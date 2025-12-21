@@ -1,3 +1,4 @@
+import { UserResponse } from '@common/interfaces/find-all-users.types';
 import { Injectable } from '@nestjs/common';
 import { User as PrismaUser } from '@prisma/identity-client';
 import { User } from '../../domain/entities/user.entity';
@@ -34,5 +35,26 @@ export class UserRepository implements IUserRepository {
       prismaUser.role,
       prismaUser.createdAt,
     );
+  }
+
+  async findAll(
+    skip: number,
+    limit: number,
+  ): Promise<{ users: UserResponse[]; total: number }> {
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          email: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.user.count(),
+    ]);
+
+    return { users, total };
   }
 }

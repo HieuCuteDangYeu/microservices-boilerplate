@@ -1,3 +1,4 @@
+import { FindAllUsersUseCase } from '@identity/application/use-cases/find-all-users.use-case';
 import { Module } from '@nestjs/common';
 import { CreateUserUseCase } from './application/use-cases/create-user.use-case';
 import { IdentityController } from './infrastructure/controllers/identity.controller';
@@ -9,6 +10,7 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
   providers: [
     PrismaService,
     CreateUserUseCase,
+    FindAllUsersUseCase,
     {
       provide: 'IUserRepository',
       useClass: UserRepository,
