@@ -12,10 +12,15 @@ export class FindAllUsersUseCase {
   ) {}
 
   async execute(command: FindAllUsersPayload): Promise<PaginatedUsersResponse> {
-    const { page, limit } = command;
+    const { page, limit, search, sort } = command;
     const skip = (page - 1) * limit;
 
-    const { users, total } = await this.userRepository.findAll(skip, limit);
+    const { users, total } = await this.userRepository.findAll({
+      skip,
+      limit,
+      search,
+      sort,
+    });
 
     return {
       data: users,

@@ -1,8 +1,11 @@
 import { UserResponse } from '@common/interfaces/find-all-users.types';
 import { Injectable } from '@nestjs/common';
-import { User as PrismaUser } from '@prisma/identity-client';
+import { Prisma, User as PrismaUser } from '@prisma/identity-client';
 import { User } from '../../domain/entities/user.entity';
-import { IUserRepository } from '../../domain/interfaces/user.repository.interface';
+import {
+  FindAllParams,
+  IUserRepository,
+} from '../../domain/interfaces/user.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -38,21 +41,32 @@ export class UserRepository implements IUserRepository {
   }
 
   async findAll(
-    skip: number,
-    limit: number,
+    params: FindAllParams,
   ): Promise<{ users: UserResponse[]; total: number }> {
+    const { skip, limit, search, sort } = params;
+
+    const where: Prisma.UserWhereInput = search
+      ? {
+          OR: [{ email: { contains: search, mode: 'insensitive' } }],
+        }
+      : {};
+
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        where,
+        orderBy: {
+          createdAt: sort || 'desc',
+        },
         select: {
           id: true,
           email: true,
+          role: true,
           createdAt: true,
         },
       }),
-      this.prisma.user.count(),
+      this.prisma.user.count({ where }),
     ]);
 
     return { users, total };
