@@ -14,4 +14,5 @@ export interface IUserRepository {
   findAll(
     params: FindAllParams,
   ): Promise<{ users: UserResponse[]; total: number }>;
+  update(id: string, data: Partial<User>): Promise<User>;
 }

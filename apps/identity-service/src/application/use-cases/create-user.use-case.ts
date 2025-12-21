@@ -1,6 +1,6 @@
 import { CreateUserDto } from '@common/dtos/create-user.dto';
+import { UserAlreadyExistsError } from '@identity/domain/errors/user-already-exists.error';
 import { Inject, Injectable } from '@nestjs/common';
-import { RpcException } from '@nestjs/microservices';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 import { User } from '../../domain/entities/user.entity';
@@ -15,7 +15,7 @@ export class CreateUserUseCase {
   async execute(dto: CreateUserDto) {
     const existing = await this.userRepository.findByEmail(dto.email);
     if (existing) {
-      throw new RpcException({ status: 409, message: 'User already exists' });
+      throw new UserAlreadyExistsError(dto.email);
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
