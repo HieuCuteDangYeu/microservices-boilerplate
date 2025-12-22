@@ -7,3 +7,11 @@ export const CreateUserSchema = z.object({
 });
 
 export class CreateUserDto extends createZodDto(CreateUserSchema) {}
+
+export const createUserPayloadSchema = CreateUserSchema.extend({
+  id: z.uuid(),
+});
+
+export class CreateUserPayloadDto extends createZodDto(
+  createUserPayloadSchema,
+) {}

@@ -1,3 +1,4 @@
+import { AuthController } from '@gateway/auth/auth.controller';
 import { UserController } from '@gateway/users/user.controller';
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
@@ -6,16 +7,24 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   imports: [
     ClientsModule.register([
       {
-        name: 'IDENTITY_SERVICE',
+        name: 'USER_SERVICE',
         transport: Transport.TCP,
         options: {
           host: '0.0.0.0',
           port: 3001,
         },
       },
+      {
+        name: 'AUTH_SERVICE',
+        transport: Transport.TCP,
+        options: {
+          host: '0.0.0.0',
+          port: 3002,
+        },
+      },
     ]),
   ],
-  controllers: [UserController],
+  controllers: [UserController, AuthController],
   providers: [],
 })
 export class ApiGatewayModule {}

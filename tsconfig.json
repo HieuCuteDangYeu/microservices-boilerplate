@@ -24,8 +24,10 @@
     "paths": {
       "@common/*": ["libs/common/src/*"],
       "@gateway/*": ["apps/api-gateway/src/*"],
+      "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@user/*": ["apps/user-service/src/*"],
-      "@prisma/user-client": ["node_modules/@prisma/user-client"]
+      "@prisma/auth-client": ["node_modules/@prisma/auth-client"],
+      "@auth/*": ["apps/auth-service/src/*"]
     }
   }
 }

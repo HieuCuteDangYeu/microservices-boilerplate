@@ -1,4 +1,4 @@
-import { CreateUserDto } from '@common/user/dtos/create-user.dto';
+import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import type { DeleteUserPayload } from '@common/user/interfaces/delete-user.types';
 import type { FindAllUsersPayload } from '@common/user/interfaces/find-all-users.types';
 import type { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
@@ -21,7 +21,7 @@ export class UserController {
   ) {}
 
   @MessagePattern('create_user')
-  async handleCreateUser(@Payload() data: CreateUserDto) {
+  async handleCreateUser(@Payload() data: CreateUserPayloadDto) {
     try {
       return await this.createUserUseCase.execute(data);
     } catch (error) {

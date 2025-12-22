@@ -1,8 +1,7 @@
-import { CreateUserDto } from '@common/user/dtos/create-user.dto';
+import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import { Inject, Injectable } from '@nestjs/common';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import * as bcrypt from 'bcrypt';
-import { randomUUID } from 'crypto';
 import { User } from '../../domain/entities/user.entity';
 import type { IUserRepository } from '../../domain/interfaces/user.repository.interface';
 
@@ -12,7 +11,7 @@ export class CreateUserUseCase {
     @Inject('IUserRepository') private readonly userRepository: IUserRepository,
   ) {}
 
-  async execute(dto: CreateUserDto) {
+  async execute(dto: CreateUserPayloadDto) {
     const existing = await this.userRepository.findByEmail(dto.email);
     if (existing) {
       throw new UserAlreadyExistsError(dto.email);
@@ -21,7 +20,7 @@ export class CreateUserUseCase {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const newUser = new User(
-      randomUUID(),
+      dto.id,
       dto.email,
       hashedPassword,
       'USER',

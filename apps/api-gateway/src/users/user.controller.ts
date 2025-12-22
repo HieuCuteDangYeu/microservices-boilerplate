@@ -28,18 +28,18 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { catchError, lastValueFrom } from 'rxjs';
 import { PaginationDto } from './dto/pagination.dto';
 
-@ApiTags('Identity')
+@ApiTags('Users')
 @Controller('users')
 export class UserController {
   constructor(
-    @Inject('IDENTITY_SERVICE') private readonly identityClient: ClientProxy,
+    @Inject('USER_SERVICE') private readonly userClient: ClientProxy,
   ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new user' })
   async register(@Body() dto: CreateUserDto): Promise<CreateUserResponse> {
     return await lastValueFrom(
-      this.identityClient.send<CreateUserResponse>('create_user', dto).pipe(
+      this.userClient.send<CreateUserResponse>('create_user', dto).pipe(
         catchError((error) => {
           if (isRpcError(error)) {
             throw new HttpException(error.message, error.statusCode);
@@ -56,7 +56,7 @@ export class UserController {
     @Query() query: PaginationDto,
   ): Promise<PaginatedUsersResponse> {
     return await lastValueFrom(
-      this.identityClient
+      this.userClient
         .send<PaginatedUsersResponse>('find_all_users', query)
         .pipe(
           catchError((error) => {
@@ -78,7 +78,7 @@ export class UserController {
     const payload: UpdateUserPayload = { id, data: dto };
 
     return await lastValueFrom(
-      this.identityClient.send<UpdateUserResponse>('update_user', payload).pipe(
+      this.userClient.send<UpdateUserResponse>('update_user', payload).pipe(
         catchError((error) => {
           if (isRpcError(error)) {
             throw new HttpException(error.message, error.statusCode);
@@ -95,7 +95,7 @@ export class UserController {
     const payload: DeleteUserPayload = { id };
 
     return await lastValueFrom(
-      this.identityClient.send<DeleteUserResponse>('delete_user', payload).pipe(
+      this.userClient.send<DeleteUserResponse>('delete_user', payload).pipe(
         catchError((error) => {
           if (isRpcError(error)) {
             throw new HttpException(error.message, error.statusCode);
