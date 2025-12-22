@@ -1,10 +1,10 @@
 import {
   UpdateUserPayload,
   UpdateUserResponse,
-} from '@common/interfaces/update-user.types';
-import { UserNotFoundError } from '@identity/domain/errors/user-not-found.error';
+} from '@common/user/interfaces/update-user.types';
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
 import * as bcrypt from 'bcrypt';
 import type { IUserRepository } from '../../domain/interfaces/user.repository.interface';
 

@@ -1,18 +1,18 @@
-import { CreateUserDto } from '@common/dtos/create-user.dto';
-import type { DeleteUserPayload } from '@common/index';
-import type { FindAllUsersPayload } from '@common/interfaces/find-all-users.types';
-import type { UpdateUserPayload } from '@common/interfaces/update-user.types';
-import { DeleteUserUseCase } from '@identity/application/use-cases/delete-user.use-case';
-import { FindAllUsersUseCase } from '@identity/application/use-cases/find-all-users.use-case';
-import { UpdateUserUseCase } from '@identity/application/use-cases/update-user.use-case';
-import { UserAlreadyExistsError } from '@identity/domain/errors/user-already-exists.error';
-import { UserNotFoundError } from '@identity/domain/errors/user-not-found.error';
+import { CreateUserDto } from '@common/user/dtos/create-user.dto';
+import type { DeleteUserPayload } from '@common/user/interfaces/delete-user.types';
+import type { FindAllUsersPayload } from '@common/user/interfaces/find-all-users.types';
+import type { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
+import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
+import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
+import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
+import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
 import { CreateUserUseCase } from '../../application/use-cases/create-user.use-case';
 
 @Controller()
-export class IdentityController {
+export class UserController {
   constructor(
     private readonly createUserUseCase: CreateUserUseCase,
     private readonly findAllUsersUseCase: FindAllUsersUseCase,

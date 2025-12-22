@@ -1,7 +1,7 @@
 import {
   FindAllUsersPayload,
   PaginatedUsersResponse,
-} from '@common/interfaces/find-all-users.types';
+} from '@common/user/interfaces/find-all-users.types';
 import { Inject, Injectable } from '@nestjs/common';
 import type { IUserRepository } from '../../domain/interfaces/user.repository.interface';
 

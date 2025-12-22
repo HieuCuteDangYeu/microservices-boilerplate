@@ -1,10 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { IdentityServiceModule } from './identity-service.module';
+import { UserServiceModule } from '@user/user-service.module';
 
 async function bootstrap() {
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
-    IdentityServiceModule,
+    UserServiceModule,
     {
       transport: Transport.TCP,
       options: {
@@ -15,6 +15,6 @@ async function bootstrap() {
   );
 
   await app.listen();
-  console.log('Identity Service is listening on TCP Port 3001');
+  console.log('User Service is listening on TCP Port 3001');
 }
 void bootstrap();

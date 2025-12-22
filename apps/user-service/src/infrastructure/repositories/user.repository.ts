@@ -1,6 +1,6 @@
-import { UserResponse } from '@common/interfaces/find-all-users.types';
+import { UserResponse } from '@common/user/interfaces/find-all-users.types';
 import { Injectable } from '@nestjs/common';
-import { Prisma, User as PrismaUser } from '@prisma/identity-client';
+import { Prisma, User as PrismaUser } from '@prisma/user-client';
 import { User } from '../../domain/entities/user.entity';
 import {
   FindAllParams,

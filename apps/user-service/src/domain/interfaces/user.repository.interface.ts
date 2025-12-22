@@ -1,4 +1,4 @@
-import { UserResponse } from '@common/interfaces/find-all-users.types';
+import { UserResponse } from '@common/user/interfaces/find-all-users.types';
 import { User } from '../entities/user.entity';
 
 export interface FindAllParams {

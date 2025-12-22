@@ -1,14 +1,16 @@
+import { CreateUserDto } from '@common/user/dtos/create-user.dto';
+import { UpdateUserDto } from '@common/user/dtos/update-user.dto';
+import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import {
-  CreateUserDto,
-  CreateUserResponse,
   DeleteUserPayload,
   DeleteUserResponse,
-  PaginatedUsersResponse,
-  UpdateUserDto,
+} from '@common/user/interfaces/delete-user.types';
+import { PaginatedUsersResponse } from '@common/user/interfaces/find-all-users.types';
+import { isRpcError } from '@common/user/interfaces/rpc-error.types';
+import {
   UpdateUserPayload,
   UpdateUserResponse,
-  isRpcError,
-} from '@common/index';
+} from '@common/user/interfaces/update-user.types';
 import {
   Body,
   Controller,
@@ -28,7 +30,7 @@ import { PaginationDto } from './dto/pagination.dto';
 
 @ApiTags('Identity')
 @Controller('users')
-export class UsersController {
+export class UserController {
   constructor(
     @Inject('IDENTITY_SERVICE') private readonly identityClient: ClientProxy,
   ) {}

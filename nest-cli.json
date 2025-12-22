@@ -29,13 +29,13 @@
         "webpack": false
       }
     },
-    "identity-service": {
+    "user-service": {
       "type": "application",
-      "root": "apps/identity-service",
+      "root": "apps/user-service",
       "entryFile": "main",
-      "sourceRoot": "apps/identity-service/src",
+      "sourceRoot": "apps/user-service/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/identity-service/tsconfig.app.json",
+        "tsConfigPath": "apps/user-service/tsconfig.app.json",
         "webpack": false
       }
     }

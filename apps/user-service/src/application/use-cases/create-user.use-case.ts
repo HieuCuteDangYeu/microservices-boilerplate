@@ -1,6 +1,6 @@
-import { CreateUserDto } from '@common/dtos/create-user.dto';
-import { UserAlreadyExistsError } from '@identity/domain/errors/user-already-exists.error';
+import { CreateUserDto } from '@common/user/dtos/create-user.dto';
 import { Inject, Injectable } from '@nestjs/common';
+import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 import { User } from '../../domain/entities/user.entity';

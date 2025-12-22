@@ -1,7 +1,7 @@
 import {
   DeleteUserPayload,
   DeleteUserResponse,
-} from '@common/interfaces/delete-user.types';
+} from '@common/user/interfaces/delete-user.types';
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { UserNotFoundError } from '../../domain/errors/user-not-found.error';

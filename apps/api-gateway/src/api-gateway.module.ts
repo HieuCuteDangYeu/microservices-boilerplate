@@ -1,4 +1,4 @@
-import { UsersController } from '@gateway/users/users.controller';
+import { UserController } from '@gateway/users/user.controller';
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 
@@ -15,7 +15,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
       },
     ]),
   ],
-  controllers: [UsersController],
+  controllers: [UserController],
   providers: [],
 })
 export class ApiGatewayModule {}

@@ -24,8 +24,8 @@
     "paths": {
       "@common/*": ["libs/common/src/*"],
       "@gateway/*": ["apps/api-gateway/src/*"],
-      "@identity/*": ["apps/identity-service/src/*"],
-      "@prisma/identity-client": ["node_modules/@prisma/identity-client"]
+      "@user/*": ["apps/user-service/src/*"],
+      "@prisma/user-client": ["node_modules/@prisma/user-client"]
     }
   }
 }
