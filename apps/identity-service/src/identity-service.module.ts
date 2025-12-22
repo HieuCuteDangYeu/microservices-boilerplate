@@ -1,3 +1,4 @@
+import { DeleteUserUseCase } from '@identity/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@identity/application/use-cases/find-all-users.use-case';
 import { UpdateUserUseCase } from '@identity/application/use-cases/update-user.use-case';
 import { Module } from '@nestjs/common';
@@ -13,6 +14,7 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     CreateUserUseCase,
     FindAllUsersUseCase,
     UpdateUserUseCase,
+    DeleteUserUseCase,
     {
       provide: 'IUserRepository',
       useClass: UserRepository,

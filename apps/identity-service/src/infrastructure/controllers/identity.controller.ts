@@ -1,6 +1,8 @@
 import { CreateUserDto } from '@common/dtos/create-user.dto';
+import type { DeleteUserPayload } from '@common/index';
 import type { FindAllUsersPayload } from '@common/interfaces/find-all-users.types';
 import type { UpdateUserPayload } from '@common/interfaces/update-user.types';
+import { DeleteUserUseCase } from '@identity/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@identity/application/use-cases/find-all-users.use-case';
 import { UpdateUserUseCase } from '@identity/application/use-cases/update-user.use-case';
 import { UserAlreadyExistsError } from '@identity/domain/errors/user-already-exists.error';
@@ -15,6 +17,7 @@ export class IdentityController {
     private readonly createUserUseCase: CreateUserUseCase,
     private readonly findAllUsersUseCase: FindAllUsersUseCase,
     private readonly updateUserUseCase: UpdateUserUseCase,
+    private readonly deleteUserUseCase: DeleteUserUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -45,6 +48,21 @@ export class IdentityController {
       if (error instanceof UserNotFoundError) {
         throw new RpcException({
           status: 404,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  }
+
+  @MessagePattern('delete_user')
+  async handleDeleteUser(@Payload() payload: DeleteUserPayload) {
+    try {
+      return await this.deleteUserUseCase.execute(payload);
+    } catch (error) {
+      if (error instanceof UserNotFoundError) {
+        throw new RpcException({
+          statusCode: 404,
           message: error.message,
         });
       }

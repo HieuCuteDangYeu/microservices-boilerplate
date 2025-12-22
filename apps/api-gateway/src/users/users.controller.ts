@@ -1,6 +1,8 @@
 import {
   CreateUserDto,
   CreateUserResponse,
+  DeleteUserPayload,
+  DeleteUserResponse,
   PaginatedUsersResponse,
   UpdateUserDto,
   UpdateUserPayload,
@@ -10,6 +12,7 @@ import {
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpException,
   Inject,
@@ -74,6 +77,23 @@ export class UsersController {
 
     return await lastValueFrom(
       this.identityClient.send<UpdateUserResponse>('update_user', payload).pipe(
+        catchError((error) => {
+          if (isRpcError(error)) {
+            throw new HttpException(error.message, error.statusCode);
+          }
+          throw new HttpException('Internal Server Error', 500);
+        }),
+      ),
+    );
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a user' })
+  async remove(@Param('id') id: string): Promise<DeleteUserResponse> {
+    const payload: DeleteUserPayload = { id };
+
+    return await lastValueFrom(
+      this.identityClient.send<DeleteUserResponse>('delete_user', payload).pipe(
         catchError((error) => {
           if (isRpcError(error)) {
             throw new HttpException(error.message, error.statusCode);
