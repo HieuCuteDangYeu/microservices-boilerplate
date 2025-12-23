@@ -1,3 +1,5 @@
+import { ValidateUserUseCase } from '@auth/application/use-cases/validate-user.use-case';
+import { LoginDto } from '@common/auth/dtos/login.dto';
 import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import type { DeleteUserPayload } from '@common/user/interfaces/delete-user.types';
 import type { FindAllUsersPayload } from '@common/user/interfaces/find-all-users.types';
@@ -18,6 +20,7 @@ export class UserController {
     private readonly findAllUsersUseCase: FindAllUsersUseCase,
     private readonly updateUserUseCase: UpdateUserUseCase,
     private readonly deleteUserUseCase: DeleteUserUseCase,
+    private readonly validateUserUseCase: ValidateUserUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -68,5 +71,10 @@ export class UserController {
       }
       throw error;
     }
+  }
+
+  @MessagePattern('validate_user')
+  async validateUser(@Payload() dto: LoginDto) {
+    return await this.validateUserUseCase.execute(dto);
   }
 }

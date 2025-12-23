@@ -1,3 +1,4 @@
+import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
@@ -37,6 +38,18 @@ export class UserServiceAdapter implements IUserService {
           return throwError(() => new Error(errorMessage));
         }),
       ),
+    );
+  }
+
+  async validateUser(
+    dto: LoginDto,
+  ): Promise<{ id: string; email: string } | null> {
+    return lastValueFrom(
+      this.client
+        .send<{ id: string; email: string } | null>('validate_user', dto)
+        .pipe(
+          catchError(() => throwError(() => new Error('Validation failed'))),
+        ),
     );
   }
 }

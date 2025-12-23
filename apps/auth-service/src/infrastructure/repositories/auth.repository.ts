@@ -1,4 +1,6 @@
+import { RefreshToken } from '@auth/domain/entities/refresh-token.entity';
 import { Injectable } from '@nestjs/common';
+import { RefreshToken as PrismaRefreshToken } from '@prisma/auth-client';
 import { Role } from '../../domain/entities/role.entity';
 import { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,5 +29,39 @@ export class AuthRepository implements IAuthRepository {
     await this.prisma.userRole.deleteMany({
       where: { userId },
     });
+  }
+
+  async createRefreshToken(
+    userId: string,
+    token: string,
+    expiresAt: Date,
+  ): Promise<RefreshToken> {
+    const savedToken: PrismaRefreshToken =
+      await this.prisma.refreshToken.create({
+        data: {
+          userId,
+          token,
+          expiresAt,
+          revoked: false,
+        },
+      });
+
+    return new RefreshToken(
+      savedToken.id,
+      savedToken.userId,
+      savedToken.token,
+      savedToken.expiresAt,
+      savedToken.revoked,
+      savedToken.createdAt,
+    );
+  }
+
+  async getUserRole(userId: string): Promise<string> {
+    const userRole = await this.prisma.userRole.findFirst({
+      where: { userId },
+      include: { role: true },
+    });
+
+    return userRole?.role.name || 'USER';
   }
 }

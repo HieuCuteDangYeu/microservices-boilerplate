@@ -1,4 +1,5 @@
 import { AuthController } from '@gateway/auth/auth.controller';
+import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import { UserController } from '@gateway/users/user.controller';
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
@@ -25,6 +26,6 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ]),
   ],
   controllers: [UserController, AuthController],
-  providers: [],
+  providers: [JwtAuthGuard],
 })
 export class ApiGatewayModule {}
