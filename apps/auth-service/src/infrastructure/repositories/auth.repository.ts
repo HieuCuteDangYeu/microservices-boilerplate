@@ -8,11 +8,13 @@ export class AuthRepository implements IAuthRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async assignRole(userId: string, roleName: string): Promise<Role> {
-    const role = await this.prisma.role.upsert({
+    const role = await this.prisma.role.findUnique({
       where: { name: roleName },
-      update: {},
-      create: { name: roleName },
     });
+
+    if (!role) {
+      throw new Error(`Role '${roleName}' not found in database.`);
+    }
 
     await this.prisma.userRole.create({
       data: { userId, roleId: role.id },

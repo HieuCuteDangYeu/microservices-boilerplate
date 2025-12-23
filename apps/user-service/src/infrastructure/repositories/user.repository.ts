@@ -18,7 +18,6 @@ export class UserRepository implements IUserRepository {
         id: user.id,
         email: user.email,
         password: user.password,
-        role: user.role,
         createdAt: user.createdAt,
       },
     });
@@ -35,7 +34,6 @@ export class UserRepository implements IUserRepository {
       prismaUser.id,
       prismaUser.email,
       prismaUser.password,
-      prismaUser.role,
       prismaUser.createdAt,
     );
   }
@@ -62,7 +60,6 @@ export class UserRepository implements IUserRepository {
         select: {
           id: true,
           email: true,
-          role: true,
           createdAt: true,
         },
       }),

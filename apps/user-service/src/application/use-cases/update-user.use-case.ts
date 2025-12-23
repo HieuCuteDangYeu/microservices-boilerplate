@@ -27,7 +27,6 @@ export class UpdateUserUseCase {
       return {
         id: updatedUser.id,
         email: updatedUser.email,
-        role: updatedUser.role,
         createdAt: updatedUser.createdAt,
       };
     } catch (error) {
