@@ -15,7 +15,10 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: 'apps/auth-service/.env',
+    }),
     ClientsModule.register([
       {
         name: 'USER_SERVICE_CLIENT',

@@ -1,16 +1,17 @@
 import { SendMailUseCase } from '@mail/application/use-cases/send-mail.use-case';
 import { SendGridAdapter } from '@mail/infrastructure/adapters/sendgrid.adapter';
 import { MailController } from '@mail/infrastructure/controllers/mail.controller';
-import { PrismaService } from '@mail/infrastructure/prisma/prisma.service';
 import { MailProcessor } from '@mail/infrastructure/queue/mail.processor';
-import { MailRepository } from '@mail/infrastructure/repositories/mail.repository';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: 'apps/mail-service/.env',
+    }),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -32,8 +33,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   controllers: [MailController],
   providers: [
     MailProcessor,
-    MailRepository,
-    PrismaService,
     SendGridAdapter,
     SendMailUseCase,
     {
