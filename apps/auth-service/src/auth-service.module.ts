@@ -1,3 +1,4 @@
+import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { MailServiceAdapter } from '@auth/infrastructure/adapters/mail-service.adapter';
 import { RedisVerificationCodeRepository } from '@auth/infrastructure/repositories/redis-verification-code.repository';
@@ -19,7 +20,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
       {
         name: 'USER_SERVICE_CLIENT',
         transport: Transport.TCP,
-        options: { host: 'localhost', port: 3001 },
+        options: { host: '0.0.0.0', port: 3001 },
       },
     ]),
     ClientsModule.register([
@@ -40,6 +41,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     PrismaService,
     RegisterUseCase,
     LoginUseCase,
+    DeleteUserRolesUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,

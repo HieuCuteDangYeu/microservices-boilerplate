@@ -1,10 +1,16 @@
+import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { Controller } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import {
+  EventPattern,
+  MessagePattern,
+  Payload,
+  RpcException,
+} from '@nestjs/microservices';
 import { RegisterUseCase } from '../../application/use-cases/register.use-case';
 import { SagaCompensationError } from '../../domain/errors/saga.error';
 
@@ -14,6 +20,7 @@ export class AuthController {
     private readonly registerUseCase: RegisterUseCase,
     private readonly loginUseCase: LoginUseCase,
     private readonly jwtService: JwtService,
+    private readonly deleteUserRolesUseCase: DeleteUserRolesUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -62,5 +69,10 @@ export class AuthController {
         message: 'Invalid Token',
       });
     }
+  }
+
+  @EventPattern('auth.delete_user_roles')
+  async handleDeleteUserRoles(@Payload() data: { userId: string }) {
+    await this.deleteUserRolesUseCase.execute(data.userId);
   }
 }
