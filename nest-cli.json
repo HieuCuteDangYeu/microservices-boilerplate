@@ -38,6 +38,16 @@
         "webpack": false
       }
     },
+    "mail-service": {
+      "type": "application",
+      "root": "apps/mail-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/mail-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/mail-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "user-service": {
       "type": "application",
       "root": "apps/user-service",
