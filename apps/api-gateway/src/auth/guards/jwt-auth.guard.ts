@@ -10,7 +10,7 @@ import { ClientProxy } from '@nestjs/microservices';
 import { Request } from 'express';
 import { catchError, lastValueFrom, timeout } from 'rxjs';
 
-interface AuthenticatedRequest extends Request {
+export interface AuthenticatedRequest extends Request {
   user?: AuthUser;
   cookies: { [key: string]: string };
 }

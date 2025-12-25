@@ -12,7 +12,6 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('Microservices API Gateway')
     .setVersion('1.0')
-    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

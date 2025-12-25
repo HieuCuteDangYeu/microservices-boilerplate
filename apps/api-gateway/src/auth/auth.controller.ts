@@ -1,15 +1,21 @@
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
+import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import { isRpcError } from '@common/user/interfaces/rpc-error.types';
+import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
   Body,
   Controller,
+  Get,
   HttpException,
   Inject,
   Post,
+  Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -75,5 +81,12 @@ export class AuthController {
     });
 
     return { message: 'Login successful' };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  @ApiOperation({ summary: 'Get current logged-in user session' })
+  getProfile(@Req() request: AuthenticatedRequest): AuthUser {
+    return request.user!;
   }
 }
