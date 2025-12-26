@@ -1,9 +1,10 @@
+import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
+import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
-import { isRpcError } from '@common/user/interfaces/rpc-error.types';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
@@ -11,6 +12,7 @@ import {
   Controller,
   Get,
   HttpException,
+  HttpStatus,
   Inject,
   Post,
   Req,
@@ -35,14 +37,7 @@ export class AuthController {
     return await lastValueFrom(
       this.authClient.send<CreateUserResponse>('auth.register', dto).pipe(
         catchError((error) => {
-          if (isRpcError(error)) {
-            throw new HttpException(error.message, error.statusCode);
-          }
-
-          const errorMessage =
-            error instanceof Error ? error.message : 'Internal Server Error';
-
-          throw new HttpException(errorMessage, 500);
+          this.handleMicroserviceError(error);
         }),
       ),
     );
@@ -57,9 +52,7 @@ export class AuthController {
     const tokens = await lastValueFrom(
       this.authClient.send<TokenResponse>('auth.login', dto).pipe(
         catchError((error) => {
-          if (isRpcError(error))
-            throw new HttpException(error.message, error.statusCode);
-          throw new HttpException('Login failed', 401);
+          this.handleMicroserviceError(error);
         }),
       ),
     );
@@ -88,5 +81,30 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current logged-in user session' })
   getProfile(@Req() request: AuthenticatedRequest): AuthUser {
     return request.user!;
+  }
+
+  @Post('confirm')
+  @ApiOperation({ summary: 'Confirm user account' })
+  async confirmAccount(@Body() dto: ConfirmAccountDto) {
+    return lastValueFrom(
+      this.authClient
+        .send<{ message: string }>('auth.confirm_account', dto)
+        .pipe(
+          catchError((error) => {
+            this.handleMicroserviceError(error);
+          }),
+        ),
+    );
+  }
+
+  private handleMicroserviceError(error: unknown): never {
+    if (isRpcError(error)) {
+      throw new HttpException(error.message, error.statusCode);
+    }
+
+    throw new HttpException(
+      'Internal Server Error',
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
   }
 }

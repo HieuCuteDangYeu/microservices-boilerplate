@@ -19,7 +19,13 @@ export class CreateUserUseCase {
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    const newUser = new User(dto.id, dto.email, hashedPassword, new Date());
+    const newUser = new User(
+      dto.id,
+      dto.email,
+      hashedPassword,
+      false,
+      new Date(),
+    );
 
     await this.userRepository.save(newUser);
 

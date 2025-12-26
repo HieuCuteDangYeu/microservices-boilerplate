@@ -1,3 +1,4 @@
+import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
@@ -16,6 +17,9 @@ export class LoginUseCase {
   async execute(dto: LoginDto): Promise<TokenResponse> {
     const user = await this.userService.validateUser(dto);
     if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user.isVerified) {
+      throw new AccountNotVerifiedError();
+    }
 
     const role = await this.authRepository.getUserRole(user.id);
 

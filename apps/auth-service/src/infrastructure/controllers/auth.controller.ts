@@ -1,5 +1,9 @@
+import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
+import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
+import { InvalidTokenError } from '@auth/domain/errors/invalid-token.error';
+import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
@@ -11,6 +15,7 @@ import {
   Payload,
   RpcException,
 } from '@nestjs/microservices';
+import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { RegisterUseCase } from '../../application/use-cases/register.use-case';
 import { SagaCompensationError } from '../../domain/errors/saga.error';
 
@@ -21,6 +26,7 @@ export class AuthController {
     private readonly loginUseCase: LoginUseCase,
     private readonly jwtService: JwtService,
     private readonly deleteUserRolesUseCase: DeleteUserRolesUseCase,
+    private readonly confirmAccountUseCase: ConfirmAccountUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -28,12 +34,20 @@ export class AuthController {
     try {
       return await this.registerUseCase.execute(dto);
     } catch (error) {
+      if (error instanceof UserAlreadyExistsError) {
+        throw new RpcException({
+          statusCode: 409,
+          message: error.message,
+        });
+      }
+
       if (error instanceof SagaCompensationError) {
         throw new RpcException({
           statusCode: 400,
           message: error.message,
         });
       }
+
       throw new RpcException({
         statusCode: 500,
         message: 'Internal Server Error',
@@ -46,9 +60,16 @@ export class AuthController {
     try {
       return await this.loginUseCase.execute(dto);
     } catch (error) {
+      if (error instanceof AccountNotVerifiedError) {
+        throw new RpcException({
+          statusCode: 403,
+          message: error.message,
+        });
+      }
+
       throw new RpcException({
         statusCode: 401,
-        message: error instanceof Error ? error.message : 'Login failed',
+        message: 'Invalid credentials',
       });
     }
   }
@@ -74,5 +95,20 @@ export class AuthController {
   @EventPattern('auth.delete_user_roles')
   async handleDeleteUserRoles(@Payload() data: { userId: string }) {
     await this.deleteUserRolesUseCase.execute(data.userId);
+  }
+
+  @MessagePattern('auth.confirm_account')
+  async handleConfirmAccount(@Payload() dto: ConfirmAccountDto) {
+    try {
+      return await this.confirmAccountUseCase.execute(dto);
+    } catch (error) {
+      if (error instanceof InvalidTokenError) {
+        throw new RpcException({
+          statusCode: 400,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
   }
 }

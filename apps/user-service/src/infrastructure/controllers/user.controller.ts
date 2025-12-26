@@ -9,6 +9,7 @@ import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
+import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
 import { CreateUserUseCase } from '../../application/use-cases/create-user.use-case';
@@ -21,6 +22,7 @@ export class UserController {
     private readonly updateUserUseCase: UpdateUserUseCase,
     private readonly deleteUserUseCase: DeleteUserUseCase,
     private readonly validateUserUseCase: ValidateUserUseCase,
+    private readonly verifyUserUseCase: VerifyUserUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -30,7 +32,7 @@ export class UserController {
     } catch (error) {
       if (error instanceof UserAlreadyExistsError) {
         throw new RpcException({
-          status: 409,
+          statusCode: 409,
           message: error.message,
         });
       }
@@ -50,7 +52,7 @@ export class UserController {
     } catch (error) {
       if (error instanceof UserNotFoundError) {
         throw new RpcException({
-          status: 404,
+          statusCode: 404,
           message: error.message,
         });
       }
@@ -76,5 +78,10 @@ export class UserController {
   @MessagePattern('validate_user')
   async validateUser(@Payload() dto: LoginDto) {
     return await this.validateUserUseCase.execute(dto);
+  }
+
+  @MessagePattern('verify_user')
+  async handleVerifyUser(@Payload() id: string) {
+    return await this.verifyUserUseCase.execute(id);
   }
 }

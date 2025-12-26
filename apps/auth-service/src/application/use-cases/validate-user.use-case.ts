@@ -20,6 +20,7 @@ export class ValidateUserUseCase {
     return {
       id: user.id,
       email: user.email,
+      isVerified: user.isVerified,
     };
   }
 }

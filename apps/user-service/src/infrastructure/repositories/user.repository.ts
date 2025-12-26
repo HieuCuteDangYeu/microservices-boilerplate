@@ -18,6 +18,7 @@ export class UserRepository implements IUserRepository {
         id: user.id,
         email: user.email,
         password: user.password,
+        isVerified: user.isVerified,
         createdAt: user.createdAt,
       },
     });
@@ -34,6 +35,7 @@ export class UserRepository implements IUserRepository {
       prismaUser.id,
       prismaUser.email,
       prismaUser.password,
+      prismaUser.isVerified,
       prismaUser.createdAt,
     );
   }

@@ -31,8 +31,8 @@
     "migrate:auth": "cd apps/auth-service && prisma migrate dev",
     "studio:user": "cd apps/user-service && prisma studio",
     "studio:auth": "cd apps/auth-service && prisma studio",
-    "seed:auth": "ts-node apps/auth-service/prisma/seed.ts",
-    "seed:user": "ts-node apps/user-service/prisma/seed.ts",
+    "seed:auth": "dotenv -e apps/auth-service/.env -- ts-node apps/auth-service/prisma/seed.ts",
+    "seed:user": "dotenv -e apps/user-service/.env -- ts-node apps/user-service/prisma/seed.ts",
     "seed:all": "pnpm run seed:auth && pnpm run seed:user"
   },
   "dependencies": {

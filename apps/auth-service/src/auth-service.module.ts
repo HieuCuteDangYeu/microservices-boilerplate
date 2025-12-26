@@ -1,3 +1,4 @@
+import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { MailServiceAdapter } from '@auth/infrastructure/adapters/mail-service.adapter';
@@ -25,8 +26,6 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
         transport: Transport.TCP,
         options: { host: '0.0.0.0', port: 3001 },
       },
-    ]),
-    ClientsModule.register([
       {
         name: 'MAIL_SERVICE_CLIENT',
         transport: Transport.TCP,
@@ -45,6 +44,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     RegisterUseCase,
     LoginUseCase,
     DeleteUserRolesUseCase,
+    ConfirmAccountUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,

@@ -3,6 +3,7 @@ export class User {
     public readonly id: string,
     public readonly email: string,
     public readonly password: string,
+    public readonly isVerified: boolean,
     public readonly createdAt: Date,
   ) {}
 }

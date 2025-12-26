@@ -1,3 +1,4 @@
+import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateUserDto } from '@common/user/dtos/create-user.dto';
 import { UpdateUserDto } from '@common/user/dtos/update-user.dto';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
@@ -6,7 +7,6 @@ import {
   DeleteUserResponse,
 } from '@common/user/interfaces/delete-user.types';
 import { PaginatedUsersResponse } from '@common/user/interfaces/find-all-users.types';
-import { isRpcError } from '@common/user/interfaces/rpc-error.types';
 import {
   UpdateUserPayload,
   UpdateUserResponse,
@@ -17,6 +17,7 @@ import {
   Delete,
   Get,
   HttpException,
+  HttpStatus,
   Inject,
   Param,
   Patch,
@@ -41,10 +42,7 @@ export class UserController {
     return await lastValueFrom(
       this.userClient.send<CreateUserResponse>('create_user', dto).pipe(
         catchError((error) => {
-          if (isRpcError(error)) {
-            throw new HttpException(error.message, error.statusCode);
-          }
-          throw new HttpException('Internal Server Error', 500);
+          this.handleMicroserviceError(error);
         }),
       ),
     );
@@ -60,10 +58,7 @@ export class UserController {
         .send<PaginatedUsersResponse>('find_all_users', query)
         .pipe(
           catchError((error) => {
-            if (isRpcError(error)) {
-              throw new HttpException(error.message, error.statusCode);
-            }
-            throw new HttpException('Internal Server Error', 500);
+            this.handleMicroserviceError(error);
           }),
         ),
     );
@@ -80,10 +75,7 @@ export class UserController {
     return await lastValueFrom(
       this.userClient.send<UpdateUserResponse>('update_user', payload).pipe(
         catchError((error) => {
-          if (isRpcError(error)) {
-            throw new HttpException(error.message, error.statusCode);
-          }
-          throw new HttpException('Internal Server Error', 500);
+          this.handleMicroserviceError(error);
         }),
       ),
     );
@@ -97,12 +89,20 @@ export class UserController {
     return await lastValueFrom(
       this.userClient.send<DeleteUserResponse>('delete_user', payload).pipe(
         catchError((error) => {
-          if (isRpcError(error)) {
-            throw new HttpException(error.message, error.statusCode);
-          }
-          throw new HttpException('Internal Server Error', 500);
+          this.handleMicroserviceError(error);
         }),
       ),
+    );
+  }
+
+  private handleMicroserviceError(error: unknown): never {
+    if (isRpcError(error)) {
+      throw new HttpException(error.message, error.statusCode);
+    }
+
+    throw new HttpException(
+      'Internal Server Error',
+      HttpStatus.INTERNAL_SERVER_ERROR,
     );
   }
 }

@@ -20,6 +20,7 @@ async function main() {
       id: DEFAULT_ADMIN_ID,
       email: DEFAULT_ADMIN_EMAIL,
       password: hashedPassword,
+      isVerified: true,
       createdAt: new Date(),
     },
   });

@@ -2,6 +2,7 @@ import type { IMailService } from '@auth/domain/interfaces/mail-service.interfac
 import type { IVerificationCodeRepository } from '@auth/domain/interfaces/verification-code.repository.interface';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { Inject, Injectable } from '@nestjs/common';
+import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { randomBytes, randomUUID } from 'crypto';
 import { SagaCompensationError } from '../../domain/errors/saga.error';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
@@ -48,11 +49,14 @@ export class RegisterUseCase {
       };
     } catch (error) {
       console.error(`Saga Failed for User ${userId}. Rolling back roles...`);
-
       try {
         await this.authRepository.rollbackRoles(userId);
       } catch (rollbackError) {
         console.error('CRITICAL: Saga Compensation Failed', rollbackError);
+      }
+
+      if (error instanceof UserAlreadyExistsError) {
+        throw error;
       }
 
       throw new SagaCompensationError(
