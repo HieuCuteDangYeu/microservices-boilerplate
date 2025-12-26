@@ -7,7 +7,7 @@ import { ValidateUserResponse } from '@common/user/interfaces/validate-user-resp
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
-import { catchError, lastValueFrom, throwError } from 'rxjs';
+import { catchError, lastValueFrom, of, throwError } from 'rxjs';
 import { IUserService } from '../../domain/interfaces/user-service.interface';
 
 @Injectable()
@@ -64,6 +64,19 @@ export class UserServiceAdapter implements IUserService {
         }),
       ),
       { defaultValue: undefined },
+    );
+  }
+
+  async findByEmail(email: string): Promise<ValidateUserResponse | null> {
+    return lastValueFrom(
+      this.client
+        .send<ValidateUserResponse | null>('user.find_by_email', { email })
+        .pipe(
+          catchError(() => {
+            return of(null);
+          }),
+        ),
+      { defaultValue: null },
     );
   }
 }

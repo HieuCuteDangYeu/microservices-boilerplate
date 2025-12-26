@@ -1,6 +1,7 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
+import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { MailServiceAdapter } from '@auth/infrastructure/adapters/mail-service.adapter';
 import { RedisVerificationCodeRepository } from '@auth/infrastructure/repositories/redis-verification-code.repository';
 import { Module } from '@nestjs/common';
@@ -45,6 +46,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     LoginUseCase,
     DeleteUserRolesUseCase,
     ConfirmAccountUseCase,
+    ResendVerificationUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,

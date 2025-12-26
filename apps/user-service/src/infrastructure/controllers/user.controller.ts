@@ -8,6 +8,7 @@ import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
+import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
@@ -23,6 +24,7 @@ export class UserController {
     private readonly deleteUserUseCase: DeleteUserUseCase,
     private readonly validateUserUseCase: ValidateUserUseCase,
     private readonly verifyUserUseCase: VerifyUserUseCase,
+    private readonly findUserByEmailUseCase: FindUserByEmailUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -83,5 +85,10 @@ export class UserController {
   @MessagePattern('verify_user')
   async handleVerifyUser(@Payload() id: string) {
     return await this.verifyUserUseCase.execute(id);
+  }
+
+  @MessagePattern('user.find_by_email')
+  async findByEmail(@Payload() data: { email: string }) {
+    return await this.findUserByEmailUseCase.execute(data.email);
   }
 }

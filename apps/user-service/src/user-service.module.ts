@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
+import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { AuthServiceAdapter } from '@user/infrastructure/adapters/auth-service.adapter';
@@ -35,6 +36,7 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     DeleteUserUseCase,
     ValidateUserUseCase,
     VerifyUserUseCase,
+    FindUserByEmailUseCase,
     {
       provide: 'IUserRepository',
       useClass: UserRepository,

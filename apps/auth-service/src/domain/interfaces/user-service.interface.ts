@@ -7,4 +7,5 @@ export interface IUserService {
   createUser(id: string, dto: RegisterDto): Promise<CreateUserResponse>;
   validateUser(dto: LoginDto): Promise<ValidateUserResponse | null>;
   verifyUser(id: string): Promise<void>;
+  findByEmail(email: string): Promise<ValidateUserResponse | null>;
 }

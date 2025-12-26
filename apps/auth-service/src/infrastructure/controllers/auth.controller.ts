@@ -1,11 +1,13 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
+import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
 import { InvalidTokenError } from '@auth/domain/errors/invalid-token.error';
 import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
+import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { Controller } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -27,6 +29,7 @@ export class AuthController {
     private readonly jwtService: JwtService,
     private readonly deleteUserRolesUseCase: DeleteUserRolesUseCase,
     private readonly confirmAccountUseCase: ConfirmAccountUseCase,
+    private readonly resendVerificationUseCase: ResendVerificationUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -109,6 +112,19 @@ export class AuthController {
         });
       }
       throw error;
+    }
+  }
+
+  @MessagePattern('auth.resend_verification')
+  async handleResendVerification(@Payload() dto: ResendVerificationDto) {
+    try {
+      return await this.resendVerificationUseCase.execute(dto);
+    } catch (error) {
+      console.error(error);
+      throw new RpcException({
+        statusCode: 500,
+        message: 'Failed to resend verification email',
+      });
     }
   }
 }

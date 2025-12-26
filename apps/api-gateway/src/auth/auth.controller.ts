@@ -1,6 +1,7 @@
 import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
+import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
@@ -94,6 +95,18 @@ export class AuthController {
             this.handleMicroserviceError(error);
           }),
         ),
+    );
+  }
+
+  @Post('resend-verification')
+  @ApiOperation({ summary: 'Resend verification email' })
+  async resendVerification(
+    @Body() dto: ResendVerificationDto,
+  ): Promise<{ message: string }> {
+    return lastValueFrom(
+      this.authClient
+        .send<{ message: string }>('auth.resend_verification', dto)
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 
