@@ -85,7 +85,7 @@ export class AuthController {
       return {
         id: payload.sub,
         email: payload.email,
-        role: payload.role,
+        roles: payload.roles,
       };
     } catch {
       throw new RpcException({

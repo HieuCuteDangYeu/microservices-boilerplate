@@ -9,5 +9,5 @@ export interface IAuthRepository {
     token: string,
     expiresAt: Date,
   ): Promise<RefreshToken>;
-  getUserRole(userId: string): Promise<string>;
+  getUserRole(userId: string): Promise<string[]>;
 }

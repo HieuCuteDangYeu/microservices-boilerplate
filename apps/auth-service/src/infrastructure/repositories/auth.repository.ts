@@ -56,12 +56,12 @@ export class AuthRepository implements IAuthRepository {
     );
   }
 
-  async getUserRole(userId: string): Promise<string> {
-    const userRole = await this.prisma.userRole.findFirst({
-      where: { userId },
-      include: { role: true },
+  async getUserRole(userId: string): Promise<string[]> {
+    const roles = await this.prisma.userRole.findMany({
+      where: { userId: userId },
+      select: { role: true },
     });
 
-    return userRole?.role.name || 'USER';
+    return roles.map((r) => r.role.name);
   }
 }

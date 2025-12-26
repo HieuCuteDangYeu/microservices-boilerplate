@@ -11,6 +11,9 @@ import {
   UpdateUserPayload,
   UpdateUserResponse,
 } from '@common/user/interfaces/update-user.types';
+import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '@gateway/auth/guards/roles.guard';
 import {
   Body,
   Controller,
@@ -23,6 +26,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -31,6 +35,7 @@ import { PaginationDto } from './dto/pagination.dto';
 
 @ApiTags('Users')
 @Controller('users')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class UserController {
   constructor(
     @Inject('USER_SERVICE') private readonly userClient: ClientProxy,
@@ -38,6 +43,7 @@ export class UserController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new user' })
+  @Roles(Role.ADMIN)
   async register(@Body() dto: CreateUserDto): Promise<CreateUserResponse> {
     return await lastValueFrom(
       this.userClient.send<CreateUserResponse>('create_user', dto).pipe(
@@ -50,6 +56,7 @@ export class UserController {
 
   @Get()
   @ApiOperation({ summary: 'Get all users' })
+  @Roles(Role.ADMIN)
   async findAll(
     @Query() query: PaginationDto,
   ): Promise<PaginatedUsersResponse> {
@@ -66,6 +73,7 @@ export class UserController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update a user' })
+  @Roles(Role.ADMIN, Role.USER)
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
@@ -83,6 +91,7 @@ export class UserController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a user' })
+  @Roles(Role.ADMIN)
   async remove(@Param('id') id: string): Promise<DeleteUserResponse> {
     const payload: DeleteUserPayload = { id };
 

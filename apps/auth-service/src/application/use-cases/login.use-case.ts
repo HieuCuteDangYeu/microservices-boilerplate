@@ -1,5 +1,6 @@
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
 import { LoginDto } from '@common/auth/dtos/login.dto';
+import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -21,12 +22,12 @@ export class LoginUseCase {
       throw new AccountNotVerifiedError();
     }
 
-    const role = await this.authRepository.getUserRole(user.id);
+    const roles = await this.authRepository.getUserRole(user.id);
 
-    const payload = {
+    const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
-      role: role,
+      roles: roles,
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {
