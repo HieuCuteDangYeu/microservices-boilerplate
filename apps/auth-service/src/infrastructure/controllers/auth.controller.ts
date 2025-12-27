@@ -1,6 +1,8 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
+import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
+import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
 import { InvalidTokenError } from '@auth/domain/errors/invalid-token.error';
@@ -30,6 +32,8 @@ export class AuthController {
     private readonly deleteUserRolesUseCase: DeleteUserRolesUseCase,
     private readonly confirmAccountUseCase: ConfirmAccountUseCase,
     private readonly resendVerificationUseCase: ResendVerificationUseCase,
+    private readonly refreshTokenUseCase: RefreshTokenUseCase,
+    private readonly logoutUseCase: LogoutUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -126,5 +130,24 @@ export class AuthController {
         message: 'Failed to resend verification email',
       });
     }
+  }
+
+  @MessagePattern('auth.refresh')
+  async refresh(@Payload() data: { refreshToken: string }) {
+    try {
+      return await this.refreshTokenUseCase.execute(data.refreshToken);
+    } catch (error) {
+      console.error(error);
+      throw new RpcException({
+        statusCode: 401,
+        message: 'Invalid or expired refresh token',
+      });
+    }
+  }
+
+  @MessagePattern('auth.logout')
+  async logout(@Payload() data: { refreshToken: string }) {
+    await this.logoutUseCase.execute(data.refreshToken);
+    return { message: 'Logged out successfully' };
   }
 }

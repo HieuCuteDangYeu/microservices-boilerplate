@@ -58,21 +58,7 @@ export class AuthController {
       ),
     );
 
-    response.cookie('access_token', tokens.accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 15 * 60 * 1000,
-    });
-
-    response.cookie('refresh_token', tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/auth/refresh',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    this.setCookies(response, tokens.accessToken, tokens.refreshToken);
 
     return { message: 'Login successful' };
   }
@@ -119,5 +105,88 @@ export class AuthController {
       'Internal Server Error',
       HttpStatus.INTERNAL_SERVER_ERROR,
     );
+  }
+
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh access token using cookie' })
+  async refresh(
+    @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const incomingRefreshToken = request.cookies['refresh_token'];
+
+    if (!incomingRefreshToken) {
+      throw new HttpException(
+        'No refresh token found',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    const tokens = await lastValueFrom(
+      this.authClient
+        .send<TokenResponse>('auth.refresh', {
+          refreshToken: incomingRefreshToken,
+        })
+        .pipe(
+          catchError(() => {
+            response.clearCookie('access_token');
+            response.clearCookie('refresh_token');
+            throw new HttpException(
+              'Invalid refresh token',
+              HttpStatus.UNAUTHORIZED,
+            );
+          }),
+        ),
+    );
+
+    this.setCookies(response, tokens.accessToken, tokens.refreshToken);
+
+    return { message: 'Token refreshed successfully' };
+  }
+
+  @Post('logout')
+  @ApiOperation({ summary: 'Logout and clear cookies' })
+  async logout(
+    @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const refreshToken = request.cookies['refresh_token'];
+
+    if (refreshToken) {
+      await lastValueFrom(
+        this.authClient.send('auth.logout', { refreshToken }).pipe(
+          catchError(() => {
+            return [null];
+          }),
+        ),
+      );
+    }
+
+    response.clearCookie('access_token');
+    response.clearCookie('refresh_token');
+
+    return { message: 'Logged out successfully' };
+  }
+
+  private setCookies(
+    response: Response,
+    accessToken: string,
+    refreshToken: string,
+  ) {
+    response.cookie('access_token', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 15 * 60 * 1000,
+    });
+
+    response.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/auth/refresh',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
   }
 }

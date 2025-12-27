@@ -64,4 +64,50 @@ export class AuthRepository implements IAuthRepository {
 
     return roles.map((r) => r.role.name);
   }
+
+  async findRefreshToken(token: string): Promise<RefreshToken | null> {
+    const found = await this.prisma.refreshToken.findUnique({
+      where: { token },
+    });
+
+    if (!found) return null;
+
+    return new RefreshToken(
+      found.id,
+      found.userId,
+      found.token,
+      found.expiresAt,
+      found.revoked,
+      found.createdAt,
+    );
+  }
+
+  async updateRefreshToken(
+    id: string,
+    data: Partial<RefreshToken>,
+  ): Promise<void> {
+    await this.prisma.refreshToken.update({
+      where: { id },
+      data: {
+        revoked: data.revoked,
+      },
+    });
+  }
+
+  async revokeAllUserTokens(userId: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revoked: false },
+      data: { revoked: true },
+    });
+  }
+
+  async deleteExpiredAndRevokedTokens(): Promise<number> {
+    const result = await this.prisma.refreshToken.deleteMany({
+      where: {
+        AND: [{ revoked: true }, { expiresAt: { lt: new Date() } }],
+      },
+    });
+
+    return result.count;
+  }
 }

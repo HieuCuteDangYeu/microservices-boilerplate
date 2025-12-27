@@ -1,13 +1,17 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
+import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
+import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { MailServiceAdapter } from '@auth/infrastructure/adapters/mail-service.adapter';
+import { TokenCleanupService } from '@auth/infrastructure/jobs/token-cleanup.service';
 import { RedisVerificationCodeRepository } from '@auth/infrastructure/repositories/redis-verification-code.repository';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { ScheduleModule } from '@nestjs/schedule';
 import Redis from 'ioredis';
 import { RegisterUseCase } from './application/use-cases/register.use-case';
 import { UserServiceAdapter } from './infrastructure/adapters/user-service.adapter';
@@ -33,6 +37,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
         options: { host: '0.0.0.0', port: 3003 },
       },
     ]),
+    ScheduleModule.forRoot(),
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'super_secret_key',
@@ -42,11 +47,14 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
   controllers: [AuthController],
   providers: [
     PrismaService,
+    TokenCleanupService,
     RegisterUseCase,
     LoginUseCase,
     DeleteUserRolesUseCase,
     ConfirmAccountUseCase,
     ResendVerificationUseCase,
+    RefreshTokenUseCase,
+    LogoutUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,
