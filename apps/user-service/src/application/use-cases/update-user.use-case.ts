@@ -25,9 +25,9 @@ export class UpdateUserUseCase {
       const updatedUser = await this.userRepository.update(id, data);
 
       return {
-        id: updatedUser.id,
+        id: updatedUser.id!,
         email: updatedUser.email,
-        createdAt: updatedUser.createdAt,
+        createdAt: updatedUser.createdAt!,
       };
     } catch (error) {
       if (

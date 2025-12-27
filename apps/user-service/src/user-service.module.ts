@@ -22,6 +22,15 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     }),
     ClientsModule.register([
       {
+        name: 'AUTH_SERVICE_RMQ',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBITMQ_URL || ''],
+          queue: 'auth_queue',
+          queueOptions: { durable: true },
+        },
+      },
+      {
         name: 'AUTH_SERVICE_CLIENT',
         transport: Transport.TCP,
         options: { host: '0.0.0.0', port: 3002 },

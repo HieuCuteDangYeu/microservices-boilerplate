@@ -1,5 +1,4 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
-import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { GoogleLoginUseCase } from '@auth/application/use-cases/google-login.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
@@ -16,12 +15,7 @@ import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { Controller } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import {
-  EventPattern,
-  MessagePattern,
-  Payload,
-  RpcException,
-} from '@nestjs/microservices';
+import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { RegisterUseCase } from '../../application/use-cases/register.use-case';
 
@@ -31,7 +25,6 @@ export class AuthController {
     private readonly registerUseCase: RegisterUseCase,
     private readonly loginUseCase: LoginUseCase,
     private readonly jwtService: JwtService,
-    private readonly deleteUserRolesUseCase: DeleteUserRolesUseCase,
     private readonly confirmAccountUseCase: ConfirmAccountUseCase,
     private readonly resendVerificationUseCase: ResendVerificationUseCase,
     private readonly refreshTokenUseCase: RefreshTokenUseCase,
@@ -100,11 +93,6 @@ export class AuthController {
         message: 'Invalid Token',
       });
     }
-  }
-
-  @EventPattern('auth.delete_user_roles')
-  async handleDeleteUserRoles(@Payload() data: { userId: string }) {
-    await this.deleteUserRolesUseCase.execute(data.userId);
   }
 
   @MessagePattern('auth.confirm_account')

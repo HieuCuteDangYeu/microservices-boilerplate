@@ -1,3 +1,4 @@
+import { AssignRoleUseCase } from '@auth/application/use-cases/assign-role.use-case';
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
 import { GoogleLoginUseCase } from '@auth/application/use-cases/google-login.use-case';
@@ -6,6 +7,7 @@ import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { MailServiceAdapter } from '@auth/infrastructure/adapters/mail-service.adapter';
+import { RoleController } from '@auth/infrastructure/controllers/role.controller';
 import { TokenCleanupService } from '@auth/infrastructure/jobs/token-cleanup.service';
 import { RedisVerificationCodeRepository } from '@auth/infrastructure/repositories/redis-verification-code.repository';
 import { Module } from '@nestjs/common';
@@ -28,13 +30,18 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     }),
     ClientsModule.register([
       {
-        name: 'USER_SERVICE_CLIENT',
+        name: 'USER_SERVICE_RMQ',
         transport: Transport.RMQ,
         options: {
           urls: [process.env.RABBITMQ_URL || ''],
           queue: 'user_queue',
           queueOptions: { durable: true },
         },
+      },
+      {
+        name: 'USER_SERVICE_CLIENT',
+        transport: Transport.TCP,
+        options: { host: '0.0.0.0', port: 3001 },
       },
       {
         name: 'MAIL_SERVICE_CLIENT',
@@ -49,7 +56,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
       signOptions: { expiresIn: '15m' },
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, RoleController],
   providers: [
     PrismaService,
     TokenCleanupService,
@@ -61,6 +68,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     RefreshTokenUseCase,
     LogoutUseCase,
     GoogleLoginUseCase,
+    AssignRoleUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,

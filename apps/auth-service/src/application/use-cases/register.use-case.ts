@@ -1,8 +1,9 @@
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
+import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import { Inject, Injectable } from '@nestjs/common';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
-import { randomBytes, randomUUID } from 'crypto';
+import { randomBytes } from 'crypto';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 import type { IMailService } from '../../domain/interfaces/mail-service.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
@@ -19,32 +20,36 @@ export class RegisterUseCase {
   ) {}
 
   async execute(dto: RegisterDto) {
-    const userId = randomUUID();
+    let result: CreateUserResponse | null = null;
 
     try {
-      const result = await this.userService.createUser(userId, dto);
+      result = await this.userService.createUser(dto);
 
-      await this.authRepository.assignRole(userId, 'USER');
+      await this.authRepository.assignRole(result.id, 'USER');
 
       const token = randomBytes(32).toString('hex');
-      await this.verificationRepo.save(token, userId, 86400);
+      await this.verificationRepo.save(token, result.id, 86400);
 
       this.mailService.sendConfirmationEmail(result.email, token);
 
       return {
-        id: userId,
+        id: result.id,
         email: result.email,
         message: 'User registered successfully',
       };
     } catch (error) {
-      console.error(`Saga Failed for User ${userId}. Initiating Rollback...`);
+      if (result && result.id) {
+        console.error(
+          `Saga Failed for User ${result.id}. Initiating Rollback...`,
+        );
 
-      this.userService.rollbackUser(userId);
+        this.userService.rollbackUser(result.id);
 
-      try {
-        await this.authRepository.rollbackRoles(userId);
-      } catch (e) {
-        console.error('CRITICAL: Failed to rollback roles locally', e);
+        try {
+          await this.authRepository.rollbackRoles(result.id);
+        } catch (e) {
+          console.error('CRITICAL: Failed to rollback roles locally', e);
+        }
       }
 
       if (error instanceof UserAlreadyExistsError) {

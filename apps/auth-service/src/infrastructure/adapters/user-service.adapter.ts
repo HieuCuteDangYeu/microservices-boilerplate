@@ -18,19 +18,19 @@ import { IUserService } from '../../domain/interfaces/user-service.interface';
 @Injectable()
 export class UserServiceAdapter implements IUserService {
   constructor(
-    @Inject('USER_SERVICE_CLIENT') private readonly client: ClientProxy,
+    @Inject('USER_SERVICE_CLIENT') private readonly tcpClient: ClientProxy,
+    @Inject('USER_SERVICE_RMQ') private readonly rmqClient: ClientProxy,
   ) {}
 
-  async createUser(id: string, dto: RegisterDto): Promise<CreateUserResponse> {
+  async createUser(dto: RegisterDto): Promise<CreateUserResponse> {
     const payload: CreateUserPayloadDto = {
-      id,
       email: dto.email,
       password: dto.password,
       isVerified: false,
     };
 
     return lastValueFrom(
-      this.client.send<CreateUserResponse>('create_user', payload).pipe(
+      this.tcpClient.send<CreateUserResponse>('create_user', payload).pipe(
         catchError((err) => {
           if (isRpcError(err) && err.statusCode === 409) {
             return throwError(() => new UserAlreadyExistsError(dto.email));
@@ -54,7 +54,7 @@ export class UserServiceAdapter implements IUserService {
 
   async validateUser(dto: LoginDto): Promise<ValidateUserResponse | null> {
     return lastValueFrom(
-      this.client
+      this.tcpClient
         .send<ValidateUserResponse | null>('validate_user', dto)
         .pipe(
           catchError(() => throwError(() => new Error('Validation failed'))),
@@ -64,7 +64,7 @@ export class UserServiceAdapter implements IUserService {
 
   async verifyUser(id: string): Promise<void> {
     return lastValueFrom(
-      this.client.send<void>('verify_user', id).pipe(
+      this.tcpClient.send<void>('verify_user', id).pipe(
         catchError(() => {
           return throwError(() => new Error('Failed to verify user'));
         }),
@@ -75,7 +75,7 @@ export class UserServiceAdapter implements IUserService {
 
   async findByEmail(email: string): Promise<ValidateUserResponse | null> {
     return lastValueFrom(
-      this.client
+      this.tcpClient
         .send<ValidateUserResponse | null>('user.find_by_email', { email })
         .pipe(
           catchError(() => {
@@ -90,7 +90,7 @@ export class UserServiceAdapter implements IUserService {
     dto: CreateSocialUserDto,
   ): Promise<ValidateUserResponse> {
     return lastValueFrom(
-      this.client.send<ValidateUserResponse>('user.create_social', dto).pipe(
+      this.tcpClient.send<ValidateUserResponse>('user.create_social', dto).pipe(
         catchError(() => {
           return throwError(() => new Error('Failed to create social user'));
         }),
@@ -99,12 +99,12 @@ export class UserServiceAdapter implements IUserService {
   }
 
   rollbackUser(id: string): void {
-    this.client.emit('user.rollback', { id });
+    this.rmqClient.emit('user.rollback', { id });
   }
 
   async updateUser(payload: UpdateUserPayload): Promise<UpdateUserResponse> {
     return await lastValueFrom(
-      this.client.send<UpdateUserResponse>('update_user', payload).pipe(
+      this.tcpClient.send<UpdateUserResponse>('update_user', payload).pipe(
         catchError(() => {
           return throwError(() => new Error('Failed to update user'));
         }),

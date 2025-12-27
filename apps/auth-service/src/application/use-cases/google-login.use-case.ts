@@ -2,11 +2,7 @@ import { GoogleProfile } from '@common/auth/interfaces/google-profile.interface'
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
-import {
-  Inject,
-  Injectable,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
@@ -63,9 +59,7 @@ export class GoogleLoginUseCase {
       }
 
       if (!userId || !user) {
-        throw new InternalServerErrorException(
-          'User state invalid after login flow.',
-        );
+        throw new Error('User state invalid after login flow.');
       }
 
       const roles = await this.authRepository.getUserRole(userId);

@@ -18,6 +18,7 @@ import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
+import { RoleAssignmentError } from '@user/domain/errors/role-assignment.error';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
 import { CreateUserUseCase } from '../../application/use-cases/create-user.use-case';
@@ -44,6 +45,12 @@ export class UserController {
         throw new RpcException({
           statusCode: 409,
           message: error.message,
+        });
+      }
+      if (error instanceof RoleAssignmentError) {
+        throw new RpcException({
+          statusCode: 500,
+          message: 'User creation failed due to role system error',
         });
       }
       throw error;

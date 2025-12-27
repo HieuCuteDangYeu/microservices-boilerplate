@@ -24,7 +24,7 @@ export class DeleteUserUseCase {
       this.authService.deleteUserRoles(id);
 
       return {
-        id: deletedUser.id,
+        id: deletedUser.id!,
         message: 'User deleted successfully',
       };
     } catch (error) {

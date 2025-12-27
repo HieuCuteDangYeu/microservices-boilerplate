@@ -9,7 +9,7 @@ import {
 import { ValidateUserResponse } from '@common/user/interfaces/validate-user-response.types';
 
 export interface IUserService {
-  createUser(id: string, dto: RegisterDto): Promise<CreateUserResponse>;
+  createUser(dto: RegisterDto): Promise<CreateUserResponse>;
   validateUser(dto: LoginDto): Promise<ValidateUserResponse | null>;
   verifyUser(id: string): Promise<void>;
   findByEmail(email: string): Promise<ValidateUserResponse | null>;

@@ -1,13 +1,11 @@
+import { UserDomainSchema } from '@common/user/dtos/create-user.dto';
 import { createZodDto } from 'nestjs-zod';
-import { UserDomainSchema } from '../schemas/user.schema';
 
 export class UpdateUserDto extends createZodDto(
   UserDomainSchema.pick({
     email: true,
     password: true,
     picture: true,
-    firstName: true,
-    lastName: true,
   }).partial(),
 ) {}
 

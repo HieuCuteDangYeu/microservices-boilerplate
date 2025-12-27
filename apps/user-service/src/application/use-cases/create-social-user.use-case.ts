@@ -1,6 +1,5 @@
 import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { Inject, Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { User } from '../../domain/entities/user.entity';
 import type { IUserRepository } from '../../domain/interfaces/user.repository.interface';
 
@@ -15,17 +14,21 @@ export class CreateSocialUserUseCase {
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(dto.email)}&background=random`;
 
     const newUser = new User(
-      randomUUID(),
+      null,
       dto.email,
       null,
       dto.isVerified,
-      new Date(),
+      null,
       dto.picture ?? avatarUrl,
       dto.provider,
       dto.providerId,
     );
 
     const savedUser = await this.userRepository.save(newUser);
+
+    if (!savedUser.id) {
+      throw new Error('Database failed to generate ID for social user');
+    }
 
     return {
       id: savedUser.id,

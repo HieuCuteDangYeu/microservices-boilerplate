@@ -15,11 +15,9 @@ export class UserRepository implements IUserRepository {
   async save(user: User): Promise<User> {
     const saved = await this.prisma.user.create({
       data: {
-        id: user.id,
         email: user.email,
         password: user.password,
         isVerified: user.isVerified,
-        createdAt: user.createdAt,
         picture: user.picture,
         provider: user.provider,
         providerId: user.providerId,
@@ -78,9 +76,12 @@ export class UserRepository implements IUserRepository {
   }
 
   async update(id: string, data: Partial<User>): Promise<User> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _id, createdAt: _date, ...cleanData } = data;
+
     const updated = await this.prisma.user.update({
       where: { id },
-      data,
+      data: cleanData,
     });
 
     return this.toDomain(updated);
