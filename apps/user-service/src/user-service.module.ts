@@ -2,6 +2,7 @@ import { ValidateUserUseCase } from '@auth/application/use-cases/validate-user.u
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
@@ -37,6 +38,7 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     ValidateUserUseCase,
     VerifyUserUseCase,
     FindUserByEmailUseCase,
+    CreateSocialUserUseCase,
     {
       provide: 'IUserRepository',
       useClass: UserRepository,

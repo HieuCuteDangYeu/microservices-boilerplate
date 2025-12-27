@@ -14,6 +14,8 @@ export class ValidateUserUseCase {
 
     if (!user) return null;
 
+    if (!user.password) return null;
+
     const isValid = await bcrypt.compare(dto.password, user.password);
     if (!isValid) return null;
 

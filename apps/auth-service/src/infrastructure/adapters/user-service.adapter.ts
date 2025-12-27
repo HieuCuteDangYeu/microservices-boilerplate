@@ -1,8 +1,13 @@
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { isRpcError } from '@common/constants/rpc-error.types';
+import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
+import {
+  UpdateUserPayload,
+  UpdateUserResponse,
+} from '@common/user/interfaces/update-user.types';
 import { ValidateUserResponse } from '@common/user/interfaces/validate-user-response.types';
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
@@ -21,6 +26,7 @@ export class UserServiceAdapter implements IUserService {
       id,
       email: dto.email,
       password: dto.password,
+      isVerified: false,
     };
 
     return lastValueFrom(
@@ -77,6 +83,32 @@ export class UserServiceAdapter implements IUserService {
           }),
         ),
       { defaultValue: null },
+    );
+  }
+
+  async createSocialUser(
+    dto: CreateSocialUserDto,
+  ): Promise<ValidateUserResponse> {
+    return lastValueFrom(
+      this.client.send<ValidateUserResponse>('user.create_social', dto).pipe(
+        catchError(() => {
+          return throwError(() => new Error('Failed to create social user'));
+        }),
+      ),
+    );
+  }
+
+  rollbackUser(id: string): void {
+    this.client.emit('user.rollback', { id });
+  }
+
+  async updateUser(payload: UpdateUserPayload): Promise<UpdateUserResponse> {
+    return await lastValueFrom(
+      this.client.send<UpdateUserResponse>('update_user', payload).pipe(
+        catchError(() => {
+          return throwError(() => new Error('Failed to update user'));
+        }),
+      ),
     );
   }
 }

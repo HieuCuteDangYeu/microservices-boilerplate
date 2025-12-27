@@ -20,6 +20,9 @@ export class UserRepository implements IUserRepository {
         password: user.password,
         isVerified: user.isVerified,
         createdAt: user.createdAt,
+        picture: user.picture,
+        provider: user.provider,
+        providerId: user.providerId,
       },
     });
     return this.toDomain(saved);
@@ -37,6 +40,9 @@ export class UserRepository implements IUserRepository {
       prismaUser.password,
       prismaUser.isVerified,
       prismaUser.createdAt,
+      prismaUser.picture,
+      prismaUser.provider,
+      prismaUser.providerId,
     );
   }
 
@@ -72,15 +78,19 @@ export class UserRepository implements IUserRepository {
   }
 
   async update(id: string, data: Partial<User>): Promise<User> {
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data,
     });
+
+    return this.toDomain(updated);
   }
 
   async delete(id: string): Promise<User> {
-    return this.prisma.user.delete({
+    const deleted = await this.prisma.user.delete({
       where: { id },
     });
+
+    return this.toDomain(deleted);
   }
 }

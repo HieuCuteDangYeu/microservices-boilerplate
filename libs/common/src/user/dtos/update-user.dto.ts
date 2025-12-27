@@ -1,6 +1,16 @@
-import { CreateUserSchema } from '@common/user/dtos/create-user.dto';
 import { createZodDto } from 'nestjs-zod';
+import { UserDomainSchema } from '../schemas/user.schema';
 
-const updateUserSchema = CreateUserSchema.partial();
+export class UpdateUserDto extends createZodDto(
+  UserDomainSchema.pick({
+    email: true,
+    password: true,
+    picture: true,
+    firstName: true,
+    lastName: true,
+  }).partial(),
+) {}
 
-export class UpdateUserDto extends createZodDto(updateUserSchema) {}
+export class InternalUpdateUserDto extends createZodDto(
+  UserDomainSchema.omit({ id: true, createdAt: true }).partial(),
+) {}

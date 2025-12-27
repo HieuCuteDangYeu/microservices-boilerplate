@@ -19,12 +19,17 @@ export class CreateUserUseCase {
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
+    const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(dto.email)}&background=random`;
+
     const newUser = new User(
       dto.id,
       dto.email,
       hashedPassword,
       false,
       new Date(),
+      avatarUrl,
+      null,
+      null,
     );
 
     await this.userRepository.save(newUser);

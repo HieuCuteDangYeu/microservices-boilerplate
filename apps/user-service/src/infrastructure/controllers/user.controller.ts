@@ -1,11 +1,18 @@
 import { ValidateUserUseCase } from '@auth/application/use-cases/validate-user.use-case';
 import { LoginDto } from '@common/auth/dtos/login.dto';
+import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import type { DeleteUserPayload } from '@common/user/interfaces/delete-user.types';
 import type { FindAllUsersPayload } from '@common/user/interfaces/find-all-users.types';
 import type { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
 import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import {
+  EventPattern,
+  MessagePattern,
+  Payload,
+  RpcException,
+} from '@nestjs/microservices';
+import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
@@ -25,6 +32,7 @@ export class UserController {
     private readonly validateUserUseCase: ValidateUserUseCase,
     private readonly verifyUserUseCase: VerifyUserUseCase,
     private readonly findUserByEmailUseCase: FindUserByEmailUseCase,
+    private readonly createSocialUserUseCase: CreateSocialUserUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -90,5 +98,15 @@ export class UserController {
   @MessagePattern('user.find_by_email')
   async findByEmail(@Payload() data: { email: string }) {
     return await this.findUserByEmailUseCase.execute(data.email);
+  }
+
+  @MessagePattern('user.create_social')
+  async createSocialUser(@Payload() dto: CreateSocialUserDto) {
+    return await this.createSocialUserUseCase.execute(dto);
+  }
+
+  @EventPattern('user.rollback')
+  async rollback(@Payload() data: DeleteUserPayload) {
+    await this.deleteUserUseCase.execute(data);
   }
 }

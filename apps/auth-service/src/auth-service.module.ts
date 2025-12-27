@@ -1,5 +1,6 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
+import { GoogleLoginUseCase } from '@auth/application/use-cases/google-login.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
@@ -28,8 +29,12 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     ClientsModule.register([
       {
         name: 'USER_SERVICE_CLIENT',
-        transport: Transport.TCP,
-        options: { host: '0.0.0.0', port: 3001 },
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBITMQ_URL || ''],
+          queue: 'user_queue',
+          queueOptions: { durable: true },
+        },
       },
       {
         name: 'MAIL_SERVICE_CLIENT',
@@ -55,6 +60,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     ResendVerificationUseCase,
     RefreshTokenUseCase,
     LogoutUseCase,
+    GoogleLoginUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,

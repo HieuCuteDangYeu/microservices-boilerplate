@@ -1,5 +1,6 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
+import { GoogleLoginUseCase } from '@auth/application/use-cases/google-login.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
@@ -10,7 +11,9 @@ import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
+import type { GoogleProfile } from '@common/auth/interfaces/google-profile.interface';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
+import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { Controller } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -21,7 +24,6 @@ import {
 } from '@nestjs/microservices';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { RegisterUseCase } from '../../application/use-cases/register.use-case';
-import { SagaCompensationError } from '../../domain/errors/saga.error';
 
 @Controller()
 export class AuthController {
@@ -34,6 +36,7 @@ export class AuthController {
     private readonly resendVerificationUseCase: ResendVerificationUseCase,
     private readonly refreshTokenUseCase: RefreshTokenUseCase,
     private readonly logoutUseCase: LogoutUseCase,
+    private readonly googleLoginUseCase: GoogleLoginUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -149,5 +152,10 @@ export class AuthController {
   async logout(@Payload() data: { refreshToken: string }) {
     await this.logoutUseCase.execute(data.refreshToken);
     return { message: 'Logged out successfully' };
+  }
+
+  @MessagePattern('auth.login_google')
+  async loginGoogle(@Payload() profile: GoogleProfile) {
+    return await this.googleLoginUseCase.execute(profile);
   }
 }

@@ -1,17 +1,18 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { UserDomainSchema } from '../schemas/user.schema';
 
-export const CreateUserSchema = z.object({
-  email: z.email(),
-  password: z.string().min(8),
-});
-
-export class CreateUserDto extends createZodDto(CreateUserSchema) {}
-
-export const createUserPayloadSchema = CreateUserSchema.extend({
-  id: z.uuid(),
-});
+export class CreateUserDto extends createZodDto(
+  UserDomainSchema.pick({ email: true, password: true }),
+) {}
 
 export class CreateUserPayloadDto extends createZodDto(
-  createUserPayloadSchema,
+  UserDomainSchema.pick({
+    id: true,
+    email: true,
+    password: true,
+    provider: true,
+    providerId: true,
+    picture: true,
+    isVerified: true,
+  }),
 ) {}
