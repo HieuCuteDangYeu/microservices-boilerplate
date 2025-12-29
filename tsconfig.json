@@ -25,11 +25,12 @@
       "@auth/*": ["apps/auth-service/src/*"],
       "@common/*": ["libs/common/src/*"],
       "@gateway/*": ["apps/api-gateway/src/*"],
+      "@mail/*": ["apps/mail-service/src/*"],
       "@prisma/auth-client": ["node_modules/@prisma/auth-client"],
+      "@prisma/mail-client": ["node_modules/@prisma/mail-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@user/*": ["apps/user-service/src/*"],
-      "@mail/*": ["apps/mail-service/src/*"],
-      "@prisma/mail-client": ["node_modules/@prisma/mail-client"]
+      "@media/*": ["apps/media-service/src/*"]
     }
   }
 }
