@@ -10,6 +10,7 @@ export class ValidateUserUseCase {
   ) {}
 
   async execute(dto: LoginDto) {
+    console.log(123);
     const user = await this.userRepository.findByEmail(dto.email);
 
     if (!user) return null;

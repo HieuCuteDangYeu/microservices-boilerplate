@@ -18,7 +18,7 @@ import { IUserService } from '../../domain/interfaces/user-service.interface';
 @Injectable()
 export class UserServiceAdapter implements IUserService {
   constructor(
-    @Inject('USER_SERVICE_CLIENT') private readonly tcpClient: ClientProxy,
+    @Inject('USER_SERVICE_TCP') private readonly tcpClient: ClientProxy,
     @Inject('USER_SERVICE_RMQ') private readonly rmqClient: ClientProxy,
   ) {}
 

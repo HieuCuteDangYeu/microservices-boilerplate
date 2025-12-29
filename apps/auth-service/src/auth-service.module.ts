@@ -39,7 +39,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
         },
       },
       {
-        name: 'USER_SERVICE_CLIENT',
+        name: 'USER_SERVICE_TCP',
         transport: Transport.TCP,
         options: { host: '0.0.0.0', port: 3001 },
       },
