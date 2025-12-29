@@ -30,7 +30,8 @@
       "@prisma/mail-client": ["node_modules/@prisma/mail-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@user/*": ["apps/user-service/src/*"],
-      "@media/*": ["apps/media-service/src/*"]
+      "@media/*": ["apps/media-service/src/*"],
+      "@prisma/media-client": ["node_modules/@prisma/media-client"]
     }
   }
 }

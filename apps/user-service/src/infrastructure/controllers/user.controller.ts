@@ -16,6 +16,7 @@ import { CreateSocialUserUseCase } from '@user/application/use-cases/create-soci
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
+import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { RoleAssignmentError } from '@user/domain/errors/role-assignment.error';
@@ -34,6 +35,7 @@ export class UserController {
     private readonly verifyUserUseCase: VerifyUserUseCase,
     private readonly findUserByEmailUseCase: FindUserByEmailUseCase,
     private readonly createSocialUserUseCase: CreateSocialUserUseCase,
+    private readonly updateUserAvatarUseCase: UpdateUserAvatarUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -115,5 +117,12 @@ export class UserController {
   @EventPattern('user.rollback')
   async rollback(@Payload() data: DeleteUserPayload) {
     await this.deleteUserUseCase.execute(data);
+  }
+
+  @EventPattern('user.avatar_updated')
+  async handleAvatarUpdated(
+    @Payload() data: { userId: string; avatarUrl: string },
+  ) {
+    await this.updateUserAvatarUseCase.execute(data.userId, data.avatarUrl);
   }
 }

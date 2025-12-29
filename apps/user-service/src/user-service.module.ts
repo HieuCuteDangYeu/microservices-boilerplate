@@ -6,6 +6,7 @@ import { CreateSocialUserUseCase } from '@user/application/use-cases/create-soci
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
+import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { AuthServiceAdapter } from '@user/infrastructure/adapters/auth-service.adapter';
@@ -48,6 +49,7 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     VerifyUserUseCase,
     FindUserByEmailUseCase,
     CreateSocialUserUseCase,
+    UpdateUserAvatarUseCase,
     {
       provide: 'IUserRepository',
       useClass: UserRepository,
