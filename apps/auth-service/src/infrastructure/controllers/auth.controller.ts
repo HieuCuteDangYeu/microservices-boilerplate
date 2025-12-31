@@ -1,15 +1,20 @@
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
+import { ForgotPasswordUseCase } from '@auth/application/use-cases/forgot-password.use-case';
 import { GoogleLoginUseCase } from '@auth/application/use-cases/google-login.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
+import { ResetPasswordUseCase } from '@auth/application/use-cases/reset-password.use-case';
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
+import { InvalidResetTokenError } from '@auth/domain/errors/invalid-reset-token.error';
 import { InvalidTokenError } from '@auth/domain/errors/invalid-token.error';
 import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
+import { ForgotPasswordDto } from '@common/auth/dtos/forgot-password.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
+import { ResetPasswordDto } from '@common/auth/dtos/reset-password.dto';
 import type { GoogleProfile } from '@common/auth/interfaces/google-profile.interface';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
@@ -30,6 +35,8 @@ export class AuthController {
     private readonly refreshTokenUseCase: RefreshTokenUseCase,
     private readonly logoutUseCase: LogoutUseCase,
     private readonly googleLoginUseCase: GoogleLoginUseCase,
+    private readonly forgotPasswordUseCase: ForgotPasswordUseCase,
+    private readonly resetPasswordUseCase: ResetPasswordUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -145,5 +152,29 @@ export class AuthController {
   @MessagePattern('auth.login_google')
   async loginGoogle(@Payload() profile: GoogleProfile) {
     return await this.googleLoginUseCase.execute(profile);
+  }
+
+  @MessagePattern('auth.forgot_password')
+  async handleForgotPassword(@Payload() dto: ForgotPasswordDto) {
+    return await this.forgotPasswordUseCase.execute(dto);
+  }
+
+  @MessagePattern('auth.reset_password')
+  async handleResetPassword(@Payload() dto: ResetPasswordDto) {
+    try {
+      return await this.resetPasswordUseCase.execute(dto);
+    } catch (error) {
+      if (error instanceof InvalidResetTokenError) {
+        throw new RpcException({
+          statusCode: 400,
+          message: error.message,
+        });
+      }
+
+      throw new RpcException({
+        statusCode: 500,
+        message: 'Internal Server Error',
+      });
+    }
   }
 }

@@ -1,11 +1,13 @@
 import { AssignRoleUseCase } from '@auth/application/use-cases/assign-role.use-case';
 import { ConfirmAccountUseCase } from '@auth/application/use-cases/confirm-account.use-case';
 import { DeleteUserRolesUseCase } from '@auth/application/use-cases/delete-user-roles.use-case';
+import { ForgotPasswordUseCase } from '@auth/application/use-cases/forgot-password.use-case';
 import { GoogleLoginUseCase } from '@auth/application/use-cases/google-login.use-case';
 import { LoginUseCase } from '@auth/application/use-cases/login.use-case';
 import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
+import { ResetPasswordUseCase } from '@auth/application/use-cases/reset-password.use-case';
 import { MailServiceAdapter } from '@auth/infrastructure/adapters/mail-service.adapter';
 import { RoleController } from '@auth/infrastructure/controllers/role.controller';
 import { TokenCleanupService } from '@auth/infrastructure/jobs/token-cleanup.service';
@@ -69,6 +71,8 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     LogoutUseCase,
     GoogleLoginUseCase,
     AssignRoleUseCase,
+    ForgotPasswordUseCase,
+    ResetPasswordUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,

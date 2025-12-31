@@ -5,6 +5,7 @@ import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import type { DeleteUserPayload } from '@common/user/interfaces/delete-user.types';
 import type { FindAllUsersPayload } from '@common/user/interfaces/find-all-users.types';
 import type { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
+import { ValidateUserResponse } from '@common/user/interfaces/validate-user-response.types';
 import { Controller } from '@nestjs/common';
 import {
   EventPattern,
@@ -16,6 +17,7 @@ import { CreateSocialUserUseCase } from '@user/application/use-cases/create-soci
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
+import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
@@ -36,6 +38,7 @@ export class UserController {
     private readonly findUserByEmailUseCase: FindUserByEmailUseCase,
     private readonly createSocialUserUseCase: CreateSocialUserUseCase,
     private readonly updateUserAvatarUseCase: UpdateUserAvatarUseCase,
+    private readonly findUserByIdUseCase: FindUserByIdUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -124,5 +127,10 @@ export class UserController {
     @Payload() data: { userId: string; avatarUrl: string },
   ) {
     await this.updateUserAvatarUseCase.execute(data.userId, data.avatarUrl);
+  }
+
+  @MessagePattern('user.find_by_id')
+  async findById(@Payload() id: string): Promise<ValidateUserResponse | null> {
+    return await this.findUserByIdUseCase.execute(id);
   }
 }

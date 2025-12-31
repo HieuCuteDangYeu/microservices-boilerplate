@@ -16,4 +16,5 @@ export interface IUserService {
   createSocialUser(dto: CreateSocialUserDto): Promise<ValidateUserResponse>;
   rollbackUser(id: string): void;
   updateUser(payload: UpdateUserPayload): Promise<UpdateUserResponse>;
+  findById(id: string): Promise<ValidateUserResponse | null>;
 }

@@ -111,4 +111,13 @@ export class UserServiceAdapter implements IUserService {
       ),
     );
   }
+
+  async findById(id: string): Promise<ValidateUserResponse | null> {
+    return lastValueFrom(
+      this.tcpClient
+        .send<ValidateUserResponse | null>('user.find_by_id', id)
+        .pipe(catchError(() => of(null))),
+      { defaultValue: null },
+    );
+  }
 }

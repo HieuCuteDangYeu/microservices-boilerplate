@@ -28,4 +28,22 @@ export class MailServiceAdapter implements IMailService {
       },
     });
   }
+
+  sendPasswordResetEmail(email: string, token: string): void {
+    const templateId = this.config.get<string>(
+      'SENDGRID_RESET_PASSWORD_TEMPLATE_ID',
+    );
+
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+
+    this.client.emit('mail.send', {
+      to: email,
+      subject: 'Password Reset Instructions',
+      template: templateId,
+      context: {
+        name: email,
+        url: resetLink,
+      },
+    });
+  }
 }

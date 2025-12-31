@@ -5,4 +5,5 @@ export interface ValidateUserResponse {
   provider?: string | null;
   providerId?: string | null;
   picture?: string | null;
+  password?: string | null;
 }

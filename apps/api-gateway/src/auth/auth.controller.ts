@@ -1,7 +1,9 @@
 import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
+import { ForgotPasswordDto } from '@common/auth/dtos/forgot-password.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
+import { ResetPasswordDto } from '@common/auth/dtos/reset-password.dto';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
@@ -207,5 +209,25 @@ export class AuthController {
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendUrl}/api`);
+  }
+
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Send forgot password email' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return lastValueFrom(
+      this.authClient
+        .send<{ message: string }>('auth.forgot_password', dto)
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset user password' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return lastValueFrom(
+      this.authClient
+        .send<{ message: string }>('auth.reset_password', dto)
+        .pipe(catchError((err) => this.handleMicroserviceError(err))),
+    );
   }
 }
