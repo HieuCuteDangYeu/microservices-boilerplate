@@ -26,12 +26,14 @@
       "@common/*": ["libs/common/src/*"],
       "@gateway/*": ["apps/api-gateway/src/*"],
       "@mail/*": ["apps/mail-service/src/*"],
+      "@media/*": ["apps/media-service/src/*"],
       "@prisma/auth-client": ["node_modules/@prisma/auth-client"],
       "@prisma/mail-client": ["node_modules/@prisma/mail-client"],
+      "@prisma/media-client": ["node_modules/@prisma/media-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@user/*": ["apps/user-service/src/*"],
-      "@media/*": ["apps/media-service/src/*"],
-      "@prisma/media-client": ["node_modules/@prisma/media-client"]
+      "@payment/*": ["apps/payment-service/src/*"],
+      "@prisma/payment-client": ["node_modules/@prisma/payment-client"]
     }
   }
 }

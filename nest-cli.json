@@ -58,6 +58,16 @@
         "webpack": false
       }
     },
+    "payment-service": {
+      "type": "application",
+      "root": "apps/payment-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/payment-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/payment-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "user-service": {
       "type": "application",
       "root": "apps/user-service",
