@@ -12,7 +12,7 @@ import { PaymentController } from './infrastructure/controllers/payment.controll
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: 'apps/payment-service/.env',
+      envFilePath: ['apps/payment-service/.env', '.env'],
     }),
   ],
   controllers: [PaymentController, PaymentWebhookController],

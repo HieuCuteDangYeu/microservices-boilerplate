@@ -28,27 +28,42 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: 'apps/auth-service/.env',
+      envFilePath: ['apps/auth-service/.env', '.env'],
     }),
-    ClientsModule.register([
-      {
-        name: 'USER_SERVICE_RMQ',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || ''],
-          queue: 'user_queue',
-          queueOptions: { durable: true },
-        },
-      },
+    ClientsModule.registerAsync([
       {
         name: 'USER_SERVICE_TCP',
-        transport: Transport.TCP,
-        options: { host: '0.0.0.0', port: 3001 },
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: config.get<string>('USER_SERVICE_HOST', '0.0.0.0'),
+            port: config.get<number>('USER_SERVICE_PORT', 3001),
+          },
+        }),
+        inject: [ConfigService],
       },
       {
         name: 'MAIL_SERVICE_CLIENT',
-        transport: Transport.TCP,
-        options: { host: '0.0.0.0', port: 3003 },
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: config.get<string>('MAIL_SERVICE_HOST', '0.0.0.0'),
+            port: config.get<number>('MAIL_SERVICE_PORT', 3003),
+          },
+        }),
+        inject: [ConfigService],
+      },
+      {
+        name: 'USER_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'user_queue',
+            queueOptions: { durable: true },
+          },
+        }),
+        inject: [ConfigService],
       },
     ]),
     ScheduleModule.forRoot(),

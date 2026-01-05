@@ -11,7 +11,7 @@ async function bootstrap() {
     transport: Transport.TCP,
     options: {
       host: '0.0.0.0',
-      port: 3001,
+      port: configService.get<number>('TCP_PORT', 3001),
     },
   });
 
@@ -20,14 +20,10 @@ async function bootstrap() {
     options: {
       urls: [configService.getOrThrow<string>('RABBITMQ_URL')],
       queue: 'user_queue',
-      queueOptions: {
-        durable: true,
-      },
+      queueOptions: { durable: true },
     },
   });
 
   await app.startAllMicroservices();
-  await app.init();
-  console.log('User Service is listening on TCP (3001) and RabbitMQ');
 }
 void bootstrap();

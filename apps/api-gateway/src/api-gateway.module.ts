@@ -5,47 +5,59 @@ import { MediaController } from '@gateway/media/media.controller';
 import { PaymentController } from '@gateway/payment/payment.controller';
 import { UserController } from '@gateway/users/user.controller';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: 'apps/api-gateway/.env',
+      envFilePath: ['apps/api-gateway/.env', '.env'],
     }),
-    ClientsModule.register([
+    ClientsModule.registerAsync([
       {
         name: 'USER_SERVICE',
-        transport: Transport.TCP,
-        options: {
-          host: '0.0.0.0',
-          port: 3001,
-        },
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: config.get<string>('USER_SERVICE_HOST', '0.0.0.0'),
+            port: config.get<number>('USER_SERVICE_PORT', 3001),
+          },
+        }),
+        inject: [ConfigService],
       },
       {
         name: 'AUTH_SERVICE',
-        transport: Transport.TCP,
-        options: {
-          host: '0.0.0.0',
-          port: 3002,
-        },
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: config.get<string>('AUTH_SERVICE_HOST', '0.0.0.0'),
+            port: config.get<number>('AUTH_SERVICE_PORT', 3002),
+          },
+        }),
+        inject: [ConfigService],
       },
       {
         name: 'MEDIA_SERVICE',
-        transport: Transport.TCP,
-        options: {
-          host: '0.0.0.0',
-          port: 3004,
-        },
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: config.get<string>('MEDIA_SERVICE_HOST', '0.0.0.0'),
+            port: config.get<number>('MEDIA_SERVICE_PORT', 3004),
+          },
+        }),
+        inject: [ConfigService],
       },
       {
         name: 'PAYMENT_SERVICE',
-        transport: Transport.TCP,
-        options: {
-          host: '0.0.0.0',
-          port: 3005,
-        },
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: config.get<string>('PAYMENT_SERVICE_HOST', '0.0.0.0'),
+            port: config.get<number>('PAYMENT_SERVICE_PORT', 3005),
+          },
+        }),
+        inject: [ConfigService],
       },
     ]),
   ],

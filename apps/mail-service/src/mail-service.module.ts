@@ -10,7 +10,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: 'apps/mail-service/.env',
+      envFilePath: ['apps/mail-service/.env', '.env'],
     }),
     BullModule.forRootAsync({
       imports: [ConfigModule],
@@ -33,7 +33,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   controllers: [MailController],
   providers: [
     MailProcessor,
-    SendGridAdapter,
     SendMailUseCase,
     {
       provide: 'IMailSender',

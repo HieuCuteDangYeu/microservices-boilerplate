@@ -1,4 +1,4 @@
-import { isRpcError } from '@common/constants/rpc-error.types'; // Ensure you have this
+import { isRpcError } from '@common/constants/rpc-error.types';
 import { ConfirmUploadDto } from '@common/media/dtos/confirm-upload.dto';
 import { GetPresignedUrlDto } from '@common/media/dtos/get-presigned-url.dto';
 import {

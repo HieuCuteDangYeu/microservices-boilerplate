@@ -1,6 +1,6 @@
 import { ValidateUserUseCase } from '@auth/application/use-cases/validate-user.use-case';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
@@ -20,22 +20,31 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: 'apps/user-service/.env',
+      envFilePath: ['apps/user-service/.env', '.env'],
     }),
-    ClientsModule.register([
-      {
-        name: 'AUTH_SERVICE_RMQ',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || ''],
-          queue: 'auth_queue',
-          queueOptions: { durable: true },
-        },
-      },
+    ClientsModule.registerAsync([
       {
         name: 'AUTH_SERVICE_TCP',
-        transport: Transport.TCP,
-        options: { host: '0.0.0.0', port: 3002 },
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: config.get<string>('AUTH_SERVICE_HOST', '0.0.0.0'),
+            port: config.get<number>('AUTH_SERVICE_PORT', 3002),
+          },
+        }),
+        inject: [ConfigService],
+      },
+      {
+        name: 'AUTH_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'auth_queue',
+            queueOptions: { durable: true },
+          },
+        }),
+        inject: [ConfigService],
       },
     ]),
   ],

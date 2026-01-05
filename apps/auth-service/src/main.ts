@@ -9,7 +9,10 @@ async function bootstrap() {
 
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.TCP,
-    options: { host: '0.0.0.0', port: 3002 },
+    options: {
+      host: '0.0.0.0',
+      port: configService.get<number>('TCP_PORT', 3002),
+    },
   });
 
   app.connectMicroservice<MicroserviceOptions>({
@@ -22,7 +25,5 @@ async function bootstrap() {
   });
 
   await app.startAllMicroservices();
-  await app.init();
-  console.log('Auth Service is listening on TCP (3002) and RabbitMQ');
 }
 void bootstrap();

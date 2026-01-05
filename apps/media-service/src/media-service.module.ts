@@ -12,7 +12,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: 'apps/media-service/.env',
+      envFilePath: ['apps/media-service/.env', '.env'],
     }),
     ClientsModule.register([
       {
