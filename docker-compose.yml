@@ -9,14 +9,6 @@ services:
       - '3000:3000'
     environment:
       - PORT=3000
-      - USER_SERVICE_HOST=user-service
-      - USER_SERVICE_PORT=3001
-      - AUTH_SERVICE_HOST=auth-service
-      - AUTH_SERVICE_PORT=3002
-      - MEDIA_SERVICE_HOST=media-service
-      - MEDIA_SERVICE_PORT=3004
-      - PAYMENT_SERVICE_HOST=payment-service
-      - PAYMENT_SERVICE_PORT=3005
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL}
@@ -30,10 +22,7 @@ services:
     container_name: user-service
     restart: always
     environment:
-      - TCP_PORT=3001
       - USER_DATABASE_URL=${USER_DATABASE_URL}
-      - AUTH_SERVICE_HOST=auth-service
-      - AUTH_SERVICE_PORT=3002
       - RABBITMQ_URL=${RABBITMQ_URL}
     networks:
       - microservices-net
@@ -45,12 +34,7 @@ services:
     container_name: auth-service
     restart: always
     environment:
-      - TCP_PORT=3002
       - AUTH_DATABASE_URL=${AUTH_DATABASE_URL}
-      - USER_SERVICE_HOST=user-service
-      - USER_SERVICE_PORT=3001
-      - MAIL_SERVICE_HOST=mail-service
-      - MAIL_SERVICE_PORT=3003
       - RABBITMQ_URL=${RABBITMQ_URL}
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
@@ -70,7 +54,6 @@ services:
     container_name: media-service
     restart: always
     environment:
-      - TCP_PORT=3004
       - MEDIA_DATABASE_URL=${MEDIA_DATABASE_URL}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - AWS_REGION=${AWS_REGION}
@@ -89,8 +72,6 @@ services:
     ports:
       - '3006:3000'
     environment:
-      - PORT=3006
-      - TCP_PORT=3005
       - PAYMENT_DATABASE_URL=${PAYMENT_DATABASE_URL}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
@@ -105,7 +86,7 @@ services:
     container_name: mail-service
     restart: always
     environment:
-      - TCP_PORT=3003
+      - WEBHOOK_PORT=3006
       - RABBITMQ_URL=${RABBITMQ_URL}
       - MAIL_QUEUE_HOST=${MAIL_QUEUE_HOST}
       - MAIL_QUEUE_PORT=${MAIL_QUEUE_PORT}

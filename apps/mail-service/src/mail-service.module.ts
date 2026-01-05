@@ -10,7 +10,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['apps/mail-service/.env', '.env'],
+      envFilePath: '.env',
     }),
     BullModule.forRootAsync({
       imports: [ConfigModule],

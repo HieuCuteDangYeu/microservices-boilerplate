@@ -12,14 +12,14 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['apps/media-service/.env', '.env'],
+      envFilePath: '.env',
     }),
     ClientsModule.register([
       {
         name: 'MEDIA_RMQ',
         transport: Transport.RMQ,
         options: {
-          urls: [process.env.RABBITMQ_URL || ''],
+          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
           queue: 'user_queue',
           queueOptions: { durable: true },
         },

@@ -1,29 +1,22 @@
-import { ConfigService } from '@nestjs/config';
+import { AuthServiceModule } from '@auth/auth-service.module';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { AuthServiceModule } from './auth-service.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AuthServiceModule);
-  const configService = app.get(ConfigService);
-
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.TCP,
-    options: {
-      host: '0.0.0.0',
-      port: configService.get<number>('TCP_PORT', 3002),
+  const app = await NestFactory.createMicroservice<MicroserviceOptions>(
+    AuthServiceModule,
+    {
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+        queue: 'auth_queue',
+        queueOptions: {
+          durable: true,
+        },
+      },
     },
-  });
+  );
 
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [configService.getOrThrow<string>('RABBITMQ_URL')],
-      queue: 'auth_queue',
-      queueOptions: { durable: true },
-    },
-  });
-
-  await app.startAllMicroservices();
+  await app.listen();
 }
 void bootstrap();

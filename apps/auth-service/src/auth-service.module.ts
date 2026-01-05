@@ -28,27 +28,17 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['apps/auth-service/.env', '.env'],
+      envFilePath: '.env',
     }),
     ClientsModule.registerAsync([
       {
-        name: 'USER_SERVICE_TCP',
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.TCP,
-          options: {
-            host: config.get<string>('USER_SERVICE_HOST', '0.0.0.0'),
-            port: config.get<number>('USER_SERVICE_PORT', 3001),
-          },
-        }),
-        inject: [ConfigService],
-      },
-      {
         name: 'MAIL_SERVICE_CLIENT',
         useFactory: (config: ConfigService) => ({
-          transport: Transport.TCP,
+          transport: Transport.RMQ,
           options: {
-            host: config.get<string>('MAIL_SERVICE_HOST', '0.0.0.0'),
-            port: config.get<number>('MAIL_SERVICE_PORT', 3003),
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'mail_queue',
+            queueOptions: { durable: true },
           },
         }),
         inject: [ConfigService],

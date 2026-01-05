@@ -1,20 +1,18 @@
-import { ConfigService } from '@nestjs/config';
+import { MailServiceModule } from '@mail/mail-service.module';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { MailServiceModule } from './mail-service.module';
 
 async function bootstrap() {
-  const appContext =
-    await NestFactory.createApplicationContext(MailServiceModule);
-  const configService = appContext.get(ConfigService);
-
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     MailServiceModule,
     {
-      transport: Transport.TCP,
+      transport: Transport.RMQ,
       options: {
-        host: '0.0.0.0',
-        port: configService.get<number>('TCP_PORT', 3003),
+        urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+        queue: 'mail_queue',
+        queueOptions: {
+          durable: true,
+        },
       },
     },
   );

@@ -1,23 +1,22 @@
-import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { PaymentServiceModule } from './payment-service.module';
+import { PaymentServiceModule } from '@payment/payment-service.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(PaymentServiceModule, { rawBody: true });
-  const configService = app.get(ConfigService);
+  const app = await NestFactory.create(PaymentServiceModule);
 
   app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.TCP,
+    transport: Transport.RMQ,
     options: {
-      host: '0.0.0.0',
-      port: configService.get<number>('TCP_PORT', 3005),
+      urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+      queue: 'payment_queue',
+      queueOptions: {
+        durable: true,
+      },
     },
   });
 
   await app.startAllMicroservices();
-
-  const port = configService.get<number>('PORT', 3006);
-  await app.listen(port);
+  await app.listen(process.env.WEBHOOK_PORT || 3006);
 }
 void bootstrap();

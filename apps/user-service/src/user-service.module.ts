@@ -20,20 +20,9 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['apps/user-service/.env', '.env'],
+      envFilePath: '.env',
     }),
     ClientsModule.registerAsync([
-      {
-        name: 'AUTH_SERVICE_TCP',
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.TCP,
-          options: {
-            host: config.get<string>('AUTH_SERVICE_HOST', '0.0.0.0'),
-            port: config.get<number>('AUTH_SERVICE_PORT', 3002),
-          },
-        }),
-        inject: [ConfigService],
-      },
       {
         name: 'AUTH_SERVICE_RMQ',
         useFactory: (config: ConfigService) => ({
