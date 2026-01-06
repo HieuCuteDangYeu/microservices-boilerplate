@@ -45,7 +45,14 @@
     "studio:payment": "cd apps/payment-service && prisma studio",
     "seed:auth": "dotenv -e apps/auth-service/.env -- ts-node apps/auth-service/prisma/seed.ts",
     "seed:user": "dotenv -e apps/user-service/.env -- ts-node apps/user-service/prisma/seed.ts",
-    "seed:all": "pnpm run seed:auth && pnpm run seed:user"
+    "seed:all": "pnpm run seed:auth && pnpm run seed:user",
+    "migrate:user:prod": "dotenv -e .env.production.local -- sh -c 'cd apps/user-service && prisma migrate deploy'",
+    "migrate:auth:prod": "dotenv -e .env.production.local -- sh -c 'cd apps/auth-service && prisma migrate deploy'",
+    "migrate:media:prod": "dotenv -e .env.production.local -- sh -c 'cd apps/media-service && prisma migrate deploy'",
+    "migrate:payment:prod": "dotenv -e .env.production.local -- sh -c 'cd apps/payment-service && prisma migrate deploy'",
+    "seed:auth:prod": "dotenv -e .env.production.local -- ts-node apps/auth-service/prisma/seed.ts",
+    "seed:user:prod": "dotenv -e .env.production.local -- ts-node apps/user-service/prisma/seed.ts",
+    "start:gateway:prod": "dotenv -e .env.production.local -- nest start api-gateway --watch"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",
