@@ -1,0 +1,61 @@
+name: Deploy Microservices to Heroku
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-gateway
+            app_name: hieu-api-gateway
+            dockerfile: ./apps/api-gateway/Dockerfile
+
+          - service: auth-service
+            app_name: hieu-auth-service
+            dockerfile: ./apps/auth-service/Dockerfile
+
+          - service: user-service
+            app_name: hieu-user-service
+            dockerfile: ./apps/user-service/Dockerfile
+
+          - service: payment-service
+            app_name: hieu-payment-service
+            dockerfile: ./apps/payment-service/Dockerfile
+
+          - service: media-service
+            app_name: hieu-media-service
+            dockerfile: ./apps/media-service/Dockerfile
+
+          - service: mail-service
+            app_name: hieu-mail-service
+            dockerfile: ./apps/mail-service/Dockerfile
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Login to Heroku Container Registry
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku container:login
+
+      - name: Build and Push Docker Image
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          docker build -t registry.heroku.com/${{ matrix.app_name }}/web -f ${{ matrix.dockerfile }} .
+
+          docker push registry.heroku.com/${{ matrix.app_name }}/web
+
+      - name: Release to Heroku
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku container:release web -a ${{ matrix.app_name }}
