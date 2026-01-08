@@ -1,98 +1,419 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Microservices Boilerplate
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A production-ready microservices architecture built with NestJS, featuring authentication, user management, media uploads, payments, and email notifications.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Architecture Overview
 
-## Description
+This project implements a microservices architecture with the following components:
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- **API Gateway** - REST API entry point that routes requests to microservices
+- **User Service** - Manages user data and profiles
+- **Auth Service** - Handles authentication, authorization, and role management
+- **Media Service** - Manages file uploads to AWS S3
+- **Payment Service** - Processes payments via Stripe
+- **Mail Service** - Sends transactional emails via SendGrid
 
-## Project setup
+### Communication
 
-```bash
-$ pnpm install
+- **RabbitMQ** - Message broker for inter-service communication
+- **Redis** - Caching and temporary data storage (verification tokens, reset tokens)
+- **BullMQ** - Job queue for email processing
+
+## Features
+
+### Authentication & Authorization
+
+- Email/password registration and login
+- Google OAuth2 authentication
+- JWT-based authentication with refresh tokens
+- Role-based access control (RBAC)
+- Email verification
+- Password reset flow
+
+### User Management
+
+- CRUD operations for users
+- Pagination and search
+- Avatar management with S3 integration
+- Social login support (Google)
+
+### Media Service
+
+- Pre-signed URL generation for direct S3 uploads
+- Image upload support (JPEG, PNG, WebP)
+- Automatic avatar update notifications
+
+### Payment Service
+
+- Stripe integration
+- Payment intent creation
+- Webhook handling for payment status updates
+- Support for multiple currencies
+
+### Email Service
+
+- Transactional email via SendGrid
+- Template-based emails
+- Queue-based processing with retry logic
+- Account verification emails
+- Password reset emails
+
+## Tech Stack
+
+- **Framework**: NestJS
+- **Language**: TypeScript
+- **Databases**: PostgreSQL (via Prisma ORM)
+- **Message Broker**: RabbitMQ
+- **Cache**: Redis
+- **Job Queue**: BullMQ
+- **Storage**: AWS S3
+- **Payment**: Stripe
+- **Email**: SendGrid
+- **Validation**: Zod with nestjs-zod
+- **Authentication**: Passport.js (JWT & Google OAuth2)
+
+## Project Structure
+
+```
+.
+├── apps/
+│   ├── api-gateway/          # REST API Gateway
+│   ├── auth-service/         # Authentication & Authorization
+│   ├── user-service/         # User Management
+│   ├── media-service/        # File Upload & Storage
+│   ├── payment-service/      # Payment Processing
+│   └── mail-service/         # Email Notifications
+├── libs/
+│   └── common/               # Shared DTOs, interfaces, and utilities
+├── .github/
+│   └── workflows/
+│       └── deploy.yml        # CI/CD for Heroku deployment
+└── docker-compose.yml        # Local development environment
 ```
 
-## Compile and run the project
+Each service follows Clean Architecture principles:
 
-```bash
-# development
-$ pnpm run start
+- `domain/` - Business entities and interfaces
+- `application/` - Use cases and business logic
+- `infrastructure/` - External dependencies (repositories, adapters, controllers)
 
-# watch mode
-$ pnpm run start:dev
+## Prerequisites
 
-# production mode
-$ pnpm run start:prod
+- Node.js 20+
+- pnpm (enabled via corepack)
+- Docker & Docker Compose
+- PostgreSQL databases (4 separate databases)
+- RabbitMQ instance
+- Redis instance
+- AWS S3 bucket
+- Stripe account
+- SendGrid account
+
+## Environment Variables
+
+Create a `.env` file in the root directory:
+
+```env
+# API Gateway
+PORT=3000
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+FRONTEND_URL=http://localhost:3000
+
+# Database URLs
+USER_DATABASE_URL=postgresql://user:password@localhost:5432/user_db
+AUTH_DATABASE_URL=postgresql://user:password@localhost:5432/auth_db
+MEDIA_DATABASE_URL=postgresql://user:password@localhost:5432/media_db
+PAYMENT_DATABASE_URL=postgresql://user:password@localhost:5432/payment_db
+
+# RabbitMQ
+RABBITMQ_URL=amqp://localhost:5672
+
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+
+# AWS S3
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_BUCKET_NAME=your_bucket_name
+
+# Stripe
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# SendGrid
+SENDGRID_API_KEY=SG....
+SENDGRID_FROM_EMAIL=noreply@yourdomain.com
+SENDGRID_CONFIRM_ACCOUNT_TEMPLATE_ID=d-...
+SENDGRID_RESET_PASSWORD_TEMPLATE_ID=d-...
+
+# Mail Queue (Redis for BullMQ)
+MAIL_QUEUE_HOST=localhost
+MAIL_QUEUE_PORT=6379
+MAIL_QUEUE_PASSWORD=
+
+# JWT
+JWT_SECRET=your_super_secret_jwt_key
+
+# Webhook Port
+WEBHOOK_PORT=3006
 ```
 
-## Run tests
+## Installation
 
 ```bash
-# unit tests
-$ pnpm run test
+# Install dependencies
+pnpm install
 
-# e2e tests
-$ pnpm run test:e2e
+# Generate Prisma clients
+pnpm prisma:generate:all
 
-# test coverage
-$ pnpm run test:cov
+# Run database migrations
+pnpm migrate:user
+pnpm migrate:auth
+pnpm migrate:media
+pnpm migrate:payment
+
+# Seed default admin user and roles
+pnpm seed:all
+```
+
+### Default Admin Credentials
+
+After seeding:
+
+- Email: `admin@example.com`
+- Password: `admin123`
+- Role: `ADMIN`
+
+## Running the Application
+
+### Development Mode
+
+```bash
+# Start all services concurrently
+pnpm start:all
+
+# Or start services individually
+pnpm start:gateway
+pnpm start:user
+pnpm start:auth
+pnpm start:mail
+pnpm start:media
+pnpm start:payment
+```
+
+The API Gateway will be available at `http://localhost:3000/api`
+
+### Using Docker Compose
+
+```bash
+# Build and start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+### Production Mode
+
+```bash
+# Build all services
+pnpm build:all
+
+# Run migrations
+pnpm migrate:user:prod
+pnpm migrate:auth:prod
+pnpm migrate:media:prod
+pnpm migrate:payment:prod
+
+# Seed data
+pnpm seed:all
+
+# Start services
+pnpm start:prod:gateway
+pnpm start:prod:user
+pnpm start:prod:auth
+pnpm start:prod:mail
+pnpm start:prod:media
+pnpm start:prod:payment
+```
+
+## API Documentation
+
+Swagger documentation is available at `http://localhost:3000/api` when running the API Gateway.
+
+### Key Endpoints
+
+**Authentication**
+
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - Login with email/password
+- `POST /auth/logout` - Logout user
+- `POST /auth/refresh` - Refresh access token
+- `GET /auth/google` - Initiate Google OAuth
+- `POST /auth/confirm` - Confirm email verification
+- `POST /auth/forgot-password` - Request password reset
+- `POST /auth/reset-password` - Reset password with token
+- `GET /auth/me` - Get current user session
+
+**Users** (Admin only)
+
+- `GET /users` - List all users (paginated)
+- `POST /users` - Create user
+- `PATCH /users/:id` - Update user
+- `DELETE /users/:id` - Delete user
+
+**Media**
+
+- `POST /media/upload-url` - Get pre-signed S3 URL
+- `POST /media/confirm` - Confirm upload and update avatar
+
+**Payments**
+
+- `POST /payments` - Create payment intent
+- `POST /payments/webhook` - Stripe webhook endpoint
+
+## Database Management
+
+```bash
+# Generate Prisma client after schema changes
+pnpm prisma:generate:all
+
+# Create a new migration
+pnpm migrate:user
+pnpm migrate:auth
+pnpm migrate:media
+pnpm migrate:payment
+
+# Open Prisma Studio for database GUI
+pnpm studio:user
+pnpm studio:auth
+pnpm studio:media
+pnpm studio:payment
 ```
 
 ## Deployment
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### Heroku (CI/CD)
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+The project includes a GitHub Actions workflow for automatic deployment to Heroku:
+
+1. Create Heroku apps for each service
+2. Add `HEROKU_API_KEY` to GitHub secrets
+3. Push to `main` branch to trigger deployment
+
+### Manual Deployment
+
+Each service has a Dockerfile optimized for production:
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+# Build Docker image
+docker build -t your-service -f apps/service-name/Dockerfile .
+
+# Run container
+docker run -p 3000:3000 --env-file .env your-service
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Testing
 
-## Resources
+```bash
+# Unit tests
+pnpm test
 
-Check out a few resources that may come in handy when working with NestJS:
+# E2E tests
+pnpm test:e2e
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+# Test coverage
+pnpm test:cov
+```
 
-## Support
+## Code Quality
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+# Format code
+pnpm format
 
-## Stay in touch
+# Lint and fix
+pnpm lint
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Architecture Patterns
+
+### Clean Architecture
+
+Each microservice follows Clean Architecture principles:
+
+- **Domain Layer**: Business entities and interfaces
+- **Application Layer**: Use cases containing business logic
+- **Infrastructure Layer**: External concerns (DB, HTTP, message queues)
+
+### SAGA Pattern
+
+Distributed transactions use the SAGA pattern with compensating actions:
+
+- User registration creates user → assigns role → sends verification email
+- On failure, rollback actions are triggered to maintain consistency
+
+### Repository Pattern
+
+Data access is abstracted through repository interfaces:
+
+```typescript
+export interface IUserRepository {
+  save(user: User): Promise<User>;
+  findByEmail(email: string): Promise<User | null>;
+  // ...
+}
+```
+
+### Adapter Pattern
+
+External services are wrapped in adapters:
+
+- `UserServiceAdapter` - Communicates with User Service via RabbitMQ
+- `MailServiceAdapter` - Sends emails via Mail Service
+- `StripeAdapter` - Integrates with Stripe API
+
+## Security Features
+
+- HTTP-only cookies for tokens
+- JWT with short-lived access tokens (15 min)
+- Refresh token rotation
+- Password hashing with bcrypt
+- Role-based access control
+- Email verification required
+- Secure password reset flow
+- Environment-based security settings
+- Stripe webhook signature verification
+
+## Monitoring & Logging
+
+- Structured logging in all services
+- Token cleanup scheduled job (daily)
+- Error handling with proper HTTP status codes
+- RabbitMQ message acknowledgment
+- Email retry logic with exponential backoff
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+This project is licensed under the UNLICENSED license.
+
+## Support
+
+For issues and questions, please open an issue on GitHub.
