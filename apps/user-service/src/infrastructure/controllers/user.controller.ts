@@ -18,6 +18,7 @@ import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-c
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
+import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
@@ -39,6 +40,7 @@ export class UserController {
     private readonly createSocialUserUseCase: CreateSocialUserUseCase,
     private readonly updateUserAvatarUseCase: UpdateUserAvatarUseCase,
     private readonly findUserByIdUseCase: FindUserByIdUseCase,
+    private readonly findUsersByIdsUseCase: FindUsersByIdsUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -132,5 +134,10 @@ export class UserController {
   @MessagePattern('user.find_by_id')
   async findById(@Payload() id: string): Promise<ValidateUserResponse | null> {
     return await this.findUserByIdUseCase.execute(id);
+  }
+
+  @MessagePattern('user.find_by_ids')
+  async findByIds(@Payload() ids: string[]) {
+    return await this.findUsersByIdsUseCase.execute(ids);
   }
 }

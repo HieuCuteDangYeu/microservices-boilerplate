@@ -101,4 +101,14 @@ export class UserRepository implements IUserRepository {
 
     return this.toDomain(deleted);
   }
+
+  async findByIds(ids: string[]): Promise<User[]> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { in: ids },
+      },
+    });
+
+    return users.map((user) => this.toDomain(user));
+  }
 }
