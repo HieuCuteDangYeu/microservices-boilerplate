@@ -111,4 +111,10 @@ export class UserRepository implements IUserRepository {
 
     return users.map((user) => this.toDomain(user));
   }
+
+  async countUsersByIds(ids: string[]): Promise<number> {
+    return this.prisma.user.count({
+      where: { id: { in: ids } },
+    });
+  }
 }

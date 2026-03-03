@@ -26,21 +26,23 @@ import { RoleAssignmentError } from '@user/domain/errors/role-assignment.error';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
 import { CreateUserUseCase } from '../../application/use-cases/create-user.use-case';
+import { ValidateUsersListUseCase } from './../../application/use-cases/validate-users-list.use-case';
 
 @Controller()
 export class UserController {
   constructor(
+    private readonly validateUserUseCase: ValidateUserUseCase,
     private readonly createUserUseCase: CreateUserUseCase,
     private readonly findAllUsersUseCase: FindAllUsersUseCase,
     private readonly updateUserUseCase: UpdateUserUseCase,
     private readonly deleteUserUseCase: DeleteUserUseCase,
-    private readonly validateUserUseCase: ValidateUserUseCase,
     private readonly verifyUserUseCase: VerifyUserUseCase,
     private readonly findUserByEmailUseCase: FindUserByEmailUseCase,
     private readonly createSocialUserUseCase: CreateSocialUserUseCase,
     private readonly updateUserAvatarUseCase: UpdateUserAvatarUseCase,
     private readonly findUserByIdUseCase: FindUserByIdUseCase,
     private readonly findUsersByIdsUseCase: FindUsersByIdsUseCase,
+    private readonly validateUsersListUseCase: ValidateUsersListUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -139,5 +141,12 @@ export class UserController {
   @MessagePattern('user.find_by_ids')
   async findByIds(@Payload() ids: string[]) {
     return await this.findUsersByIdsUseCase.execute(ids);
+  }
+
+  @MessagePattern('user.validate_list')
+  async handleValidateList(
+    @Payload() data: { ids: string[] },
+  ): Promise<boolean> {
+    return await this.validateUsersListUseCase.execute(data.ids);
   }
 }
