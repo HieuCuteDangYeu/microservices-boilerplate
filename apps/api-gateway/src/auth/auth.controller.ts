@@ -165,8 +165,16 @@ export class AuthController {
       );
     }
 
-    response.clearCookie('access_token');
-    response.clearCookie('refresh_token');
+    response.clearCookie('access_token', {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+    });
+    response.clearCookie('refresh_token', {
+      path: '/auth',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+    });
 
     return { message: 'Logged out successfully' };
   }
@@ -188,7 +196,7 @@ export class AuthController {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      path: '/auth/refresh',
+      path: '/auth',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
   }

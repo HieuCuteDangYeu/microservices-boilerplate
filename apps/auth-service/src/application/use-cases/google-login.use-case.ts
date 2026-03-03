@@ -1,3 +1,4 @@
+import type { IUserRoleRepository } from '@auth/domain/interfaces/user-role.repository,interface';
 import { GoogleProfile } from '@common/auth/interfaces/google-profile.interface';
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
@@ -12,6 +13,8 @@ export class GoogleLoginUseCase {
   constructor(
     @Inject('IUserService') private readonly userService: IUserService,
     @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
+    @Inject('IUserRoleRepository')
+    private readonly roleCache: IUserRoleRepository,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -63,7 +66,14 @@ export class GoogleLoginUseCase {
       }
 
       const roles = await this.authRepository.getUserRole(userId);
-      const payload = { sub: userId, email: user.email, roles };
+
+      await this.roleCache.setUserRoles(userId, roles);
+
+      const payload = {
+        sub: userId,
+        email: user.email,
+        picture: user.picture,
+      };
 
       const accessToken = await this.jwtService.signAsync(payload, {
         expiresIn: '15m',
