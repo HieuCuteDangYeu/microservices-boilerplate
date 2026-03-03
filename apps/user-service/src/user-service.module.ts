@@ -10,6 +10,7 @@ import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
+import { ValidateUsersListUseCase } from '@user/application/use-cases/validate-users-list.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { AuthServiceAdapter } from '@user/infrastructure/adapters/auth-service.adapter';
 import { UserController } from '@user/infrastructure/controllers/user.controller';
@@ -52,6 +53,7 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     UpdateUserAvatarUseCase,
     FindUserByIdUseCase,
     FindUsersByIdsUseCase,
+    ValidateUsersListUseCase,
     {
       provide: 'IUserRepository',
       useClass: UserRepository,
