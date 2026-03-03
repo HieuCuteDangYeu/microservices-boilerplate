@@ -171,7 +171,7 @@ export class AuthController {
       secure: process.env.NODE_ENV === 'production',
     });
     response.clearCookie('refresh_token', {
-      path: '/auth',
+      path: '/',
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
     });
