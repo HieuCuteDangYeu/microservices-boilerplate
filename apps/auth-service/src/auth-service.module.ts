@@ -8,9 +8,11 @@ import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { ResetPasswordUseCase } from '@auth/application/use-cases/reset-password.use-case';
+import { VerifyTokenUseCase } from '@auth/application/use-cases/verify-token.use-case';
 import { MailServiceAdapter } from '@auth/infrastructure/adapters/mail-service.adapter';
 import { RoleController } from '@auth/infrastructure/controllers/role.controller';
 import { TokenCleanupService } from '@auth/infrastructure/jobs/token-cleanup.service';
+import { RedisUserRoleRepository } from '@auth/infrastructure/repositories/redis-user-role.repository';
 import { RedisVerificationCodeRepository } from '@auth/infrastructure/repositories/redis-verification-code.repository';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -78,6 +80,7 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     AssignRoleUseCase,
     ForgotPasswordUseCase,
     ResetPasswordUseCase,
+    VerifyTokenUseCase,
     {
       provide: 'IAuthRepository',
       useClass: AuthRepository,
@@ -107,6 +110,10 @@ import { AuthRepository } from './infrastructure/repositories/auth.repository';
     {
       provide: 'IVerificationCodeRepository',
       useClass: RedisVerificationCodeRepository,
+    },
+    {
+      provide: 'IUserRoleRepository',
+      useClass: RedisUserRoleRepository,
     },
   ],
 })

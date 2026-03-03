@@ -6,6 +6,7 @@ import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { ResetPasswordUseCase } from '@auth/application/use-cases/reset-password.use-case';
+import { VerifyTokenUseCase } from '@auth/application/use-cases/verify-token.use-case';
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
 import { InvalidResetTokenError } from '@auth/domain/errors/invalid-reset-token.error';
 import { InvalidTokenError } from '@auth/domain/errors/invalid-token.error';
@@ -16,10 +17,8 @@ import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
 import { ResetPasswordDto } from '@common/auth/dtos/reset-password.dto';
 import type { GoogleProfile } from '@common/auth/interfaces/google-profile.interface';
-import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { Controller } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { RegisterUseCase } from '../../application/use-cases/register.use-case';
@@ -29,7 +28,6 @@ export class AuthController {
   constructor(
     private readonly registerUseCase: RegisterUseCase,
     private readonly loginUseCase: LoginUseCase,
-    private readonly jwtService: JwtService,
     private readonly confirmAccountUseCase: ConfirmAccountUseCase,
     private readonly resendVerificationUseCase: ResendVerificationUseCase,
     private readonly refreshTokenUseCase: RefreshTokenUseCase,
@@ -37,6 +35,7 @@ export class AuthController {
     private readonly googleLoginUseCase: GoogleLoginUseCase,
     private readonly forgotPasswordUseCase: ForgotPasswordUseCase,
     private readonly resetPasswordUseCase: ResetPasswordUseCase,
+    private readonly verifyTokenUseCase: VerifyTokenUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -86,20 +85,7 @@ export class AuthController {
 
   @MessagePattern('auth.verify_token')
   async verifyToken(@Payload() data: { token: string }) {
-    try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(data.token);
-
-      return {
-        id: payload.sub,
-        email: payload.email,
-        roles: payload.roles,
-      };
-    } catch {
-      throw new RpcException({
-        statusCode: 401,
-        message: 'Invalid Token',
-      });
-    }
+    return await this.verifyTokenUseCase.execute(data.token);
   }
 
   @MessagePattern('auth.confirm_account')

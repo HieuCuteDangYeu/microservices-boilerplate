@@ -1,16 +1,17 @@
+import type { IUserRoleRepository } from '@auth/domain/interfaces/user-role.repository,interface';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InvalidTokenError } from '../../domain/errors/invalid-token.error';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
-import type { IUserService } from '../../domain/interfaces/user-service.interface';
 
 @Injectable()
 export class RefreshTokenUseCase {
   constructor(
     @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
-    @Inject('IUserService') private readonly userService: IUserService,
+    @Inject('IUserRoleRepository')
+    private readonly roleCache: IUserRoleRepository,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -37,10 +38,12 @@ export class RefreshTokenUseCase {
 
       const roles = await this.authRepository.getUserRole(payload.sub);
 
+      await this.roleCache.setUserRoles(payload.sub, roles);
+
       const newPayload: JwtPayload = {
         sub: payload.sub,
         email: payload.email,
-        roles: roles,
+        picture: payload.picture ?? undefined,
       };
 
       const accessToken = await this.jwtService.signAsync(newPayload, {

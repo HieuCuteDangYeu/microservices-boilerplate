@@ -13,6 +13,7 @@ import {
 } from '@common/user/interfaces/update-user.types';
 import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '@gateway/auth/guards/ownership.guard';
 import { RolesGuard } from '@gateway/auth/guards/roles.guard';
 import {
   Body,
@@ -74,6 +75,7 @@ export class UserController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update a user' })
   @Roles(Role.ADMIN, Role.USER)
+  @UseGuards(OwnershipGuard)
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,

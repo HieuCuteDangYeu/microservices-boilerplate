@@ -1,4 +1,5 @@
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
+import type { IUserRoleRepository } from '@auth/domain/interfaces/user-role.repository,interface';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
@@ -12,6 +13,8 @@ export class LoginUseCase {
   constructor(
     @Inject('IUserService') private readonly userService: IUserService,
     @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
+    @Inject('IUserRoleRepository')
+    private readonly userRoleRepository: IUserRoleRepository,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -24,10 +27,12 @@ export class LoginUseCase {
 
     const roles = await this.authRepository.getUserRole(user.id);
 
+    await this.userRoleRepository.setUserRoles(user.id, roles);
+
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
-      roles: roles,
+      picture: user.picture ?? undefined,
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {
