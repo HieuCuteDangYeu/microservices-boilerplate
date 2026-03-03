@@ -216,7 +216,7 @@ export class AuthController {
     this.setCookies(res, accessToken, refreshToken);
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/api`);
+    res.redirect(`${frontendUrl}`);
   }
 
   @Post('forgot-password')

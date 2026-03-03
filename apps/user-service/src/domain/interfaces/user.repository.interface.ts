@@ -18,4 +18,5 @@ export interface IUserRepository {
   ): Promise<{ users: UserResponse[]; total: number }>;
   update(id: string, data: Partial<User>): Promise<User>;
   delete(id: string): Promise<User>;
+  countUsersByIds(ids: string[]): Promise<number>;
 }

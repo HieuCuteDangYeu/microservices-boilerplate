@@ -38,6 +38,16 @@
         "webpack": false
       }
     },
+    "conversation-service": {
+      "type": "application",
+      "root": "apps/conversation-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/conversation-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/conversation-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "mail-service": {
       "type": "application",
       "root": "apps/mail-service",
