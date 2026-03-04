@@ -1,4 +1,4 @@
-name: Deploy Microservices to Heroku
+name: Deploy Microservices to DigitalOcean
 
 on:
   push:
@@ -7,60 +7,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: api-gateway
-            app_name: hieu-api-gateway
-            dockerfile: ./apps/api-gateway/Dockerfile
-
-          - service: auth-service
-            app_name: hieu-auth-service
-            dockerfile: ./apps/auth-service/Dockerfile
-
-          - service: user-service
-            app_name: hieu-user-service
-            dockerfile: ./apps/user-service/Dockerfile
-
-          - service: payment-service
-            app_name: hieu-payment-service
-            dockerfile: ./apps/payment-service/Dockerfile
-
-          - service: media-service
-            app_name: hieu-media-service
-            dockerfile: ./apps/media-service/Dockerfile
-
-          - service: mail-service
-            app_name: hieu-mail-service
-            dockerfile: ./apps/mail-service/Dockerfile
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Create the directory if it doesn't exist
+            mkdir -p /var/www/microservices
+            cd /var/www/microservices
 
-      - name: Install Heroku CLI
-        run: |
-          curl https://cli-assets.heroku.com/install.sh | sh
+            # Check if it is already a git repository
+            if [ ! -d ".git" ]; then
+              echo "Cloning repository..."
+              git clone https://github.com/hieucutedangyeu/microservices-boilerplate.git .
+            else
+              echo "Pulling latest changes..."
+              git pull origin master
+            fi
 
-      - name: Login to Heroku Container Registry
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          echo $HEROKU_API_KEY | docker login --username=_ --password-stdin registry.heroku.com
-
-      - name: Build and Push Docker Image
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          docker build -t registry.heroku.com/${{ matrix.app_name }}/web -f ${{ matrix.dockerfile }} .
-
-          docker push registry.heroku.com/${{ matrix.app_name }}/web
-
-      - name: Release to Heroku
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          heroku container:release web -a ${{ matrix.app_name }}
+            # Rebuild and restart the Docker containers in the background
+            docker compose up -d --build
