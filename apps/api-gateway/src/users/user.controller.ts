@@ -57,7 +57,7 @@ export class UserController {
 
   @Get()
   @ApiOperation({ summary: 'Get all users' })
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.USER)
   async findAll(
     @Query() query: PaginationDto,
   ): Promise<PaginatedUsersResponse> {
