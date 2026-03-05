@@ -13,8 +13,9 @@ export class KeyMicroserviceController {
     try {
       await this.keyRepo.storeKeyBundle(data);
       return { success: true };
-    } catch (error) {
-      throw new RpcException(error);
+    } catch (err: unknown) {
+      const error = err as Error;
+      throw new RpcException(error.message);
     }
   }
 
@@ -22,11 +23,14 @@ export class KeyMicroserviceController {
   @MessagePattern('get_prekey_bundle')
   async handleGetPreKeyBundle(@Payload() data: { userId: string }) {
     try {
-      const bundle = await this.keyRepo.fetchKeyBundleForUser(data.userId);
+      const bundle = (await this.keyRepo.fetchKeyBundleForUser(
+        data.userId,
+      )) as UserKeyBundle | null;
 
       return bundle;
-    } catch (error) {
-      throw new RpcException(error);
+    } catch (err: unknown) {
+      const error = err as Error;
+      throw new RpcException(error.message);
     }
   }
 

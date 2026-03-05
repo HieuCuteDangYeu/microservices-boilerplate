@@ -96,6 +96,26 @@ services:
     networks:
       - microservices-net
 
+  conversation-service:
+    build:
+      context: .
+      dockerfile: ./apps/conversation-service/Dockerfile
+    container_name: conversation-service
+    restart: always
+    ports:
+      - '3005:3005'
+    environment:
+      - CONVERSATION_PORT=${CONVERSATION_PORT}
+      - CONVERSATION_DATABASE_URL=${CONVERSATION_DATABASE_URL}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - FRONTEND_URL=${FRONTEND_URL}
+    networks:
+      - microservices-net
+
 networks:
   microservices-net:
     driver: bridge

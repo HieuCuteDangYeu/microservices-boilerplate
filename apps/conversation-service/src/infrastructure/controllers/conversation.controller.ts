@@ -46,9 +46,10 @@ export class ConversationMicroserviceController {
 
       this.logger.log(`✅ [CreateConversation] Success: ${newConversation.id}`);
       return newConversation;
-    } catch (error) {
+    } catch (err: unknown) {
+      const error = err as Error;
       this.logger.error(`❌ [CreateConversation] Error: ${error.message}`);
-      throw new RpcException(error);
+      throw new RpcException(error.message);
     }
   }
 
@@ -71,9 +72,10 @@ export class ConversationMicroserviceController {
         Number(data.limit),
         data.cursor,
       );
-    } catch (error) {
+    } catch (err: unknown) {
+      const error = err as Error;
       this.logger.error(`❌ [GetMessages] Error: ${error.message}`);
-      throw new RpcException(error);
+      throw new RpcException(error.message);
     }
   }
 
@@ -82,9 +84,10 @@ export class ConversationMicroserviceController {
   async handleGetConversation(@Payload() data: { id: string; userId: string }) {
     try {
       return await this.getConversationUseCase.execute(data.id, data.userId);
-    } catch (error) {
+    } catch (err: unknown) {
+      const error = err as Error;
       this.logger.error(`❌ [GetConversation] Error: ${error.message}`);
-      throw new RpcException(error);
+      throw new RpcException(error.message);
     }
   }
 
@@ -120,9 +123,10 @@ export class ConversationMicroserviceController {
 
       // 👇 4. Trả về cả message và conversation (để API Gateway trả về Frontend nếu cần)
       return { message, conversation };
-    } catch (error) {
+    } catch (err: unknown) {
+      const error = err as Error;
       this.logger.error(`❌ [CreateMessage] Error: ${error.message}`);
-      throw new RpcException(error);
+      throw new RpcException(error.message);
     }
   }
 
@@ -141,9 +145,10 @@ export class ConversationMicroserviceController {
         Number(data.limit),
         data.cursor,
       );
-    } catch (error) {
-      this.logger.error(error);
-      throw new RpcException(error);
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(error.message);
+      throw new RpcException(error.message);
     }
   }
 }

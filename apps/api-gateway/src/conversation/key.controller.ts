@@ -1,4 +1,5 @@
 import { CurrentUser } from '@common/auth/decorators/current-user.decorator';
+import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { UploadKeyBundleDto } from '@common/conversation/dtos/upload-key-bundle.dto';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
@@ -24,7 +25,7 @@ export class GatewayKeyController {
 
   // 1. Upload Key Bundle (Khi user mới đăng ký hoặc cần bổ sung key)
   @Post()
-  uploadKeys(@CurrentUser() user: any, @Body() dto: UploadKeyBundleDto) {
+  uploadKeys(@CurrentUser() user: AuthUser, @Body() dto: UploadKeyBundleDto) {
     // Ép userId từ token vào payload để bảo mật (không cho upload hộ người khác)
     const payload = { ...dto, userId: user.id };
 
@@ -41,7 +42,7 @@ export class GatewayKeyController {
 
   // 3. Kiểm tra xem mình còn bao nhiêu key (để Client biết đường upload thêm)
   @Get('me/count')
-  countMyKeys(@CurrentUser() user: any) {
+  countMyKeys(@CurrentUser() user: AuthUser) {
     return this.conversationClient.send('count_prekeys', { userId: user.id });
   }
 }
