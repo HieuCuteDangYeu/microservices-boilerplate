@@ -38,7 +38,8 @@ export class PrismaKeyBundleRepository {
         },
       });
       this.logger.log(`Stored key bundle for user ${bundle.userId}`);
-    } catch (error) {
+    } catch (err: unknown) {
+      const error = err as Error;
       this.logger.error(`Error storing key bundle: ${error.message}`);
       throw new InternalServerErrorException('Could not store key bundle');
     }
@@ -85,7 +86,8 @@ export class PrismaKeyBundleRepository {
         registrationId: bundle.registrationId,
         preKey: preKey,
       };
-    } catch (error) {
+    } catch (err: unknown) {
+      const error = err as Error;
       this.logger.error(`Error fetching key bundle: ${error.message}`);
       throw new InternalServerErrorException('Could not fetch key bundle');
     }

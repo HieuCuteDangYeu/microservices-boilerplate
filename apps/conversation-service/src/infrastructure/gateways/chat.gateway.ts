@@ -27,7 +27,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userId = this.extractUserId(client);
 
     if (userId) {
-      client.join(userId);
+      void client.join(userId);
       console.log(`Client connected: ${client.id} (User: ${userId})`);
     } else {
       // Tùy logic: Có thể disconnect nếu không có userId
@@ -83,7 +83,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() conversationId: string,
     @ConnectedSocket() client: Socket,
   ) {
-    client.join(conversationId);
+    void client.join(conversationId);
     console.log(`Client ${client.id} joined room ${conversationId}`);
   }
 
@@ -155,8 +155,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     event: string,
     data: Record<string, any>,
   ) {
-    const toUserId = data['toUserId']; // Truy cập an toàn qua string key
-    if (typeof toUserId === 'string') {
+    const toUserId = String(data['toUserId']); // Truy cập an toàn qua string key
+    if (toUserId) {
       const senderId = this.extractUserId(client);
       client.to(toUserId).emit(event, { ...data, fromUserId: senderId });
     }

@@ -63,7 +63,7 @@ export class ConversationController {
       'create_conversation',
       payload,
     );
-    return await lastValueFrom(source$);
+    return (await lastValueFrom(source$)) as ConversationDto;
   }
 
   @Get()
@@ -103,7 +103,7 @@ export class ConversationController {
       limit: limitNumber,
       cursor: cursor, // 👈 Quan trọng: Truyền cursor đi
     });
-    return await lastValueFrom(source$);
+    return (await lastValueFrom(source$)) as MessageDto[];
   }
 
   // --- 3. LẤY CHI TIẾT CONVERSATION ---
@@ -120,7 +120,7 @@ export class ConversationController {
       id: id,
       userId: user.id,
     });
-    return await lastValueFrom(source$);
+    return (await lastValueFrom(source$)) as ConversationDto;
   }
 
   // --- 4. GỬI TIN NHẮN (HTTP Fallback) ---
@@ -140,6 +140,6 @@ export class ConversationController {
     };
 
     const source$ = this.conversationClient.send('create_message', payload);
-    return await lastValueFrom(source$);
+    return (await lastValueFrom(source$)) as MessageDto;
   }
 }

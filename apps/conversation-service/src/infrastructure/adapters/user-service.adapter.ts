@@ -18,8 +18,9 @@ export class UserServiceAdapter implements IUserService {
         .send<boolean>('user.validate_list', { ids }) // 👈 Gọi đúng Pattern mới
         .pipe(
           timeout(5000), // Quá 5s thì tự cắt
-          catchError((err) => {
-            this.logger.error(`RPC Error [validateUsers]: ${err.message}`);
+          catchError((err: unknown) => {
+            const error = err as Error;
+            this.logger.error(`RPC Error [validateUsers]: ${error.message}`);
             return of(false); // Lỗi thì trả về false (An toàn)
           }),
         ),
@@ -33,8 +34,9 @@ export class UserServiceAdapter implements IUserService {
         .send<ValidateUserResponse | null>('user.find_by_ids', ids) // ✅ ĐỔI THÀNH OBJECT { ids } CHO ĐỒNG BỘ
         .pipe(
           timeout(5000),
-          catchError((err) => {
-            this.logger.error(`RPC Error [findUsersByIds]: ${err.message}`);
+          catchError((err: unknown) => {
+            const error = err as Error;
+            this.logger.error(`RPC Error [findUsersByIds]: ${error.message}`);
             return of(null);
           }),
         ),

@@ -122,10 +122,11 @@ export class PrismaChatRepository implements IChatRepository {
     // BƯỚC 4: Cập nhật Redis dạng "Fire-and-Forget"
     // KHÔNG dùng await ở đây. Để nó chạy ngầm, lỗi thì log lại sau.
     // User nhận phản hồi ngay lập tức sau Bước 3.
-    this.updateRedisInBackground(domainMsg).catch((err) => {
+    this.updateRedisInBackground(domainMsg).catch((err: unknown) => {
+      const error = err as Error;
       this.logger.error(
         `Failed to update cache for msg ${domainMsg.id}`,
-        err.stack,
+        error.stack,
       );
     });
 
@@ -294,9 +295,10 @@ export class PrismaChatRepository implements IChatRepository {
       } else if (
         response &&
         'users' in response &&
-        Array.isArray((response as any).users)
+        Array.isArray((response as Record<string, unknown>).users)
       ) {
-        usersList = (response as any).users as ChatParticipant[];
+        usersList = (response as Record<string, unknown>)
+          .users as ChatParticipant[];
       }
 
       // Tạo Map để lookup cho nhanh
@@ -354,9 +356,10 @@ export class PrismaChatRepository implements IChatRepository {
       } else if (
         response &&
         'users' in response &&
-        Array.isArray((response as any).users)
+        Array.isArray((response as Record<string, unknown>).users)
       ) {
-        usersList = (response as any).users as ChatParticipant[];
+        usersList = (response as Record<string, unknown>)
+          .users as ChatParticipant[];
       }
 
       usersList.forEach((u) => {
