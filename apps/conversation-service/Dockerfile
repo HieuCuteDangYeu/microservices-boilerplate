@@ -17,4 +17,4 @@ RUN npx prisma generate --schema=./apps/conversation-service/prisma/schema.prism
 
 RUN pnpm run build conversation-service
 
-CMD ["node", "dist/apps/conversation-service/main.js"]
+CMD ["node", "dist/apps/conversation-service/apps/conversation-service/src/main.js"]
