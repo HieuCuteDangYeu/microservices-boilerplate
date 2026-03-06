@@ -29,7 +29,7 @@ COPY apps/user-service/prisma ./apps/user-service/prisma/
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
-RUN npx prisma generate --schema=./apps/user-service/prisma/schema.prisma
+RUN npx prisma@5.22.0 generate --schema=./apps/user-service/prisma/schema.prisma
 
 COPY --from=builder /usr/src/app/dist ./dist
 
