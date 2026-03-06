@@ -1,6 +1,5 @@
 import { AuthController } from '@gateway/auth/auth.controller';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
-import { GoogleStrategy } from '@gateway/auth/strategies/google.strategy';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
 import { MediaController } from '@gateway/media/media.controller';
@@ -80,6 +79,6 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ConversationController,
     GatewayKeyController,
   ],
-  providers: [JwtAuthGuard, GoogleStrategy],
+  providers: [JwtAuthGuard],
 })
 export class ApiGatewayModule {}

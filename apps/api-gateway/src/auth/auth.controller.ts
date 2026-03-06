@@ -4,6 +4,7 @@ import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
 import { ResetPasswordDto } from '@common/auth/dtos/reset-password.dto';
+import { VerifyGoogleTokenDto } from '@common/auth/dtos/verify-google-token.dto';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
@@ -23,7 +24,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { AuthGuard } from '@nestjs/passport';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { catchError, lastValueFrom } from 'rxjs';
@@ -179,6 +179,27 @@ export class AuthController {
     return { message: 'Logged out successfully' };
   }
 
+  @Post('google/verify')
+  @ApiOperation({
+    summary: 'Verify Google ID token from Web/Mobile and set cookies',
+  })
+  async verifyGoogleToken(
+    @Body() dto: VerifyGoogleTokenDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const tokens = await lastValueFrom(
+      this.authClient.send<TokenResponse>('auth.verify_google_token', dto).pipe(
+        catchError((error) => {
+          this.handleMicroserviceError(error);
+        }),
+      ),
+    );
+
+    this.setCookies(response, tokens.accessToken, tokens.refreshToken);
+
+    return { message: 'Google login successful' };
+  }
+
   private setCookies(
     response: Response,
     accessToken: string,
@@ -199,24 +220,6 @@ export class AuthController {
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
-  }
-
-  @Get('google')
-  @UseGuards(AuthGuard('google'))
-  async googleAuth() {}
-
-  @Get('google/callback')
-  @UseGuards(AuthGuard('google'))
-  googleAuthRedirect(
-    @Req() req: AuthenticatedRequest,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const { accessToken, refreshToken } = req.user as unknown as TokenResponse;
-
-    this.setCookies(res, accessToken, refreshToken);
-
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/chat`);
   }
 
   @Post('forgot-password')

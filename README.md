@@ -117,8 +117,8 @@ Create a `.env` file in the root directory:
 # API Gateway
 PORT=3000
 GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+GOOGLE_IOS_CLIENT_ID=your_google_client_id
+GOOGLE_ANDROID_CLIENT_ID=your_google_client_id
 FRONTEND_URL=http://localhost:3000
 
 # Database URLs

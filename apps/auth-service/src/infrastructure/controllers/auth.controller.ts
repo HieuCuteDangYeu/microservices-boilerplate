@@ -6,6 +6,7 @@ import { LogoutUseCase } from '@auth/application/use-cases/logout.use-case';
 import { RefreshTokenUseCase } from '@auth/application/use-cases/refresh-token.use-case';
 import { ResendVerificationUseCase } from '@auth/application/use-cases/resend-verification.use-case';
 import { ResetPasswordUseCase } from '@auth/application/use-cases/reset-password.use-case';
+import { VerifyGoogleTokenUseCase } from '@auth/application/use-cases/verify-google-token.use-case';
 import { VerifyTokenUseCase } from '@auth/application/use-cases/verify-token.use-case';
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
 import { InvalidResetTokenError } from '@auth/domain/errors/invalid-reset-token.error';
@@ -16,6 +17,7 @@ import { LoginDto } from '@common/auth/dtos/login.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
 import { ResetPasswordDto } from '@common/auth/dtos/reset-password.dto';
+import { VerifyGoogleTokenDto } from '@common/auth/dtos/verify-google-token.dto';
 import type { GoogleProfile } from '@common/auth/interfaces/google-profile.interface';
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { Controller } from '@nestjs/common';
@@ -36,6 +38,7 @@ export class AuthController {
     private readonly forgotPasswordUseCase: ForgotPasswordUseCase,
     private readonly resetPasswordUseCase: ResetPasswordUseCase,
     private readonly verifyTokenUseCase: VerifyTokenUseCase,
+    private readonly verifyGoogleTokenUseCase: VerifyGoogleTokenUseCase,
   ) {}
 
   @MessagePattern('auth.register')
@@ -160,6 +163,19 @@ export class AuthController {
       throw new RpcException({
         statusCode: 500,
         message: 'Internal Server Error',
+      });
+    }
+  }
+
+  @MessagePattern('auth.verify_google_token')
+  async verifyGoogleToken(@Payload() dto: VerifyGoogleTokenDto) {
+    try {
+      return await this.verifyGoogleTokenUseCase.execute(dto.idToken);
+    } catch (error) {
+      console.error(error);
+      throw new RpcException({
+        statusCode: 401,
+        message: 'Invalid Google token',
       });
     }
   }
