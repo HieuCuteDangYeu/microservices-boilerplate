@@ -84,7 +84,6 @@ services:
     build:
       context: .
       dockerfile: ./apps/mail-service/Dockerfile
-    container_name: mail-service
     restart: always
     environment:
       - WEBHOOK_PORT=3006
