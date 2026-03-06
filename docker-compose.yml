@@ -1,9 +1,9 @@
 services:
   api-gateway:
+    image: ${DOCKERHUB_USERNAME}/api-gateway:latest
     build:
       context: .
       dockerfile: ./apps/api-gateway/Dockerfile
-    container_name: api-gateway
     restart: always
     ports:
       - '3000:3000'
@@ -14,10 +14,10 @@ services:
       - microservices-net
 
   user-service:
+    image: ${DOCKERHUB_USERNAME}/user-service:latest
     build:
       context: .
       dockerfile: ./apps/user-service/Dockerfile
-    container_name: user-service
     restart: always
     environment:
       - USER_DATABASE_URL=${USER_DATABASE_URL}
@@ -26,10 +26,10 @@ services:
       - microservices-net
 
   auth-service:
+    image: ${DOCKERHUB_USERNAME}/auth-service:latest
     build:
       context: .
       dockerfile: ./apps/auth-service/Dockerfile
-    container_name: auth-service
     restart: always
     environment:
       - AUTH_DATABASE_URL=${AUTH_DATABASE_URL}
@@ -49,10 +49,10 @@ services:
       - microservices-net
 
   media-service:
+    image: ${DOCKERHUB_USERNAME}/media-service:latest
     build:
       context: .
       dockerfile: ./apps/media-service/Dockerfile
-    container_name: media-service
     restart: always
     environment:
       - MEDIA_DATABASE_URL=${MEDIA_DATABASE_URL}
@@ -65,10 +65,10 @@ services:
       - microservices-net
 
   payment-service:
+    image: ${DOCKERHUB_USERNAME}/payment-service:latest
     build:
       context: .
       dockerfile: ./apps/payment-service/Dockerfile
-    container_name: payment-service
     restart: always
     ports:
       - '3006:3000'
@@ -81,6 +81,7 @@ services:
       - microservices-net
 
   mail-service:
+    image: ${DOCKERHUB_USERNAME}/mail-service:latest
     build:
       context: .
       dockerfile: ./apps/mail-service/Dockerfile
@@ -97,10 +98,10 @@ services:
       - microservices-net
 
   conversation-service:
+    image: ${DOCKERHUB_USERNAME}/conversation-service:latest
     build:
       context: .
       dockerfile: ./apps/conversation-service/Dockerfile
-    container_name: conversation-service
     restart: always
     ports:
       - '3005:3005'

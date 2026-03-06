@@ -1,5 +1,30 @@
+# Dependency directories
 node_modules
+/.pnp
+.pnp.js
+
+# Build outputs
 dist
+coverage
 build
+
+# Docker and OS files
+.dockerignore
+Dockerfile
+docker-compose*.yml
+.DS_Store
+Thumbs.db
+
+# Git
 .git
+.gitignore
+
+# Env files (Security!)
 .env
+.env.*
+!.env.example
+
+# NPM/PNPM logs
+npm-debug.log
+yarn-error.log
+pnpm-debug.log

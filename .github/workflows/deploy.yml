@@ -7,9 +7,42 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          [
+            api-gateway,
+            user-service,
+            auth-service,
+            media-service,
+            payment-service,
+            mail-service,
+            conversation-service,
+          ]
 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -18,18 +51,17 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Create the directory if it doesn't exist
             mkdir -p /var/www/microservices
             cd /var/www/microservices
 
-            # Check if it is already a git repository
             if [ ! -d ".git" ]; then
-              echo "Cloning repository..."
               git clone https://github.com/hieucutedangyeu/microservices-boilerplate.git .
             else
-              echo "Pulling latest changes..."
               git pull origin master
             fi
 
-            # Rebuild and restart the Docker containers in the background
-            docker compose up -d --build
+            export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+
+            docker compose pull
+
+            docker compose up -d --remove-orphans
