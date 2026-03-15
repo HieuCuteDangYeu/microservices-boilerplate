@@ -10,14 +10,17 @@ export class S3Service {
   private readonly bucketName: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.bucketName = this.configService.getOrThrow<string>('AWS_BUCKET_NAME');
+    this.bucketName = this.configService.getOrThrow<string>('R2_BUCKET_NAME');
+    const accountId = this.configService.getOrThrow<string>('R2_ACCOUNT_ID');
 
     this.s3Client = new S3Client({
-      region: this.configService.getOrThrow<string>('AWS_REGION'),
+      region: 'auto',
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+      forcePathStyle: true,
       credentials: {
-        accessKeyId: this.configService.getOrThrow<string>('AWS_ACCESS_KEY_ID'),
+        accessKeyId: this.configService.getOrThrow<string>('R2_ACCESS_KEY_ID'),
         secretAccessKey: this.configService.getOrThrow<string>(
-          'AWS_SECRET_ACCESS_KEY',
+          'R2_SECRET_ACCESS_KEY',
         ),
       },
     });

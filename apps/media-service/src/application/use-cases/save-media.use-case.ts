@@ -7,8 +7,7 @@ import type { IUserIntegrationService } from '../../domain/interfaces/user-integ
 
 @Injectable()
 export class SaveMediaUseCase {
-  private readonly bucketName: string;
-  private readonly region: string;
+  private readonly publicDomain: string;
 
   constructor(
     @Inject('IMediaRepository')
@@ -17,12 +16,13 @@ export class SaveMediaUseCase {
     private readonly userIntegration: IUserIntegrationService,
     private readonly configService: ConfigService,
   ) {
-    this.bucketName = this.configService.getOrThrow('AWS_BUCKET_NAME');
-    this.region = this.configService.getOrThrow('AWS_REGION');
+    this.publicDomain =
+      this.configService.getOrThrow<string>('R2_PUBLIC_DOMAIN');
   }
 
   async execute(userId: string, key: string, mimeType: string): Promise<Media> {
-    const publicUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${key}`;
+    const baseUrl = this.publicDomain.replace(/\/$/, '');
+    const publicUrl = `${baseUrl}/${key}`;
 
     const newMedia = new Media(
       randomUUID(),
