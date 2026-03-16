@@ -13,7 +13,7 @@ export class MailServiceAdapter implements IMailService {
   sendConfirmationEmail(email: string, token: string): void {
     const frontendUrl = this.config.get<string>('FRONTEND_URL');
     const templateId = this.config.get<string>(
-      'SENDGRID_CONFIRM_ACCOUNT_TEMPLATE_ID',
+      'RESEND_CONFIRM_ACCOUNT_TEMPLATE_ID',
     );
 
     const confirmationUrl = `${frontendUrl}/confirm?token=${token}`;
@@ -31,7 +31,7 @@ export class MailServiceAdapter implements IMailService {
 
   sendPasswordResetEmail(email: string, token: string): void {
     const templateId = this.config.get<string>(
-      'SENDGRID_RESET_PASSWORD_TEMPLATE_ID',
+      'RESEND_RESET_PASSWORD_TEMPLATE_ID',
     );
 
     const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;

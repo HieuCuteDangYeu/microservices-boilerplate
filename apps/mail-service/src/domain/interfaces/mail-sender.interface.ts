@@ -3,6 +3,6 @@ export interface IMailSender {
     to: string,
     subject: string,
     template: string,
-    context: any,
+    context: Record<string, unknown>,
   ): Promise<void>;
 }

@@ -1,24 +1,34 @@
 import { SendMailDto } from '@common/mail/dtos/send-mail.dto';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Controller } from '@nestjs/common';
-import { EventPattern, Payload } from '@nestjs/microservices';
-import { Queue } from 'bullmq';
+import { Controller, Logger } from '@nestjs/common';
+import { Ctx, EventPattern, Payload, RmqContext } from '@nestjs/microservices';
+import type { Channel, Message } from 'amqplib';
+import { SendMailUseCase } from '../../application/use-cases/send-mail.use-case';
 
 @Controller()
 export class MailController {
-  constructor(@InjectQueue('mail_queue') private readonly mailQueue: Queue) {}
+  private readonly logger = new Logger(MailController.name);
+
+  constructor(private readonly sendMailUseCase: SendMailUseCase) {}
 
   @EventPattern('mail.send')
-  async handleSendMail(@Payload() data: SendMailDto) {
-    console.log(`Received request to email: ${data.to}`);
+  async handleMailSend(
+    @Payload() data: SendMailDto,
+    @Ctx() context: RmqContext,
+  ) {
+    const channel = context.getChannelRef() as Channel;
+    const originalMsg = context.getMessage() as Message;
 
-    await this.mailQueue.add('send_email', data, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 5000,
-      },
-      removeOnComplete: true,
-    });
+    try {
+      this.logger.log(`Received mail.send event for: ${data.to}`);
+
+      await this.sendMailUseCase.execute(data);
+
+      this.logger.log(`Successfully processed email to: ${data.to}`);
+
+      channel.ack(originalMsg);
+    } catch (error) {
+      this.logger.error(`Failed to process mail for: ${data.to}`, error);
+      channel.nack(originalMsg, false, false);
+    }
   }
 }
