@@ -25,6 +25,7 @@ export class MailServiceAdapter implements IMailService {
       context: {
         name: email,
         url: confirmationUrl,
+        otp: token,
       },
     });
   }
@@ -43,6 +44,7 @@ export class MailServiceAdapter implements IMailService {
       context: {
         name: email,
         url: resetLink,
+        otp: token,
       },
     });
   }

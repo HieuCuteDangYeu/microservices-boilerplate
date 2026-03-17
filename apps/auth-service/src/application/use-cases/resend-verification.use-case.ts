@@ -1,6 +1,6 @@
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
 import { Inject, Injectable } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { randomInt } from 'crypto';
 import type { IMailService } from '../../domain/interfaces/mail-service.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
 import type { IVerificationCodeRepository } from '../../domain/interfaces/verification-code.repository.interface';
@@ -25,9 +25,9 @@ export class ResendVerificationUseCase {
       return { message: 'Account is already verified' };
     }
 
-    const newToken = randomBytes(32).toString('hex');
+    const newToken = randomInt(100000, 1000000).toString();
 
-    await this.verificationRepo.save(newToken, user.id, 86400);
+    await this.verificationRepo.save(newToken, user.id, 900);
     this.mailService.sendConfirmationEmail(user.email, newToken);
 
     return { message: 'Verification email resent successfully' };

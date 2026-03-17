@@ -3,7 +3,7 @@ import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import { Inject, Injectable } from '@nestjs/common';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
-import { randomBytes } from 'crypto';
+import { randomInt } from 'crypto';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 import type { IMailService } from '../../domain/interfaces/mail-service.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
@@ -27,8 +27,8 @@ export class RegisterUseCase {
 
       await this.authRepository.assignRole(result.id, 'USER');
 
-      const token = randomBytes(32).toString('hex');
-      await this.verificationRepo.save(token, result.id, 86400);
+      const token = randomInt(100000, 1000000).toString();
+      await this.verificationRepo.save(token, result.id, 900);
 
       this.mailService.sendConfirmationEmail(result.email, token);
 

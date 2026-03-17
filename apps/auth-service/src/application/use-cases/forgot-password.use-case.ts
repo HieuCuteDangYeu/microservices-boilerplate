@@ -1,6 +1,6 @@
 import { ForgotPasswordDto } from '@common/auth/dtos/forgot-password.dto';
 import { Inject, Injectable } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { randomInt } from 'crypto';
 import type { IMailService } from '../../domain/interfaces/mail-service.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
 import type { IVerificationCodeRepository } from '../../domain/interfaces/verification-code.repository.interface';
@@ -19,7 +19,7 @@ export class ForgotPasswordUseCase {
 
     if (!user) return { message: 'If email exists, reset instructions sent.' };
 
-    const token = randomBytes(32).toString('hex');
+    const token = randomInt(100000, 1000000).toString();
 
     await this.redisRepository.save(`reset_password:${token}`, user.id, 900);
 
