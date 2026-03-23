@@ -19,7 +19,6 @@ export class MediaController {
     try {
       return await this.getPresignedUrlUseCase.execute(
         data.userId,
-        data.fileName,
         data.fileType,
       );
     } catch (error) {

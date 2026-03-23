@@ -29,14 +29,16 @@
       "@media/*": ["apps/media-service/src/*"],
       "@payment/*": ["apps/payment-service/src/*"],
       "@prisma/auth-client": ["node_modules/@prisma/auth-client"],
+      "@prisma/conversation-client": [
+        "node_modules/@prisma/conversation-client"
+      ],
       "@prisma/mail-client": ["node_modules/@prisma/mail-client"],
       "@prisma/media-client": ["node_modules/@prisma/media-client"],
       "@prisma/payment-client": ["node_modules/@prisma/payment-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
-      "@prisma/conversation-client": [
-        "node_modules/@prisma/conversation-client"
-      ],
-      "@user/*": ["apps/user-service/src/*"]
+      "@user/*": ["apps/user-service/src/*"],
+      "@content/*": ["apps/content-service/src/*"],
+      "@prisma/content-client": ["node_modules/@prisma/content-client"]
     }
   }
 }

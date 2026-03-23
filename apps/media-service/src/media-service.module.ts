@@ -30,7 +30,6 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   providers: [
     GetPresignedUrlUseCase,
     S3Service,
-    GetPresignedUrlUseCase,
     SaveMediaUseCase,
     {
       provide: 'IMediaRepository',

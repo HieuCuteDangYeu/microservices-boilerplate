@@ -26,10 +26,14 @@ export class S3Service {
     });
   }
 
-  async generatePresignedUrl(userId: string, contentType: string) {
+  async generatePresignedUrl(
+    userId: string,
+    contentType: string,
+    folder: string = 'avatars',
+  ) {
     try {
       const fileExtension = contentType.split('/')[1];
-      const key = `avatars/${userId}/${randomUUID()}.${fileExtension}`;
+      const key = `${folder}/${userId}/${randomUUID()}.${fileExtension}`;
 
       const command = new PutObjectCommand({
         Bucket: this.bucketName,

@@ -43,7 +43,6 @@ export class MediaController {
           expiresIn: number;
         }>('media.get_presigned_url', {
           userId: request.user!.id,
-          fileName: body.fileName,
           fileType: body.fileType,
         })
         .pipe(

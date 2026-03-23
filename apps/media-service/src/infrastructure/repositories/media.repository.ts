@@ -33,4 +33,23 @@ export class MediaRepository
       savedRecord.createdAt,
     );
   }
+
+  async findById(id: string): Promise<Media | null> {
+    const record = await this.media.findUnique({
+      where: { id },
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return new Media(
+      record.id,
+      record.userId,
+      record.key,
+      record.url,
+      record.type,
+      record.createdAt,
+    );
+  }
 }

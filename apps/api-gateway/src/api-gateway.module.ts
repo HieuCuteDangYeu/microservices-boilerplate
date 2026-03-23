@@ -1,5 +1,6 @@
 import { AuthController } from '@gateway/auth/auth.controller';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { ContentController } from '@gateway/content/content.controller';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
 import { MediaController } from '@gateway/media/media.controller';
@@ -69,6 +70,15 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
           queueOptions: { durable: true },
         },
       },
+      {
+        name: 'CONTENT_SERVICE',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+          queue: 'content_queue',
+          queueOptions: { durable: true },
+        },
+      },
     ]),
   ],
   controllers: [
@@ -78,6 +88,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     PaymentController,
     ConversationController,
     GatewayKeyController,
+    ContentController,
   ],
   providers: [JwtAuthGuard],
 })
