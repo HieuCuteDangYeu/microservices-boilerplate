@@ -44,7 +44,8 @@
       "entryFile": "main",
       "sourceRoot": "apps/content-service/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/content-service/tsconfig.app.json"
+        "tsConfigPath": "apps/content-service/tsconfig.app.json",
+        "webpack": false
       }
     },
     "conversation-service": {
