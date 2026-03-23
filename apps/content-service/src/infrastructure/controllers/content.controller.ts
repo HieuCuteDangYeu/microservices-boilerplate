@@ -1,11 +1,20 @@
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
+import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import {
+  EventPattern,
+  MessagePattern,
+  Payload,
+  RpcException,
+} from '@nestjs/microservices';
 import { CreateReelUseCase } from '../../application/use-cases/create-reel.use-case';
 
 @Controller()
 export class ContentController {
-  constructor(private readonly createReelUseCase: CreateReelUseCase) {}
+  constructor(
+    private readonly createReelUseCase: CreateReelUseCase,
+    private readonly updateReelStatusUseCase: UpdateReelStatusUseCase,
+  ) {}
 
   @MessagePattern('content.create_reel')
   async createReel(
@@ -20,5 +29,19 @@ export class ContentController {
           : 'An unexpected error occurred while creating the reel',
       );
     }
+  }
+
+  @EventPattern('reel.processing_completed')
+  async handleProcessingCompleted(
+    @Payload() data: { reelId: string; status: 'COMPLETED' },
+  ) {
+    await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+  }
+
+  @EventPattern('reel.processing_failed')
+  async handleProcessingFailed(
+    @Payload() data: { reelId: string; status: 'FAILED' },
+  ) {
+    await this.updateReelStatusUseCase.execute(data.reelId, data.status);
   }
 }

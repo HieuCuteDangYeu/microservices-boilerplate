@@ -88,6 +88,16 @@
         "webpack": false
       }
     },
+    "processing-service": {
+      "type": "application",
+      "root": "apps/processing-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/processing-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/processing-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "user-service": {
       "type": "application",
       "root": "apps/user-service",

@@ -24,11 +24,13 @@
     "paths": {
       "@auth/*": ["apps/auth-service/src/*"],
       "@common/*": ["libs/common/src/*"],
+      "@content/*": ["apps/content-service/src/*"],
       "@gateway/*": ["apps/api-gateway/src/*"],
       "@mail/*": ["apps/mail-service/src/*"],
       "@media/*": ["apps/media-service/src/*"],
       "@payment/*": ["apps/payment-service/src/*"],
       "@prisma/auth-client": ["node_modules/@prisma/auth-client"],
+      "@prisma/content-client": ["node_modules/@prisma/content-client"],
       "@prisma/conversation-client": [
         "node_modules/@prisma/conversation-client"
       ],
@@ -37,8 +39,7 @@
       "@prisma/payment-client": ["node_modules/@prisma/payment-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@user/*": ["apps/user-service/src/*"],
-      "@content/*": ["apps/content-service/src/*"],
-      "@prisma/content-client": ["node_modules/@prisma/content-client"]
+      "@processing/*": ["apps/processing-service/src/*"]
     }
   }
 }

@@ -1,3 +1,4 @@
+import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
@@ -26,6 +27,7 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
   controllers: [ContentController],
   providers: [
     CreateReelUseCase,
+    UpdateReelStatusUseCase,
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,
