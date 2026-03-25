@@ -1,5 +1,6 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateUserDto } from '@common/user/dtos/create-user.dto';
+import { UpdateAvatarDto } from '@common/user/dtos/update-avatar.dto';
 import { UpdateUserDto } from '@common/user/dtos/update-user.dto';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import {
@@ -12,6 +13,7 @@ import {
   UpdateUserResponse,
 } from '@common/user/interfaces/update-user.types';
 import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
+import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import { OwnershipGuard } from '@gateway/auth/guards/ownership.guard';
 import { RolesGuard } from '@gateway/auth/guards/roles.guard';
@@ -27,12 +29,22 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { catchError, lastValueFrom } from 'rxjs';
 import { PaginationDto } from './dto/pagination.dto';
+
+export interface MicroserviceUser {
+  id: string;
+  email: string;
+  name?: string | null;
+  avatarKey?: string | null;
+  password?: string | null;
+  [key: string]: unknown;
+}
 
 @ApiTags('Users')
 @Controller('users')
@@ -89,6 +101,26 @@ export class UserController {
         }),
       ),
     );
+  }
+
+  @Patch('me/avatar')
+  @Roles(Role.ADMIN, Role.USER)
+  @ApiOperation({ summary: 'Update user avatar using an uploaded R2 key' })
+  @UseGuards(OwnershipGuard)
+  async updateAvatar(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: UpdateAvatarDto,
+  ) {
+    const updatedUser = await lastValueFrom(
+      this.userClient
+        .send<MicroserviceUser>('user.update_avatar', {
+          userId: request.user!.id,
+          payload: body,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return updatedUser;
   }
 
   @Delete(':id')
