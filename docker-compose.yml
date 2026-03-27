@@ -10,6 +10,7 @@ services:
     environment:
       - PORT=3000
       - RABBITMQ_URL=${RABBITMQ_URL}
+      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
     networks:
       - microservices-net
 
@@ -22,7 +23,7 @@ services:
     environment:
       - USER_DATABASE_URL=${USER_DATABASE_URL}
       - RABBITMQ_URL=${RABBITMQ_URL}
-      - R2_ENDPOINT=${R2_ENDPOINT}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
@@ -59,7 +60,7 @@ services:
     restart: always
     environment:
       - RABBITMQ_URL=${RABBITMQ_URL}
-      - R2_ENDPOINT=${R2_ENDPOINT}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
@@ -75,7 +76,7 @@ services:
     restart: always
     environment:
       - RABBITMQ_URL=${RABBITMQ_URL}
-      - R2_ENDPOINT=${R2_ENDPOINT}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}

@@ -9,7 +9,7 @@ export class CreateReelUseCase {
   constructor(
     @Inject('IContentRepository')
     private readonly contentRepository: IContentRepository,
-    @Inject('CONTENT_RMQ') private readonly messageBroker: ClientProxy,
+    @Inject('PROCESSING_SERVICE') private readonly messageBroker: ClientProxy,
   ) {}
 
   async execute(userId: string, payload: CreateReelDto) {

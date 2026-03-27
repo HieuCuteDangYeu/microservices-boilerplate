@@ -12,6 +12,10 @@ export class ContentRepository
     await this.$connect();
   }
 
+  async onModuleDestroy() {
+    await this.$disconnect();
+  }
+
   async createReel(reel: Partial<Reel>): Promise<Reel> {
     const savedRecord = await this.reel.create({
       data: {

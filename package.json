@@ -45,7 +45,7 @@
     "prisma:generate:payment": "prisma generate --schema=apps/payment-service/prisma/schema.prisma",
     "prisma:generate:conversation": "prisma generate --schema=apps/conversation-service/prisma/schema.prisma",
     "prisma:generate:content": "prisma generate --schema=apps/content-service/prisma/schema.prisma",
-    "prisma:generate:all": "pnpm run prisma:generate:user && pnpm run prisma:generate:auth && pnpm run prisma:generate:media && pnpm run prisma:generate:payment && pnpm run prisma:generate:content",
+    "prisma:generate:all": "pnpm run prisma:generate:user && pnpm run prisma:generate:auth && pnpm run prisma:generate:payment && pnpm run prisma:generate:content",
     "migrate:user": "cd apps/user-service && prisma migrate dev",
     "migrate:auth": "cd apps/auth-service && prisma migrate dev",
     "migrate:payment": "cd apps/payment-service && prisma migrate dev",
