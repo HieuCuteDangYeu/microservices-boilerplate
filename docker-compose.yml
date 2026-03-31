@@ -10,6 +10,7 @@ services:
     environment:
       - PORT=3000
       - RABBITMQ_URL=${RABBITMQ_URL}
+      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
     networks:
       - microservices-net
 
@@ -22,6 +23,11 @@ services:
     environment:
       - USER_DATABASE_URL=${USER_DATABASE_URL}
       - RABBITMQ_URL=${RABBITMQ_URL}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
     networks:
       - microservices-net
 
@@ -53,13 +59,44 @@ services:
       dockerfile: ./apps/media-service/Dockerfile
     restart: always
     environment:
-      - MEDIA_DATABASE_URL=${MEDIA_DATABASE_URL}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
       - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+    networks:
+      - microservices-net
+
+  processing-service:
+    image: ${DOCKERHUB_USERNAME}/processing-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/processing-service/Dockerfile
+    restart: always
+    environment:
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+    networks:
+      - microservices-net
+
+  content-service:
+    image: ${DOCKERHUB_USERNAME}/content-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/content-service/Dockerfile
+    restart: always
+    environment:
+      - CONTENT_DATABASE_URL=${CONTENT_DATABASE_URL}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
     networks:
       - microservices-net
 

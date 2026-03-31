@@ -38,6 +38,16 @@
         "webpack": false
       }
     },
+    "content-service": {
+      "type": "application",
+      "root": "apps/content-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/content-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/content-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "conversation-service": {
       "type": "application",
       "root": "apps/conversation-service",
@@ -75,6 +85,16 @@
       "sourceRoot": "apps/payment-service/src",
       "compilerOptions": {
         "tsConfigPath": "apps/payment-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
+    "processing-service": {
+      "type": "application",
+      "root": "apps/processing-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/processing-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/processing-service/tsconfig.app.json",
         "webpack": false
       }
     },

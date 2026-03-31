@@ -21,7 +21,7 @@ model User {
   password   String?  
   provider   String? 
   providerId String? 
-  picture    String?
+  avatarKey  String?
   isVerified Boolean  @default(false)
   createdAt  DateTime @default(now())
 }

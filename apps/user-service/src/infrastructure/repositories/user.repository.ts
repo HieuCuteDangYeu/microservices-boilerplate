@@ -13,12 +13,16 @@ export class UserRepository implements IUserRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async save(user: User): Promise<User> {
+    const dbAvatarKey = user.picture
+      ? user.picture.replace(`${process.env.R2_PUBLIC_DOMAIN}/`, '')
+      : null;
+
     const saved = await this.prisma.user.create({
       data: {
         email: user.email,
         password: user.password,
         isVerified: user.isVerified,
-        picture: user.picture,
+        avatarKey: dbAvatarKey,
         provider: user.provider,
         providerId: user.providerId,
       },
@@ -39,13 +43,24 @@ export class UserRepository implements IUserRepository {
   }
 
   private toDomain(prismaUser: PrismaUser): User {
+    const cdnDomain = process.env.R2_PUBLIC_DOMAIN || '';
+    let computedPicture: string | null = null;
+
+    if (prismaUser.avatarKey) {
+      if (prismaUser.avatarKey.startsWith('http')) {
+        computedPicture = prismaUser.avatarKey;
+      } else {
+        computedPicture = `${cdnDomain}/${prismaUser.avatarKey}`;
+      }
+    }
+
     return new User(
       prismaUser.id,
       prismaUser.email,
       prismaUser.password,
       prismaUser.isVerified,
       prismaUser.createdAt,
-      prismaUser.picture,
+      computedPicture,
       prismaUser.provider,
       prismaUser.providerId,
     );
@@ -84,11 +99,19 @@ export class UserRepository implements IUserRepository {
 
   async update(id: string, data: Partial<User>): Promise<User> {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { id: _id, createdAt: _date, ...cleanData } = data;
+    const { id: _id, createdAt: _date, picture, ...cleanData } = data;
+
+    const updateData: Prisma.UserUpdateInput = { ...cleanData };
+
+    if (picture !== undefined) {
+      updateData.avatarKey = picture
+        ? picture.replace(`${process.env.R2_PUBLIC_DOMAIN}/`, '')
+        : null;
+    }
 
     const updated = await this.prisma.user.update({
       where: { id },
-      data: cleanData,
+      data: updateData,
     });
 
     return this.toDomain(updated);

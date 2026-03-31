@@ -1,7 +1,7 @@
-import { ValidateUserUseCase } from '@auth/application/use-cases/validate-user.use-case';
 import { LoginDto } from '@common/auth/dtos/login.dto';
 import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
+import { UpdateAvatarDto } from '@common/user/dtos/update-avatar.dto';
 import type { DeleteUserPayload } from '@common/user/interfaces/delete-user.types';
 import type { FindAllUsersPayload } from '@common/user/interfaces/find-all-users.types';
 import type { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
@@ -21,7 +21,9 @@ import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
+import { ValidateUserUseCase } from '@user/application/use-cases/validate-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
+import { InvalidAvatarFileError } from '@user/domain/errors/invalid-avatar-file.error';
 import { RoleAssignmentError } from '@user/domain/errors/role-assignment.error';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
@@ -126,11 +128,35 @@ export class UserController {
     await this.deleteUserUseCase.execute(data);
   }
 
-  @EventPattern('user.avatar_updated')
-  async handleAvatarUpdated(
-    @Payload() data: { userId: string; avatarUrl: string },
+  @MessagePattern('user.update_avatar')
+  async updateAvatar(
+    @Payload() data: { userId: string; payload: UpdateAvatarDto },
   ) {
-    await this.updateUserAvatarUseCase.execute(data.userId, data.avatarUrl);
+    try {
+      return await this.updateUserAvatarUseCase.execute(
+        data.userId,
+        data.payload,
+      );
+    } catch (error) {
+      if (error instanceof UserNotFoundError) {
+        throw new RpcException({
+          message: error.message,
+          statusCode: 404,
+        });
+      }
+
+      if (error instanceof InvalidAvatarFileError) {
+        throw new RpcException({
+          message: error.message,
+          statusCode: 400,
+        });
+      }
+
+      throw new RpcException({
+        message: 'An unexpected error occurred while updating the avatar',
+        statusCode: 500,
+      });
+    }
   }
 
   @MessagePattern('user.find_by_id')

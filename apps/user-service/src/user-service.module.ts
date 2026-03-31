@@ -1,4 +1,3 @@
-import { ValidateUserUseCase } from '@auth/application/use-cases/validate-user.use-case';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
@@ -10,10 +9,12 @@ import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
+import { ValidateUserUseCase } from '@user/application/use-cases/validate-user.use-case';
 import { ValidateUsersListUseCase } from '@user/application/use-cases/validate-users-list.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { AuthServiceAdapter } from '@user/infrastructure/adapters/auth-service.adapter';
 import { UserController } from '@user/infrastructure/controllers/user.controller';
+import { R2StorageService } from '@user/infrastructure/services/r2-storage.service';
 import { CreateUserUseCase } from './application/use-cases/create-user.use-case';
 import { PrismaService } from './infrastructure/prisma/prisma.service';
 import { UserRepository } from './infrastructure/repositories/user.repository';
@@ -61,6 +62,10 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     {
       provide: 'IAuthService',
       useClass: AuthServiceAdapter,
+    },
+    {
+      provide: 'IStorageService',
+      useClass: R2StorageService,
     },
   ],
 })

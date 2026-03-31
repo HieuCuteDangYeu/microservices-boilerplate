@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/@prisma/content-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("CONTENT_DATABASE_URL")
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Reel {
+  id          String   @id @default(uuid())
+  userId      String   
+  mediaKey    String   // The S3 key ONLY (e.g., reels/user-123/uuid.mp4)
+  title       String?
+  description String?
+  tags        String[]
+  status      ProcessingStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
