@@ -20,6 +20,8 @@ jobs:
             payment-service,
             mail-service,
             conversation-service,
+            content-service,
+            processing-service,
           ]
 
     steps:
