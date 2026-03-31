@@ -106,7 +106,6 @@ export class UserController {
   @Patch('me/avatar')
   @Roles(Role.ADMIN, Role.USER)
   @ApiOperation({ summary: 'Update user avatar using an uploaded R2 key' })
-  @UseGuards(OwnershipGuard)
   async updateAvatar(
     @Req() request: AuthenticatedRequest,
     @Body() body: UpdateAvatarDto,

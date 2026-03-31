@@ -1,5 +1,6 @@
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
+import { InvalidMediaFileError } from '@content/domain/errors/content.error';
 import { Controller } from '@nestjs/common';
 import {
   EventPattern,
@@ -23,11 +24,22 @@ export class ContentController {
     try {
       return await this.createReelUseCase.execute(data.userId, data.payload);
     } catch (error) {
-      throw new RpcException(
-        error instanceof Error
-          ? error.message
-          : 'An unexpected error occurred while creating the reel',
-      );
+      if (error instanceof InvalidMediaFileError) {
+        throw new RpcException({
+          statusCode: 400,
+          message: error.message,
+          error: 'Bad Request',
+        });
+      }
+
+      throw new RpcException({
+        statusCode: 500,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'An unexpected error occurred while creating the reel',
+        error: 'Internal Server Error',
+      });
     }
   }
 
