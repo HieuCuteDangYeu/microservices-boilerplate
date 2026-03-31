@@ -15,6 +15,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { catchError, lastValueFrom } from 'rxjs';
@@ -26,6 +27,7 @@ import { catchError, lastValueFrom } from 'rxjs';
 export class ContentController {
   constructor(
     @Inject('CONTENT_SERVICE') private readonly contentClient: ClientProxy,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('reels')
@@ -47,9 +49,12 @@ export class ContentController {
         ),
     );
 
-    const cdnDomain = process.env.R2_PUBLIC_DOMAIN;
-    const folderPath = reel.mediaKey.replace('.mp4', '');
-    const streamUrl = `${cdnDomain}/${folderPath}/stream.m3u8`;
+    const cdnDomain = this.configService.getOrThrow<string>('R2_PUBLIC_DOMAIN');
+    const extIndex = reel.mediaKey.lastIndexOf('.');
+    const folderPath =
+      extIndex !== -1 ? reel.mediaKey.substring(0, extIndex) : reel.mediaKey;
+    const sanitizedDomain = cdnDomain.replace(/\/$/, '');
+    const streamUrl = `${sanitizedDomain}/${folderPath}/stream.m3u8`;
 
     return {
       ...reel,
