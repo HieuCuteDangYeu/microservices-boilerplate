@@ -1,4 +1,5 @@
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
+import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
@@ -31,6 +32,10 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,
+    },
+    {
+      provide: 'IStorageService',
+      useClass: R2StorageService,
     },
   ],
 })

@@ -72,4 +72,29 @@ export class ContentRepository
 
     return updatedReel;
   }
+
+  async findById(id: string): Promise<Reel | null> {
+    const record = await this.reel.findUnique({ where: { id } });
+
+    if (!record) {
+      return null;
+    }
+
+    const foundReel = new Reel();
+    foundReel.id = record.id;
+    foundReel.userId = record.userId;
+    foundReel.mediaKey = record.mediaKey;
+    foundReel.title = record.title ?? undefined;
+    foundReel.description = record.description ?? undefined;
+    foundReel.tags = record.tags;
+    foundReel.status = record.status as
+      | 'PENDING'
+      | 'PROCESSING'
+      | 'COMPLETED'
+      | 'FAILED';
+    foundReel.createdAt = record.createdAt;
+    foundReel.updatedAt = record.updatedAt;
+
+    return foundReel;
+  }
 }

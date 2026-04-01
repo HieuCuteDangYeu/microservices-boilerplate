@@ -6,4 +6,5 @@ export interface IContentRepository {
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
   ): Promise<Reel>;
+  findById(id: string): Promise<Reel | null>;
 }

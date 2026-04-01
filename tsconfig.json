@@ -38,8 +38,10 @@
       "@prisma/media-client": ["node_modules/@prisma/media-client"],
       "@prisma/payment-client": ["node_modules/@prisma/payment-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
+      "@processing/*": ["apps/processing-service/src/*"],
       "@user/*": ["apps/user-service/src/*"],
-      "@processing/*": ["apps/processing-service/src/*"]
+      "@ai/*": ["apps/ai-service/src/*"],
+      "@prisma/ai-client": ["node_modules/@prisma/ai-client"]
     }
   }
 }
