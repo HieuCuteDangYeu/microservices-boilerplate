@@ -1,3 +1,4 @@
+import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { Module } from '@nestjs/common';
@@ -29,6 +30,7 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
   providers: [
     CreateReelUseCase,
     UpdateReelStatusUseCase,
+    GetReelStatusUseCase,
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,
