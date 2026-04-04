@@ -30,4 +30,18 @@ export class FfmpegService {
         .run();
     });
   }
+
+  async extractAudio(inputPath: string, outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .noVideo()
+        .audioFrequency(16000)
+        .audioChannels(1)
+        .format('wav')
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
+        .run();
+    });
+  }
 }

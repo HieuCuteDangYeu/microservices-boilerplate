@@ -24,6 +24,8 @@ model Reel {
   description String?
   tags        String[]
   status      ProcessingStatus @default(PENDING)
+  transcript  String?  @db.Text
+  embedding   Unsupported("vector(384)")?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

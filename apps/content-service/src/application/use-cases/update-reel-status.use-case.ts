@@ -11,7 +11,14 @@ export class UpdateReelStatusUseCase {
   async execute(
     reelId: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
+    transcript?: string,
+    embedding?: number[],
   ) {
-    return await this.contentRepository.updateReelStatus(reelId, status);
+    return await this.contentRepository.updateReelStatus(
+      reelId,
+      status,
+      transcript,
+      embedding,
+    );
   }
 }

@@ -1,5 +1,6 @@
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
+import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -38,6 +39,10 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
     {
       provide: 'IStorageService',
       useClass: R2StorageService,
+    },
+    {
+      provide: 'IProcessingService',
+      useClass: ProcessingServiceAdapter,
     },
   ],
 })

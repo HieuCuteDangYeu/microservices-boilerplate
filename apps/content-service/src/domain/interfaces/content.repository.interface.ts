@@ -5,6 +5,8 @@ export interface IContentRepository {
   updateReelStatus(
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
+    transcript?: string,
+    embedding?: number[],
   ): Promise<Reel>;
   findById(id: string): Promise<Reel | null>;
 }

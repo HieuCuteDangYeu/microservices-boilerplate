@@ -6,6 +6,8 @@ export class Reel {
   description?: string;
   tags: string[];
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  transcript?: string;
+  embedding?: number[];
   createdAt: Date;
   updatedAt: Date;
 }

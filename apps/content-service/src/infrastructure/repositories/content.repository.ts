@@ -49,11 +49,26 @@ export class ContentRepository
   async updateReelStatus(
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
+    transcript?: string,
+    embedding?: number[],
   ): Promise<Reel> {
     const updatedRecord = await this.reel.update({
       where: { id },
-      data: { status },
+      data: {
+        status,
+        ...(transcript !== undefined && { transcript }),
+      },
     });
+
+    if (embedding && embedding.length > 0) {
+      const vectorString = `[${embedding.join(',')}]`;
+
+      await this.$executeRaw`
+        UPDATE "Reel" 
+        SET embedding = ${vectorString}::vector 
+        WHERE id = ${id}
+      `;
+    }
 
     const updatedReel = new Reel();
     updatedReel.id = updatedRecord.id;
@@ -69,6 +84,11 @@ export class ContentRepository
       | 'FAILED';
     updatedReel.createdAt = updatedRecord.createdAt;
     updatedReel.updatedAt = updatedRecord.updatedAt;
+
+    updatedReel.transcript = updatedRecord.transcript ?? undefined;
+    if (embedding) {
+      updatedReel.embedding = embedding;
+    }
 
     return updatedReel;
   }

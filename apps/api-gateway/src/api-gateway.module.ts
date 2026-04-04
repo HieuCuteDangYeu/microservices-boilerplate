@@ -1,6 +1,5 @@
 import { AuthController } from '@gateway/auth/auth.controller';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
-import { ChatController } from '@gateway/chat/chat.controller';
 import { ContentController } from '@gateway/content/content.controller';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
@@ -99,7 +98,6 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ConversationController,
     GatewayKeyController,
     ContentController,
-    ChatController,
   ],
   providers: [JwtAuthGuard],
 })

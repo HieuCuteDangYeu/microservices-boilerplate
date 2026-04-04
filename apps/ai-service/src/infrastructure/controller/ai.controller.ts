@@ -1,26 +1,62 @@
+import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
-import { ProcessChatUseCase } from '../../application/use-cases/process-chat.use-case';
-import { LlmUnavailableError } from '../../domain/errors/llm-unavailable.error';
+import { GenerateEmbeddingUseCase } from '../../application/use-cases/generate-embedding.use-case';
 
+interface SerializedBuffer {
+  type: 'Buffer';
+  data: number[];
+}
 @Controller()
 export class AiController {
-  constructor(private readonly processChatUseCase: ProcessChatUseCase) {}
+  constructor(
+    private readonly generateEmbeddingUseCase: GenerateEmbeddingUseCase,
+    private readonly transcribeAudioUseCase: TranscribeAudioUseCase,
+  ) {}
 
-  @MessagePattern('ai.ask_question')
-  async handleQuestion(@Payload() data: { message: string; userId: string }) {
+  @MessagePattern('ai.generate_embedding')
+  async handleGenerateEmbedding(@Payload() data: { text: string }) {
     try {
-      return await this.processChatUseCase.execute(data.message, data.userId);
+      const embedding = await this.generateEmbeddingUseCase.execute(data.text);
+      return { embedding };
     } catch (error) {
-      if (error instanceof LlmUnavailableError) {
-        throw new RpcException({
-          statusCode: 503,
-          message: error.message,
-        });
-      }
+      console.error(error);
       throw new RpcException({
         statusCode: 500,
-        message: 'Internal server error processing AI request',
+        message: 'Internal server error processing embedding request',
+      });
+    }
+  }
+
+  @MessagePattern('ai.transcribe_audio')
+  async handleTranscribeAudio(
+    @Payload() payload: { audioBuffer: Buffer | SerializedBuffer },
+  ) {
+    try {
+      let buffer: Buffer;
+
+      if (Buffer.isBuffer(payload.audioBuffer)) {
+        buffer = payload.audioBuffer;
+      } else if (
+        payload.audioBuffer &&
+        'data' in payload.audioBuffer &&
+        Array.isArray(payload.audioBuffer.data)
+      ) {
+        buffer = Buffer.from(payload.audioBuffer.data);
+      } else {
+        throw new Error(
+          'Unrecognized audio buffer format received from RabbitMQ',
+        );
+      }
+
+      const transcript = await this.transcribeAudioUseCase.execute(buffer);
+
+      return { transcript };
+    } catch (error) {
+      console.error('Transcription error:', error);
+      throw new RpcException({
+        statusCode: 500,
+        message: 'Internal server error processing transcription request',
       });
     }
   }

@@ -47,9 +47,20 @@ export class ContentController {
 
   @EventPattern('reel.processing_completed')
   async handleProcessingCompleted(
-    @Payload() data: { reelId: string; status: 'COMPLETED' },
+    @Payload()
+    data: {
+      reelId: string;
+      status: 'COMPLETED';
+      transcript?: string;
+      embedding?: number[];
+    },
   ) {
-    await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+    await this.updateReelStatusUseCase.execute(
+      data.reelId,
+      data.status,
+      data.transcript,
+      data.embedding,
+    );
   }
 
   @EventPattern('reel.processing_failed')
