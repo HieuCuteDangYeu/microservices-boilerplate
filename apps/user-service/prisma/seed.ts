@@ -1,6 +1,8 @@
 import { PrismaClient } from '@prisma/user-client';
 import * as bcrypt from 'bcrypt';
 import {
+  BOT_USER_EMAIL,
+  BOT_USER_ID,
   DEFAULT_ADMIN_EMAIL,
   DEFAULT_ADMIN_ID,
   DEFAULT_ADMIN_PASSWORD,
@@ -26,6 +28,20 @@ async function main() {
   });
 
   console.log(`Admin User created: ${admin.email} (${admin.id})`);
+
+  const bot = await prisma.user.upsert({
+    where: { email: BOT_USER_EMAIL },
+    update: {},
+    create: {
+      id: BOT_USER_ID,
+      email: BOT_USER_EMAIL,
+      password: hashedPassword,
+      isVerified: true,
+      createdAt: new Date(),
+    },
+  });
+
+  console.log(`Bot User created: ${bot.email} (${bot.id})`);
 }
 
 main()

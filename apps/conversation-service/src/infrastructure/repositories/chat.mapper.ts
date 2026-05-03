@@ -14,10 +14,9 @@ export class ChatMapper {
       conversationId: prismaMsg.conversationId,
       senderId: prismaMsg.senderId,
 
-      // 👇 CẬP NHẬT 3 DÒNG NÀY
-      type: prismaMsg.type, // Business Type
-      signalType: prismaMsg.signalType, // Signal Type
-      content: prismaMsg.content, // Ciphertext
+      type: prismaMsg.type,
+      signalType: prismaMsg.signalType,
+      content: prismaMsg.content,
       registrationId: prismaMsg.registrationId ?? undefined,
       createdAt: prismaMsg.createdAt,
       readBy: prismaMsg.readBy
@@ -26,5 +25,22 @@ export class ChatMapper {
           )
         : [],
     });
+  }
+
+  static toDto(domain: Message) {
+    return {
+      id: domain.id,
+      conversationId: domain.conversationId,
+      senderId: domain.senderId,
+      content: domain.content,
+      type: domain.type,
+      signalType: domain.signalType,
+      createdAt: domain.createdAt.toISOString(),
+      createdAtMs: domain.createdAt.getTime(),
+      readBy: domain.readBy.map((r) => ({
+        userId: r.userId,
+        at: r.at.toISOString(),
+      })),
+    };
   }
 }
