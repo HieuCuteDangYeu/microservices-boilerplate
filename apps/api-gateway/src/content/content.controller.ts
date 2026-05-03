@@ -75,6 +75,10 @@ export class ContentController {
       throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
     }
 
+    const isPublicFeed =
+      !query.userId || query.visibility !== 'private';
+    const effectiveVisibility = query.visibility ?? 'public';
+
     const result = await lastValueFrom(
       this.contentClient
         .send<{
@@ -82,9 +86,12 @@ export class ContentController {
           nextCursor: string | null;
         }>('content.list_reels', {
           userId: query.userId,
-          visibility: query.visibility ?? 'public',
+          visibility: effectiveVisibility,
           limit: query.limit,
           cursor: query.cursor,
+          // Exclude PENDING/PROCESSING/FAILED from public feed to prevent
+          // broken streamUrl thumbnails that haven't been transcoded yet
+          onlyPublished: isPublicFeed,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );

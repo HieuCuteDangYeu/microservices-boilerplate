@@ -121,6 +121,9 @@ export class ContentRepository
     if (query.userId) {
       where['userId'] = query.userId;
     }
+    if (query.onlyPublished) {
+      where['status'] = 'COMPLETED';
+    }
     if (query.cursor) {
       where['OR'] = [
         { createdAt: { lt: query.cursor.createdAt } },

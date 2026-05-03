@@ -188,6 +188,7 @@ export class ContentController {
       visibility?: 'public' | 'private';
       limit?: number;
       cursor?: { createdAt: string; id: string };
+      onlyPublished?: boolean;
     },
   ) {
     try {
@@ -201,6 +202,7 @@ export class ContentController {
               id: data.cursor.id,
             }
           : undefined,
+        onlyPublished: data.onlyPublished,
       };
 
       const result = await this.listReelsUseCase.execute(query);

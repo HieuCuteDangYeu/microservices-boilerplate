@@ -6,6 +6,8 @@ export interface ReelListQuery {
   visibility?: 'public' | 'private';
   limit?: number;
   cursor?: { createdAt: Date; id: string };
+  /** When true, only returns COMPLETED reels (use for public feed). */
+  onlyPublished?: boolean;
 }
 
 export interface ReelUpdateData {
