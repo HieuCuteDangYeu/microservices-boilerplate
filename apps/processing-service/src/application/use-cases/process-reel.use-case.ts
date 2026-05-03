@@ -23,14 +23,32 @@ export class ProcessReelUseCase {
     const inputPath = path.join(workDir, 'input.mp4');
     const hlsOutputDir = path.join(workDir, 'hls');
     const audioPath = path.join(workDir, 'audio.wav');
+    const thumbnailPath = path.join(workDir, 'thumbnail.jpg');
+
+    let thumbnailKey: string | undefined;
 
     try {
+      // Immediately signal PROCESSING so client can show progress
+      this.contentService.emitProcessingStarted({
+        reelId,
+        status: 'PROCESSING',
+      });
+
       await this.r2Service.downloadVideo(mediaKey, inputPath);
 
       await this.ffmpegService.transcodeToHls(inputPath, hlsOutputDir);
 
-      const s3Prefix = mediaKey.replace('.mp4', '');
+      const s3Prefix = mediaKey.replace(/\.[^.]+$/, '');
       await this.r2Service.uploadHlsDirectory(hlsOutputDir, s3Prefix);
+
+      // Extract thumbnail at 2s mark
+      await this.ffmpegService.extractThumbnail(inputPath, thumbnailPath);
+      thumbnailKey = `${s3Prefix}/thumbnail.jpg`;
+      await this.r2Service.uploadThumbnail(thumbnailPath, thumbnailKey);
+
+      // Clean up HLS directory and thumbnail before AI call (free disk)
+      fs.rmSync(hlsOutputDir, { recursive: true, force: true });
+      if (fs.existsSync(thumbnailPath)) fs.unlinkSync(thumbnailPath);
 
       await this.ffmpegService.extractAudio(inputPath, audioPath);
 
@@ -45,6 +63,7 @@ export class ProcessReelUseCase {
         status: 'COMPLETED',
         transcript: transcriptText,
         embedding: embedding,
+        thumbnailKey,
       });
     } catch (error) {
       console.error(`[Reel ${reelId}] Processing failed:`, error);

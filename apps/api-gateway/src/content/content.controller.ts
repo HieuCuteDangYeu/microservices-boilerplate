@@ -1,5 +1,7 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
+import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
+import { UpdateReelDto } from '@common/content/dtos/update-reel.dto';
 import { Reel } from '@content/domain/entities/reel.entity';
 import {
   JwtAuthGuard,
@@ -8,10 +10,15 @@ import {
 import {
   Body,
   Controller,
+  Delete,
+  Get,
   HttpException,
   HttpStatus,
   Inject,
+  Param,
+  Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -25,10 +32,16 @@ import { catchError, lastValueFrom } from 'rxjs';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ContentController {
+  private readonly cdnDomain: string;
+
   constructor(
     @Inject('CONTENT_SERVICE') private readonly contentClient: ClientProxy,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.cdnDomain = this.configService
+      .getOrThrow<string>('R2_PUBLIC_DOMAIN')
+      .replace(/\/$/, '');
+  }
 
   @Post('reels')
   @ApiOperation({ summary: 'Create a new reel from an uploaded S3 key' })
@@ -42,24 +55,144 @@ export class ContentController {
           userId: request.user!.id,
           payload: body,
         })
-        .pipe(
-          catchError((error) => {
-            return this.handleMicroserviceError(error);
-          }),
-        ),
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
 
-    const cdnDomain = this.configService.getOrThrow<string>('R2_PUBLIC_DOMAIN');
+    return this._enrichReel(reel);
+  }
+
+  @Get('reels')
+  @ApiOperation({ summary: 'List reels (public feed or user-specific)' })
+  async listReels(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ListReelsQueryDto,
+  ) {
+    const result = await lastValueFrom(
+      this.contentClient
+        .send<{
+          items: Reel[];
+          nextCursor: string | null;
+        }>('content.list_reels', {
+          userId: query.userId,
+          visibility: query.visibility ?? 'public',
+          limit: query.limit,
+          cursor: query.cursor,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return {
+      items: result.items.map((r) => this._enrichReel(r)),
+      nextCursor: result.nextCursor,
+    };
+  }
+
+  @Get('reels/:id')
+  @ApiOperation({ summary: 'Get a single reel by ID' })
+  async getReel(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+  ) {
+    const reel = await lastValueFrom(
+      this.contentClient
+        .send<Reel | null>('content.get_reel', { reelId })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    if (!reel) {
+      throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
+    }
+
+    // Only owner can view private reels
+    if (
+      reel.visibility === 'private' &&
+      reel.userId !== request.user!.id &&
+      !request.user!.roles?.includes('ADMIN')
+    ) {
+      throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
+    }
+
+    return this._enrichReel(reel, { includeTranscript: true });
+  }
+
+  @Patch('reels/:id')
+  @ApiOperation({ summary: 'Update reel metadata (owner only)' })
+  async updateReel(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+    @Body() body: UpdateReelDto,
+  ) {
+    const reel = await lastValueFrom(
+      this.contentClient
+        .send<Reel | null>('content.update_reel', {
+          reelId,
+          userId: request.user!.id,
+          payload: body,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    if (!reel) {
+      throw new HttpException(
+        'Reel not found or not owned by you',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    return this._enrichReel(reel);
+  }
+
+  @Delete('reels/:id')
+  @ApiOperation({ summary: 'Delete a reel (owner only)' })
+  async deleteReel(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+  ) {
+    await lastValueFrom(
+      this.contentClient
+        .send<{ success: boolean }>('content.delete_reel', {
+          reelId,
+          userId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return { success: true };
+  }
+
+  private _enrichReel(reel: Reel, opts: { includeTranscript?: boolean } = {}) {
     const extIndex = reel.mediaKey.lastIndexOf('.');
     const folderPath =
       extIndex !== -1 ? reel.mediaKey.substring(0, extIndex) : reel.mediaKey;
-    const sanitizedDomain = cdnDomain.replace(/\/$/, '');
-    const streamUrl = `${sanitizedDomain}/${folderPath}/stream.m3u8`;
+    const streamUrl = `${this.cdnDomain}/${folderPath}/stream.m3u8`;
+    const thumbnailUrl = reel.thumbnailKey
+      ? `${this.cdnDomain}/${reel.thumbnailKey}`
+      : undefined;
 
-    return {
-      ...reel,
+    const result: Record<string, unknown> = {
+      id: reel.id,
+      userId: reel.userId,
+      mediaKey: reel.mediaKey,
+      title: reel.title,
+      tags: reel.tags,
+      status: reel.status,
+      visibility: reel.visibility,
+      viewCount:
+        typeof reel.viewCount === 'bigint'
+          ? Number(reel.viewCount)
+          : reel.viewCount,
+      thumbnailKey: reel.thumbnailKey,
+      thumbnailUrl,
       streamUrl,
+      createdAt: reel.createdAt,
     };
+
+    if (opts.includeTranscript) {
+      result['description'] = reel.description;
+      result['transcript'] = reel.transcript;
+    }
+
+    return result;
   }
 
   private handleMicroserviceError(error: any): never {

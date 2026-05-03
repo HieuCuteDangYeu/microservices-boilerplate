@@ -1,6 +1,10 @@
+import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
+import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
+import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { SearchTranscriptsUseCase } from '@content/application/use-cases/search-transcripts.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
+import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { Module } from '@nestjs/common';
@@ -34,6 +38,10 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
   controllers: [ContentController],
   providers: [
     CreateReelUseCase,
+    ListReelsUseCase,
+    GetReelUseCase,
+    UpdateReelUseCase,
+    DeleteReelUseCase,
     UpdateReelStatusUseCase,
     GetReelStatusUseCase,
     SearchTranscriptsUseCase,

@@ -44,4 +44,23 @@ export class FfmpegService {
         .run();
     });
   }
+
+  async extractThumbnail(
+    inputPath: string,
+    outputPath: string,
+    timestamp = '00:00:02',
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .seekInput(timestamp)
+        .frames(1)
+        .size('480x?')
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) =>
+          reject(err instanceof Error ? err : new Error(String(err))),
+        )
+        .run();
+    });
+  }
 }

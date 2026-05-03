@@ -8,11 +8,16 @@ export class ContentServiceAdapter implements IContentService {
     @Inject('CONTENT_RMQ') private readonly messageBroker: ClientProxy,
   ) {}
 
+  emitProcessingStarted(data: { reelId: string; status: 'PROCESSING' }): void {
+    this.messageBroker.emit('reel.processing_started', data);
+  }
+
   emitProcessingCompleted(data: {
     reelId: string;
     status: 'COMPLETED';
     transcript?: string;
     embedding?: number[];
+    thumbnailKey?: string;
   }): void {
     this.messageBroker.emit('reel.processing_completed', data);
   }

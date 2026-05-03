@@ -13,6 +13,7 @@ export class UpdateReelStatusUseCase {
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
     transcript?: string,
     embedding?: number[],
+    thumbnailKey?: string,
   ) {
     if (status === 'COMPLETED') {
       if (!transcript || transcript.trim() === '') {
@@ -39,6 +40,7 @@ export class UpdateReelStatusUseCase {
       status,
       transcript,
       embedding,
+      thumbnailKey,
     );
   }
 
