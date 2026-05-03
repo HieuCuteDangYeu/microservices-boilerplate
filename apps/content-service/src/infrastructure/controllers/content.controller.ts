@@ -104,8 +104,16 @@ export class ContentController {
     } catch (err: unknown) {
       const error = err as Error;
       console.error(
-        `❌ [processing_completed] ${error.message} — reel ${data.reelId} NOT updated to COMPLETED`,
+        `❌ [processing_completed] ${error.message} — rolling reel ${data.reelId} back to FAILED`,
       );
+      try {
+        await this.updateReelStatusUseCase.execute(data.reelId, 'FAILED');
+      } catch (fallbackErr) {
+        const fallbackError = fallbackErr as Error;
+        console.error(
+          `⚠️ [processing_completed] could not set FAILED either for reel ${data.reelId}: ${fallbackError.message}`,
+        );
+      }
     }
   }
 
@@ -113,14 +121,28 @@ export class ContentController {
   async handleProcessingFailed(
     @Payload() data: { reelId: string; status: 'FAILED' },
   ) {
-    await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+    try {
+      await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(
+        `❌ [processing_failed] ${error.message} — reel ${data.reelId} NOT updated to FAILED`,
+      );
+    }
   }
 
   @EventPattern('reel.processing_started')
   async handleProcessingStarted(
     @Payload() data: { reelId: string; status: 'PROCESSING' },
   ) {
-    await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+    try {
+      await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(
+        `❌ [processing_started] ${error.message} — reel ${data.reelId} NOT updated to PROCESSING`,
+      );
+    }
   }
 
   @MessagePattern('content.get_reel_status')
