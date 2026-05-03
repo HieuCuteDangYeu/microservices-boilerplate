@@ -8,6 +8,9 @@ import { CreateConversationUseCase } from 'apps/conversation-service/src/applica
 import { GetConversationUseCase } from 'apps/conversation-service/src/application/use-cases/get-conversation.use-case';
 import { GetMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages.use-case';
 import { GetUserConversationsUseCase } from 'apps/conversation-service/src/application/use-cases/get-user-conversations.use-case';
+import { ProcessBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/process-bot-reply.use-case';
+import { TriggerBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/trigger-bot-reply.use-case';
+import { AiServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/ai-service.adapter';
 import { UserServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/user-service.adapter';
 import { ConversationMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/conversation.controller';
 import { KeyMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/key.controller';
@@ -33,6 +36,24 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
             urls: [config.getOrThrow<string>('RABBITMQ_URL')],
             queue: 'user_queue',
             queueOptions: { durable: true },
+            heartbeat: 60,
+            retryAttempts: 10,
+            retryDelay: 3000,
+          },
+        }),
+        inject: [ConfigService],
+      },
+      {
+        name: 'AI_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'ai_queue',
+            queueOptions: { durable: true },
+            heartbeat: 60,
+            retryAttempts: 10,
+            retryDelay: 3000,
           },
         }),
         inject: [ConfigService],
@@ -50,6 +71,8 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     GetConversationUseCase,
     CreateConversationUseCase,
     GetUserConversationsUseCase,
+    ProcessBotReplyUseCase,
+    TriggerBotReplyUseCase,
 
     // --- Repositories ---
     PrismaChatRepository,
@@ -66,6 +89,10 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     {
       provide: 'IEncryptionRepository', // Token để inject
       useClass: AesEncryptionRepository, // Class thực thi
+    },
+    {
+      provide: 'IAiService',
+      useClass: AiServiceAdapter,
     },
 
     // --- REDIS CLIENT (Để lưu cache tin nhắn - Giống Auth Service) ---

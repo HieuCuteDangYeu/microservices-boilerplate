@@ -1,4 +1,5 @@
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
+import { SearchTranscriptsUseCase } from '@content/application/use-cases/search-transcripts.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
@@ -23,6 +24,9 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
           urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
           queue: 'processing_queue',
           queueOptions: { durable: true },
+          heartbeat: 60,
+          retryAttempts: 10,
+          retryDelay: 3000,
         },
       },
     ]),
@@ -32,6 +36,7 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
     CreateReelUseCase,
     UpdateReelStatusUseCase,
     GetReelStatusUseCase,
+    SearchTranscriptsUseCase,
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,

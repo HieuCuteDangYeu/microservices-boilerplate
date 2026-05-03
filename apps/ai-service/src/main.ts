@@ -11,6 +11,9 @@ async function bootstrap() {
         urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
         queue: 'ai_queue',
         queueOptions: { durable: true },
+        heartbeat: 60,
+        retryAttempts: 10,
+        retryDelay: 3000,
       },
     },
   );
