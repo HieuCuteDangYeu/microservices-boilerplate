@@ -61,23 +61,27 @@ export class ContentRepository
     embedding?: number[],
     thumbnailKey?: string,
   ): Promise<Reel> {
-    const data: Record<string, unknown> = { status };
-    if (transcript !== undefined) data['transcript'] = transcript;
-    if (thumbnailKey !== undefined) data['thumbnailKey'] = thumbnailKey;
+    const updatedRecord = await this.$transaction(async (tx) => {
+      const data: Record<string, unknown> = { status };
+      if (transcript !== undefined) data['transcript'] = transcript;
+      if (thumbnailKey !== undefined) data['thumbnailKey'] = thumbnailKey;
 
-    const updatedRecord = await this.reel.update({
-      where: { id },
-      data,
+      const record = await tx.reel.update({
+        where: { id },
+        data,
+      });
+
+      if (embedding && embedding.length > 0) {
+        const vectorString = `[${embedding.join(',')}]`;
+        await tx.$executeRaw`
+          UPDATE "Reel"
+          SET embedding = ${vectorString}::vector
+          WHERE id = ${id}
+        `;
+      }
+
+      return record;
     });
-
-    if (embedding && embedding.length > 0) {
-      const vectorString = `[${embedding.join(',')}]`;
-      await this.$executeRaw`
-        UPDATE "Reel"
-        SET embedding = ${vectorString}::vector
-        WHERE id = ${id}
-      `;
-    }
 
     return this.toDomain(updatedRecord as Record<string, unknown>);
   }
