@@ -75,8 +75,7 @@ export class ContentController {
       throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
     }
 
-    const isPublicFeed =
-      !query.userId || query.visibility !== 'private';
+    const isPublicFeed = !query.userId || query.visibility !== 'private';
     const effectiveVisibility = query.visibility ?? 'public';
 
     const result = await lastValueFrom(

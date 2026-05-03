@@ -1,5 +1,4 @@
 import {
-  Conversation as PrismaConversation,
   MessageReadStatus,
   Message as PrismaMessage,
 } from '@prisma/conversation-client';
