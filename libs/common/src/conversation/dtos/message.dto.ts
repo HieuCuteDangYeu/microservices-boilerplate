@@ -7,7 +7,9 @@ export const MessageSchema = z.object({
   senderId: z.string(),
   content: z.string(),
   type: z.string().default('text'),
+  signalType: z.number().int().optional(),
   createdAt: z.string().datetime(),
+  createdAtMs: z.number().int(),
   readBy: z
     .array(
       z.object({
