@@ -67,6 +67,14 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Query() query: ListReelsQueryDto,
   ) {
+    if (
+      query.visibility === 'private' &&
+      query.userId !== request.user!.id &&
+      !request.user!.roles?.includes('ADMIN')
+    ) {
+      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    }
+
     const result = await lastValueFrom(
       this.contentClient
         .send<{
