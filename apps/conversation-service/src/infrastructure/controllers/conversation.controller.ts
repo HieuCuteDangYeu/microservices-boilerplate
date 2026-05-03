@@ -1,6 +1,6 @@
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
-import { Controller, Logger } from '@nestjs/common';
+import { Controller, Inject, Logger } from '@nestjs/common';
 import {
   EventPattern,
   MessagePattern,
@@ -12,6 +12,7 @@ import { GetConversationUseCase } from '../../application/use-cases/get-conversa
 import { GetMessagesUseCase } from '../../application/use-cases/get-messages.use-case';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
+import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { ChatGateway } from '../gateways/chat.gateway';
 import { ChatMapper } from '../repositories/chat.mapper';
 import { GetUserConversationsUseCase } from './../../application/use-cases/get-user-conversations.use-case';
@@ -28,6 +29,7 @@ export class ConversationMicroserviceController {
     private readonly getUserConversationsUseCase: GetUserConversationsUseCase,
     private readonly chatGateway: ChatGateway,
     private readonly triggerBotReplyUseCase: TriggerBotReplyUseCase,
+    @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
   ) {}
 
   @MessagePattern('create_conversation')
@@ -99,6 +101,21 @@ export class ConversationMicroserviceController {
       this.chatGateway.server
         .to(dto.conversationId)
         .emit('new_message', ChatMapper.toDto(savedMessage));
+
+      const conversation = await this.chatRepository.findConversation(
+        dto.conversationId,
+      );
+      if (conversation) {
+        conversation.lastMessage =
+          savedMessage.content ?? savedMessage.type ?? null;
+        conversation.lastMessageAt = savedMessage.createdAt;
+        this.chatGateway.server
+          .to(dto.conversationId)
+          .emit(
+            'conversation_updated',
+            ChatMapper.conversationToDto(conversation),
+          );
+      }
 
       void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
         (result) => {
