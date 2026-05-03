@@ -1,6 +1,7 @@
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
+import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { SearchTranscriptsUseCase } from '@content/application/use-cases/search-transcripts.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
@@ -40,6 +41,7 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
     CreateReelUseCase,
     ListReelsUseCase,
     GetReelUseCase,
+    IncrementReelViewUseCase,
     UpdateReelUseCase,
     DeleteReelUseCase,
     UpdateReelStatusUseCase,

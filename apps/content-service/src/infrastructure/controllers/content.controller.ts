@@ -2,6 +2,7 @@ import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
+import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { SearchTranscriptsUseCase } from '@content/application/use-cases/search-transcripts.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
@@ -27,6 +28,7 @@ export class ContentController {
     private readonly createReelUseCase: CreateReelUseCase,
     private readonly listReelsUseCase: ListReelsUseCase,
     private readonly getReelUseCase: GetReelUseCase,
+    private readonly incrementReelViewUseCase: IncrementReelViewUseCase,
     private readonly updateReelUseCase: UpdateReelUseCase,
     private readonly deleteReelUseCase: DeleteReelUseCase,
     private readonly updateReelStatusUseCase: UpdateReelStatusUseCase,
@@ -240,6 +242,12 @@ export class ContentController {
         message: `Get Reel Error: ${err.message}`,
       });
     }
+  }
+
+  @MessagePattern('content.increment_reel_view')
+  async incrementReelView(@Payload() data: { reelId: string }) {
+    await this.incrementReelViewUseCase.execute(data.reelId);
+    return { success: true };
   }
 
   @MessagePattern('content.update_reel')

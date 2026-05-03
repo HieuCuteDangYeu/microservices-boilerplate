@@ -127,6 +127,13 @@ export class ContentController {
       throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
     }
 
+    // Increment view count only after visibility check passes
+    await lastValueFrom(
+      this.contentClient
+        .send<{ success: boolean }>('content.increment_reel_view', { reelId })
+        .pipe(catchError(() => [])),
+    );
+
     return this._enrichReel(reel, { includeTranscript: true });
   }
 

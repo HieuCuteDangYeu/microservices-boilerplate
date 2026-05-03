@@ -1,19 +1,18 @@
-import { Reel } from '@content/domain/entities/reel.entity';
 import type { IContentRepository } from '@content/domain/interfaces/content.repository.interface';
 import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
-export class GetReelUseCase {
+export class IncrementReelViewUseCase {
   constructor(
     @Inject('IContentRepository')
     private readonly repository: IContentRepository,
   ) {}
 
-  async execute(id: string): Promise<Reel | null> {
+  async execute(reelId: string): Promise<void> {
     try {
-      return await this.repository.findById(id);
+      await this.repository.incrementViewCount(reelId);
     } catch {
-      return null;
+      // Swallow — a missed view count is non-critical
     }
   }
 }
