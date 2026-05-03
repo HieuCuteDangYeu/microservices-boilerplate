@@ -1,6 +1,7 @@
 import {
   DeleteObjectsCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
@@ -64,5 +65,30 @@ export class R2StorageService implements IStorageService {
         },
       }),
     );
+  }
+
+  async listObjects(prefix: string): Promise<string[]> {
+    const bucketName = this.configService.get<string>('R2_BUCKET_NAME')?.trim();
+    const cleanPrefix = prefix.replace(/^\/+/, '').trim();
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const response = await this.s3Client.send(
+        new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: cleanPrefix,
+          ContinuationToken: continuationToken,
+        }),
+      );
+
+      for (const obj of response.Contents ?? []) {
+        if (obj.Key) keys.push(obj.Key);
+      }
+
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+
+    return keys;
   }
 }

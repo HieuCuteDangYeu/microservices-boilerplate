@@ -21,10 +21,10 @@ export class DeleteReelUseCase {
     // Cleanup R2 objects: HLS directory + thumbnail
     const keysToDelete: string[] = [];
 
-    // HLS manifest & segments: strip .mp4 extension, all files under that prefix
+    // HLS manifest & segments: strip .mp4 extension, list all objects under that prefix
     const hlsPrefix = reel.mediaKey.replace(/\.[^.]+$/, '');
-    keysToDelete.push(hlsPrefix + '/stream.m3u8');
-    keysToDelete.push(hlsPrefix); // prefix itself (R2 treats this as directory marker)
+    const hlsObjects = await this.storageService.listObjects(hlsPrefix);
+    keysToDelete.push(...hlsObjects);
 
     if (reel.thumbnailKey) {
       keysToDelete.push(reel.thumbnailKey);
