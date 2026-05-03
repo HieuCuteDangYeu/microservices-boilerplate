@@ -28,7 +28,7 @@ export class MediaController {
   ) {}
 
   @Post('upload-url')
-  @ApiOperation({ summary: 'Get a pre-signed URL to upload an image' })
+  @ApiOperation({ summary: 'Get a pre-signed URL to upload' })
   async getUploadUrl(
     @Req() request: AuthenticatedRequest,
     @Body() body: GetPresignedUrlDto,
