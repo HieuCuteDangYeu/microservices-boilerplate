@@ -1,7 +1,9 @@
 import {
+  Conversation as PrismaConversation,
   MessageReadStatus,
   Message as PrismaMessage,
 } from '@prisma/conversation-client';
+import { Conversation } from '../../domain/entities/conversation.entity';
 import { Message } from '../../domain/entities/message.entity';
 import { ReadStatus } from '../../domain/entities/read-status.entity';
 
@@ -41,6 +43,20 @@ export class ChatMapper {
         userId: r.userId,
         at: r.at.toISOString(),
       })),
+    };
+  }
+
+  static conversationToDto(domain: Conversation) {
+    return {
+      id: domain.id,
+      creatorId: domain.creatorId,
+      participantIds: domain.participantIds,
+      participants: domain.participants,
+      lastMessage: domain.lastMessage,
+      lastMessageAt: domain.lastMessageAt?.toISOString() ?? null,
+      isGroup: domain.isGroup,
+      createdAt: domain.createdAt.toISOString(),
+      updatedAt: domain.updatedAt.toISOString(),
     };
   }
 }

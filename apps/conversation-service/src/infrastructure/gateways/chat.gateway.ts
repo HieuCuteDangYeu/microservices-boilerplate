@@ -67,10 +67,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.sendMessageUseCase
       .execute(payload, senderId)
-      .then((savedMessage: Message) => {
+      .then(async (savedMessage: Message) => {
         this.server
           .to(payload.conversationId)
           .emit('message_synced', ChatMapper.toDto(savedMessage));
+
+        // Update conversation sidebar for all participants (lastMessage, ordering)
+        const conversation = await this.chatRepository.findConversation(
+          payload.conversationId,
+        );
+        if (conversation) {
+          conversation.lastMessage =
+            savedMessage.content ?? savedMessage.type ?? null;
+          conversation.lastMessageAt = savedMessage.createdAt;
+          this.server
+            .to(payload.conversationId)
+            .emit(
+              'conversation_updated',
+              ChatMapper.conversationToDto(conversation),
+            );
+        }
 
         void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
           (result) => {
