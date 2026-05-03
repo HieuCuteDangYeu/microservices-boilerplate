@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   AutomaticSpeechRecognitionPipeline,
   pipeline,
@@ -12,11 +13,14 @@ export class XenovaTranscriptionAdapter
 {
   private transcriber: AutomaticSpeechRecognitionPipeline | null = null;
 
+  constructor(private readonly config: ConfigService) {}
+
   async onModuleInit(): Promise<void> {
-    this.transcriber = await pipeline(
-      'automatic-speech-recognition',
-      'Xenova/whisper-tiny.en',
+    const model = this.config.get<string>(
+      'WHISPER_MODEL',
+      'Xenova/whisper-base',
     );
+    this.transcriber = await pipeline('automatic-speech-recognition', model);
   }
 
   async transcribeAudio(audioBuffer: Buffer): Promise<string> {
