@@ -1,3 +1,4 @@
+import { TranscriptSearchResult } from '@common/content/interfaces/transcript-search-result.interface';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/content-client';
 import { Reel } from '../../domain/entities/reel.entity';
@@ -116,5 +117,24 @@ export class ContentRepository
     foundReel.updatedAt = record.updatedAt;
 
     return foundReel;
+  }
+
+  async searchTranscripts(
+    queryVector: number[],
+  ): Promise<TranscriptSearchResult[]> {
+    const vectorLiteral = `[${queryVector.join(',')}]`;
+
+    const results = await this.$queryRaw<TranscriptSearchResult[]>`
+        SELECT 
+          transcript,
+          (embedding <=> ${vectorLiteral}::vector) as distance
+        FROM "Reel"
+        WHERE transcript IS NOT NULL 
+          AND embedding IS NOT NULL
+        ORDER BY distance ASC
+        LIMIT 3;
+      `;
+
+    return results;
   }
 }

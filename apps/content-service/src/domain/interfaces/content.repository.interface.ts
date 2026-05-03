@@ -1,3 +1,4 @@
+import { TranscriptSearchResult } from '@common/content/interfaces/transcript-search-result.interface';
 import { Reel } from '../entities/reel.entity';
 
 export interface IContentRepository {
@@ -9,4 +10,5 @@ export interface IContentRepository {
     embedding?: number[],
   ): Promise<Reel>;
   findById(id: string): Promise<Reel | null>;
+  searchTranscripts(queryVector: number[]): Promise<TranscriptSearchResult[]>;
 }
