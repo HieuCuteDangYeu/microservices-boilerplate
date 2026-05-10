@@ -6,10 +6,10 @@ WORKDIR /usr/src/app
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml ./
-COPY apps/auth-service/prisma ./apps/auth-service/prisma/
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
+COPY apps/auth-service/prisma ./apps/auth-service/prisma/
 COPY . .
 
 RUN npx prisma generate --schema=./apps/auth-service/prisma/schema.prisma
@@ -25,9 +25,10 @@ WORKDIR /usr/src/app
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml ./
-COPY apps/auth-service/prisma ./apps/auth-service/prisma/
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
+
+COPY apps/auth-service/prisma ./apps/auth-service/prisma/
 
 RUN npx prisma@5.22.0 generate --schema=./apps/auth-service/prisma/schema.prisma
 
