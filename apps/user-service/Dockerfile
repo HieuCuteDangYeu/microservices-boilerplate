@@ -27,6 +27,8 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
+COPY --from=builder /usr/src/app/dist ./dist
+
 RUN npx prisma@5.22.0 generate --schema=./apps/user-service/prisma/schema.prisma
 
 USER node

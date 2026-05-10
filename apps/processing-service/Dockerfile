@@ -25,6 +25,8 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
+COPY --from=builder /usr/src/app/dist ./dist
+
 USER node
 
 CMD ["node", "dist/apps/processing-service/main.js"]
