@@ -147,6 +147,7 @@ export class ConversationController {
         content: body.content,
         type: body.type,
         signalType: body.signalType,
+        registrationId: body.registrationId,
         conversationId: convResult.id,
         senderId: user.id,
       }),
