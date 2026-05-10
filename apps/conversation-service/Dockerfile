@@ -5,12 +5,9 @@ RUN apk add --no-cache openssl
 WORKDIR /usr/src/app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+COPY . .
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
-
-COPY apps/conversation-service/prisma ./apps/conversation-service/prisma/
-COPY . .
 
 RUN npx prisma generate --schema=./apps/conversation-service/prisma/schema.prisma
 
@@ -24,15 +21,11 @@ RUN apk add --no-cache openssl
 WORKDIR /usr/src/app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
-COPY apps/conversation-service/prisma ./apps/conversation-service/prisma/
-
 RUN npx prisma@5.22.0 generate --schema=./apps/conversation-service/prisma/schema.prisma
-
-COPY --from=builder /usr/src/app/dist ./dist
 
 USER node
 

@@ -4,11 +4,9 @@ WORKDIR /usr/src/app
 
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+COPY . .
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
-
-COPY . .
 
 RUN pnpm run build api-gateway
 
@@ -19,12 +17,10 @@ WORKDIR /usr/src/app
 
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
-COPY --from=builder /usr/src/app/dist ./dist
-
 USER node
 
-CMD ["node", "dist/apps/api-gateway/main"]
+CMD ["node", "dist/apps/api-gateway/main.js"]

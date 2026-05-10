@@ -5,10 +5,9 @@ RUN apk add --no-cache openssl
 WORKDIR /usr/src/app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --ignore-scripts
-
 COPY . .
+
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 RUN pnpm run build ai-service
 
@@ -20,11 +19,10 @@ RUN apk add --no-cache openssl
 WORKDIR /usr/src/app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts
+COPY . .
 
-COPY --from=builder /usr/src/app/dist ./dist
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 USER node
 
-CMD ["node", "dist/apps/ai-service/apps/ai-service/src/main"]
+CMD ["node", "dist/apps/ai-service/apps/ai-service/src/main.js"]

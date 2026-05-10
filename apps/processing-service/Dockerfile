@@ -5,11 +5,9 @@ RUN apk add --no-cache ffmpeg
 WORKDIR /usr/src/app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+COPY . .
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
-
-COPY . .
 
 RUN pnpm run build processing-service
 
@@ -21,12 +19,10 @@ RUN apk add --no-cache ffmpeg
 WORKDIR /usr/src/app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
-COPY --from=builder /usr/src/app/dist ./dist
-
 USER node
 
-CMD ["node", "dist/apps/processing-service/apps/processing-service/src/main"]
+CMD ["node", "dist/apps/processing-service/main.js"]
