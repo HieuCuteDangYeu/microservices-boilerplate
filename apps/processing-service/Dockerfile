@@ -4,6 +4,7 @@ RUN apk add --no-cache ffmpeg
 
 WORKDIR /usr/src/app
 RUN corepack enable
+RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
 
@@ -18,6 +19,7 @@ RUN apk add --no-cache ffmpeg
 
 WORKDIR /usr/src/app
 RUN corepack enable
+RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
 
