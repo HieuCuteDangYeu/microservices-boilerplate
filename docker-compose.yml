@@ -149,6 +149,19 @@ services:
     networks:
       - microservices-net
 
+  ai-service:
+    image: ${DOCKERHUB_USERNAME}/ai-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/ai-service/Dockerfile
+    restart: always
+    environment:
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - WHISPER_MODEL=${WHISPER_MODEL:-Xenova/whisper-base}
+    networks:
+      - microservices-net
+
 networks:
   microservices-net:
     driver: bridge
