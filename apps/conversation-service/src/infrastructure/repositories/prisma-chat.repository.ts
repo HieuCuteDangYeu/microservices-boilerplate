@@ -28,16 +28,13 @@ interface CachedReadStatus {
   at: string;
 }
 
-// 👇 1. CẬP NHẬT INTERFACE CACHE
 interface CachedMessage {
   id: string;
   conversationId: string;
   senderId: string;
-
-  type: string; // Business Type
-  signalType: number; // Signal Type
-
-  content: string; // Cho người nhận
+  type: string;
+  signalType: number;
+  content: string;
   createdAt: string;
   readBy?: CachedReadStatus[];
 }
@@ -136,18 +133,11 @@ export class PrismaChatRepository implements IChatRepository {
   private async updateRedisInBackground(domainMsg: Message) {
     const redisKey = `chat:history:${domainMsg.conversationId}`;
 
-    // Dùng pipeline để gom lệnh Redis
     const pipeline = this.redis.pipeline();
 
-    pipeline.lpush(
-      redisKey,
-      JSON.stringify({
-        ...domainMsg,
-        createdAt: domainMsg.createdAt.toISOString(),
-      }),
-    );
-    pipeline.ltrim(redisKey, 0, 49); // Giữ 50 tin mới nhất
-    pipeline.expire(redisKey, 60 * 60 * 24 * 7); // Gia hạn
+    pipeline.lpush(redisKey, JSON.stringify(ChatMapper.toDto(domainMsg)));
+    pipeline.ltrim(redisKey, 0, 49);
+    pipeline.expire(redisKey, 60 * 60 * 24 * 7);
 
     await pipeline.exec();
   }
@@ -215,15 +205,8 @@ export class PrismaChatRepository implements IChatRepository {
     // Hydrate Cache: Chỉ cache nếu đang load trang đầu tiên và Cache bị rỗng
     if (!cursor && domainMsgs.length > 0) {
       const pipeline = this.redis.pipeline();
-      // Cache tối đa 50 tin mới nhất thôi
       domainMsgs.slice(0, 50).forEach((msg) => {
-        pipeline.rpush(
-          redisKey,
-          JSON.stringify({
-            ...msg,
-            createdAt: msg.createdAt.toISOString(),
-          }),
-        );
+        pipeline.rpush(redisKey, JSON.stringify(ChatMapper.toDto(msg)));
       });
       pipeline.expire(redisKey, 60 * 60 * 24 * 7);
       await pipeline.exec();

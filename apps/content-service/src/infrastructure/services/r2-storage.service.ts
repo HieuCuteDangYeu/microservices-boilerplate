@@ -1,4 +1,9 @@
-import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IStorageService } from '../../domain/interfaces/storage.service.interface';
@@ -41,5 +46,49 @@ export class R2StorageService implements IStorageService {
       console.error('R2 Vault Check Failed for Reel:', error);
       return false;
     }
+  }
+
+  async deleteObjects(keys: string[]): Promise<void> {
+    const bucketName = this.configService.get<string>('R2_BUCKET_NAME')?.trim();
+    const filtered = keys
+      .map((k) => k.replace(/^\/+/, '').trim())
+      .filter((k) => k.length > 0);
+
+    if (filtered.length === 0) return;
+
+    await this.s3Client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucketName,
+        Delete: {
+          Objects: filtered.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      }),
+    );
+  }
+
+  async listObjects(prefix: string): Promise<string[]> {
+    const bucketName = this.configService.get<string>('R2_BUCKET_NAME')?.trim();
+    const cleanPrefix = prefix.replace(/^\/+/, '').trim();
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const response = await this.s3Client.send(
+        new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: cleanPrefix,
+          ContinuationToken: continuationToken,
+        }),
+      );
+
+      for (const obj of response.Contents ?? []) {
+        if (obj.Key) keys.push(obj.Key);
+      }
+
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+
+    return keys;
   }
 }

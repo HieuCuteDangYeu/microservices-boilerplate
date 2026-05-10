@@ -19,6 +19,16 @@
   "monorepo": true,
   "root": "apps/microservices-boilerplate",
   "projects": {
+    "ai-service": {
+      "type": "application",
+      "root": "apps/ai-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/ai-service/src",
+      "compilerOptions": {
+        "webpack": false,
+        "tsConfigPath": "apps/ai-service/tsconfig.app.json"
+      }
+    },
     "api-gateway": {
       "type": "application",
       "root": "apps/api-gateway",

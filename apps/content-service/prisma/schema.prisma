@@ -17,15 +17,23 @@ enum ProcessingStatus {
 }
 
 model Reel {
-  id          String   @id @default(uuid())
-  userId      String   
-  mediaKey    String   // The S3 key ONLY (e.g., reels/user-123/uuid.mp4)
-  title       String?
-  description String?
-  tags        String[]
-  status      ProcessingStatus @default(PENDING)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(uuid())
+  userId       String
+  mediaKey     String
+  title        String?
+  description  String?
+  tags         String[]
+  status       ProcessingStatus @default(PENDING)
+  visibility   String   @default("public")
+  viewCount    BigInt   @default(0)
+  transcript   String?  @db.Text
+  embedding    Unsupported("vector(384)")?
+  thumbnailKey String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([userId])
+  @@index([visibility, createdAt(sort: Desc)])
+  @@index([userId, visibility, createdAt(sort: Desc)])
+  @@index([status])
 }

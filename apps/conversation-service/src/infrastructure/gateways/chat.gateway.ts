@@ -1,5 +1,5 @@
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
-import { Inject } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -9,29 +9,32 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { IChatRepository } from 'apps/conversation-service/src/domain/interfaces/chat.repository.interface';
-import { Server, Socket } from 'socket.io'; // Import đúng type của Socket.io
+import { Server, Socket } from 'socket.io';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
+import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
+import { Message } from '../../domain/entities/message.entity';
+import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
+import { ChatMapper } from '../repositories/chat.mapper';
 
 @WebSocketGateway({ cors: { origin: '*' } })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer() server: Server;
+  @WebSocketServer()
+  server!: Server;
+
+  private readonly logger = new Logger(ChatGateway.name);
 
   constructor(
     private readonly sendMessageUseCase: SendMessageUseCase,
+    private readonly triggerBotReplyUseCase: TriggerBotReplyUseCase,
     @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
   ) {}
 
   // --- 1. HANDLE CONNECTION ---
   handleConnection(client: Socket) {
     const userId = this.extractUserId(client);
-
     if (userId) {
       void client.join(userId);
       console.log(`Client connected: ${client.id} (User: ${userId})`);
-    } else {
-      // Tùy logic: Có thể disconnect nếu không có userId
-      // client.disconnect();
     }
   }
 
@@ -49,7 +52,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const senderId = this.extractUserId(client);
     if (!senderId) return;
 
-    // ✅ TẠO MESSAGE TẠM (optimistic)
     const tempMessage = {
       id: crypto.randomUUID(),
       conversationId: payload.conversationId,
@@ -65,13 +67,41 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.sendMessageUseCase
       .execute(payload, senderId)
-      .then(({ message, conversation }) => {
-        // optional: emit ack / sync lại ID thật
-        this.server.to(payload.conversationId).emit('message_synced', message);
+      .then(async (savedMessage: Message) => {
+        this.server
+          .to(payload.conversationId)
+          .emit('message_synced', ChatMapper.toDto(savedMessage));
 
-        conversation.participantIds.forEach((id) => {
-          this.server.to(id).emit('conversation_updated', conversation);
-        });
+        // Update conversation sidebar for all participants (lastMessage, ordering)
+        const conversation = await this.chatRepository.findConversation(
+          payload.conversationId,
+        );
+        if (conversation) {
+          conversation.lastMessage =
+            savedMessage.content ?? savedMessage.type ?? null;
+          conversation.lastMessageAt = savedMessage.createdAt;
+          this.server
+            .to(payload.conversationId)
+            .emit(
+              'conversation_updated',
+              ChatMapper.conversationToDto(conversation),
+            );
+        }
+
+        void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
+          (result) => {
+            if (result.botReply) {
+              this.server
+                .to(savedMessage.conversationId)
+                .emit('new_message', ChatMapper.toDto(result.botReply));
+            }
+          },
+          (err) => {
+            this.logger.warn(
+              `Bot reply trigger failed: ${(err as Error).message}`,
+            );
+          },
+        );
       })
       .catch(() => {
         this.server.to(client.id).emit('message_failed', tempMessage.id);
@@ -88,10 +118,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // --- 4. WEBRTC SIGNALING ---
-  // Sử dụng 'any' có kiểm soát hoặc tạo DTO riêng cho WebRTC signal
   @SubscribeMessage('offer')
   handleOffer(
-    @MessageBody() data: Record<string, any>,
+    @MessageBody() data: Record<string, unknown>,
     @ConnectedSocket() client: Socket,
   ) {
     this.relaySignal(client, 'offer', data);
@@ -99,7 +128,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('answer')
   handleAnswer(
-    @MessageBody() data: Record<string, any>,
+    @MessageBody() data: Record<string, unknown>,
     @ConnectedSocket() client: Socket,
   ) {
     this.relaySignal(client, 'answer', data);
@@ -107,7 +136,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('ice_candidate')
   handleIceCandidate(
-    @MessageBody() data: Record<string, any>,
+    @MessageBody() data: Record<string, unknown>,
     @ConnectedSocket() client: Socket,
   ) {
     this.relaySignal(client, 'ice_candidate', data);
@@ -116,13 +145,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- 5. TYPING INDICATOR ---
   @SubscribeMessage('typing_start')
   handleTypingStart(
-    @MessageBody() conversationId: string, // Nhận vào ID phòng
+    @MessageBody() conversationId: string,
     @ConnectedSocket() client: Socket,
   ) {
     const userId = this.extractUserId(client);
-
-    // Gửi cho tất cả mọi người trong phòng TRỪ người gửi (client.to)
-    // Client nhận được sẽ hiện: "User A đang soạn tin..."
     client.to(conversationId).emit('user_typing', {
       conversationId,
       userId,
@@ -136,8 +162,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
   ) {
     const userId = this.extractUserId(client);
-
-    // Gửi thông báo dừng gõ
     client.to(conversationId).emit('user_typing', {
       conversationId,
       userId,
@@ -145,70 +169,41 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
-  // --- PRIVATE HELPER FUNCTIONS (Để code gọn và Type Safe) ---
-
-  /**
-   * Helper chuyển tiếp tín hiệu WebRTC an toàn
-   */
+  // --- PRIVATE HELPERS ---
   private relaySignal(
     client: Socket,
     event: string,
-    data: Record<string, any>,
-  ) {
-    const toUserId = String(data['toUserId']); // Truy cập an toàn qua string key
+    data: Record<string, unknown>,
+  ): void {
+    const toUserId = String(data['toUserId']);
     if (toUserId) {
       const senderId = this.extractUserId(client);
       client.to(toUserId).emit(event, { ...data, fromUserId: senderId });
     }
   }
 
-  /**
-   * Helper lấy userId từ query string đảm bảo trả về string | null
-   */
   private extractUserId(client: Socket): string | null {
-    // handshake.query có thể là ParsedUrlQuery, truy cập an toàn
     const userId = client.handshake.query?.['userId'];
-
     if (Array.isArray(userId)) {
       return userId[0];
     }
     return userId || null;
   }
 
-  /**
-   * Helper xử lý Error object an toàn (Tránh lỗi Unsafe member access)
-   */
-  private extractErrorMessage(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    if (typeof error === 'string') {
-      return error;
-    }
-    return 'An unknown error occurred';
-  }
-
   @SubscribeMessage('mark_seen')
   async handleMarkSeen(
-    @MessageBody() conversationId: string, // Hoặc object { conversationId: string } tuỳ client gửi
+    @MessageBody() conversationId: string,
     @ConnectedSocket() client: Socket,
   ) {
-    // Lưu ý: Nếu client gửi json { conversationId: "..." } thì @MessageBody() conversationId sẽ là object
-    // Bạn nên check lại log xem payload là string hay object nhé.
-    // Giả sử client gửi string conversationId.
-
     const userId = this.extractUserId(client);
     if (!userId) return;
 
-    // 1. Gọi Repo và LẤY KẾT QUẢ
     const updatedCount = await this.chatRepository.markMessagesAsSeen(
       conversationId,
       userId,
     );
 
-    // 2. Kiểm tra count > 0 mới bắn Socket
     if (updatedCount > 0) {
-      // Báo cho người kia biết
       client.to(conversationId).emit('messages_seen', {
         conversationId,
         readByUserId: userId,
@@ -216,10 +211,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
       console.log(
         `✅ [Socket] Emitted messages_seen to room ${conversationId}`,
-      );
-    } else {
-      console.log(
-        `⚠️ [Socket] Skipped emit messages_seen (DB updated 0 records)`,
       );
     }
   }
