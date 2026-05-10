@@ -1,5 +1,7 @@
 FROM node:20-alpine AS builder
 
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /usr/src/app
 RUN corepack enable
 
