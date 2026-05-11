@@ -25,9 +25,11 @@ RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
 
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts
+RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /usr/src/app/dist ./dist
+
+RUN npx prisma generate --schema=./apps/conversation-service/prisma/schema.prisma
 
 USER node
 
