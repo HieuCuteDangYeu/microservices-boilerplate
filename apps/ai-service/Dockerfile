@@ -2,6 +2,7 @@ FROM node:20-bullseye AS builder
 
 WORKDIR /usr/src/app
 RUN corepack enable
+RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
 
@@ -14,6 +15,7 @@ FROM node:20-bullseye AS production
 
 WORKDIR /usr/src/app
 RUN corepack enable
+RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
 
