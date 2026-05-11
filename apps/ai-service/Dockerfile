@@ -15,7 +15,7 @@ RUN pnpm run build ai-service
 
 FROM node:20-alpine AS production
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl gcompat
 
 WORKDIR /usr/src/app
 RUN corepack enable
