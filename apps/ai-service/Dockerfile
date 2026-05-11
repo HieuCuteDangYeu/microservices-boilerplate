@@ -8,6 +8,8 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
+RUN chown -R node:node /usr/src/app/node_modules
+
 RUN pnpm run build ai-service
 
 
@@ -20,6 +22,8 @@ RUN corepack prepare pnpm@9.15.0 --activate
 COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
+
+RUN chown -R node:node /usr/src/app/node_modules
 
 COPY --from=builder /usr/src/app/dist ./dist
 
