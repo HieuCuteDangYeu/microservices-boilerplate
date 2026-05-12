@@ -57,6 +57,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       content: payload.content,
       type: payload.type,
       signalType: payload.signalType,
+      replyToId: payload.replyToId,
       createdAt: new Date(),
       status: 'sending',
     };

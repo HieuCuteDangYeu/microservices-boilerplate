@@ -61,6 +61,11 @@ model Message {
 
   registrationId Int?     // ID thiết bị người gửi
   senderId       String
+  isRecalled     Boolean  @default(false)
+  recalledAt     DateTime?
+  replyToId      String?  @db.ObjectId
+  replyPreview   Json?
+  reactions      Json?
   
   conversationId String   @db.ObjectId
   conversation   Conversation @relation(fields: [conversationId], references: [id])
@@ -69,6 +74,7 @@ model Message {
   readBy         MessageReadStatus[]
   
   @@index([conversationId, createdAt(sort: Desc)])
+  @@index([replyToId])
   @@map("messages")
 }
 

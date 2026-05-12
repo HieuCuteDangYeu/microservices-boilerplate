@@ -8,6 +8,25 @@ export const MessageSchema = z.object({
   content: z.string(),
   type: z.string().default('text'),
   createdAt: z.string().datetime(),
+  isRecalled: z.boolean().optional(),
+  recalledAt: z.string().datetime().optional(),
+  replyToId: z.string().optional(),
+  replyPreview: z
+    .object({
+      senderName: z.string(),
+      content: z.string(),
+      type: z.enum(['text', 'image', 'video', 'file', 'call']),
+    })
+    .optional(),
+  reactions: z
+    .record(
+      z.string(),
+      z.object({
+        emoji: z.string(),
+        createdAt: z.string().datetime(),
+      }),
+    )
+    .optional(),
   readBy: z
     .array(
       z.object({

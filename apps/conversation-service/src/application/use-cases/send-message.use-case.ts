@@ -24,6 +24,7 @@ export class SendMessageUseCase {
       signalType: dto.signalType,
       type: dto.type,
       createdAt: new Date(),
+      replyToId: dto.replyToId,
     });
 
     const savedMessage = await this.chatRepository.createMessage(newMessage);

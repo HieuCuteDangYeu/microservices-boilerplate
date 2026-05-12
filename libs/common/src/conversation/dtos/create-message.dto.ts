@@ -17,6 +17,7 @@ export const CreateMessageSchema = z.object({
     }),
   content: z.string().min(1, 'Ciphertext content cannot be empty'),
   registrationId: z.number().int().optional(),
+  replyToId: z.string().min(1, 'Reply message ID cannot be empty').optional(),
 });
 
 export class CreateMessageDto extends createZodDto(CreateMessageSchema) {}

@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import { ContentController } from '@gateway/content/content.controller';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
+import { MessageController } from '@gateway/conversation/message.controller';
 import { MediaController } from '@gateway/media/media.controller';
 import { PaymentController } from '@gateway/payment/payment.controller';
 import { UserController } from '@gateway/users/user.controller';
@@ -87,6 +88,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     MediaController,
     PaymentController,
     ConversationController,
+    MessageController,
     GatewayKeyController,
     ContentController,
   ],

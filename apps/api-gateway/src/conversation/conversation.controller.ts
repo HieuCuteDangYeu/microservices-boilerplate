@@ -106,6 +106,23 @@ export class ConversationController {
     return (await lastValueFrom(source$)) as MessageDto[];
   }
 
+  @Post(':id/messages/:messageId/recall')
+  @ApiOperation({ summary: 'Thu hồi một tin nhắn' })
+  @ApiOkResponse({ type: MessageDto })
+  async recallMessage(
+    @Param('id') conversationId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<MessageDto> {
+    const source$ = this.conversationClient.send('recall_message', {
+      conversationId,
+      messageId,
+      userId: user.id,
+    });
+
+    return (await lastValueFrom(source$)) as MessageDto;
+  }
+
   // --- 3. LẤY CHI TIẾT CONVERSATION ---
   @Get(':id')
   @ApiOperation({ summary: 'Lấy thông tin cuộc hội thoại' })

@@ -1,4 +1,4 @@
-import { Controller, Logger } from '@nestjs/common';
+import { Controller, Inject, Logger } from '@nestjs/common';
 import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 import { GetUserConversationsUseCase } from './../../application/use-cases/get-user-conversations.use-case';
 
@@ -8,6 +8,7 @@ import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 
 // Use Cases
 import { CreateConversationUseCase } from 'apps/conversation-service/src/application/use-cases/create-conversastion.use-case';
+import { IChatRepository } from 'apps/conversation-service/src/domain/interfaces/chat.repository.interface';
 import { ChatGateway } from 'apps/conversation-service/src/infrastructure/gateways/chat.gateway';
 import { GetConversationUseCase } from '../../application/use-cases/get-conversation.use-case';
 import { GetMessagesUseCase } from '../../application/use-cases/get-messages.use-case';
@@ -25,6 +26,8 @@ export class ConversationMicroserviceController {
     private readonly createConversationUseCase: CreateConversationUseCase,
     private readonly getUserConversationsUseCase: GetUserConversationsUseCase,
     private readonly chatGateway: ChatGateway,
+    @Inject('IChatRepository')
+    private readonly chatRepository: IChatRepository,
   ) {}
 
   // --- 1. TẠO CUỘC TRÒ CHUYỆN (MỚI THÊM) ---
@@ -148,6 +151,100 @@ export class ConversationMicroserviceController {
     } catch (err: unknown) {
       const error = err as Error;
       this.logger.error(error.message);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('add_reaction')
+  async handleAddReaction(
+    @Payload() data: { messageId: string; userId: string; emoji: string },
+  ) {
+    try {
+      const message = await this.chatRepository.addReaction(
+        data.messageId,
+        data.userId,
+        data.emoji,
+      );
+
+      this.chatGateway.server
+        .to(message.conversationId)
+        .emit('message_reaction_updated', message);
+
+      return message;
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [AddReaction] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('remove_reaction')
+  async handleRemoveReaction(
+    @Payload() data: { messageId: string; userId: string },
+  ) {
+    try {
+      const message = await this.chatRepository.removeReaction(
+        data.messageId,
+        data.userId,
+      );
+
+      this.chatGateway.server
+        .to(message.conversationId)
+        .emit('message_reaction_updated', message);
+
+      return message;
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [RemoveReaction] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('recall_message')
+  async handleRecallMessage(
+    @Payload() data: { messageId: string; userId: string },
+  ) {
+    try {
+      const result = await this.chatRepository.recallMessage(
+        data.messageId,
+        data.userId,
+      );
+
+      this.chatGateway.server.to(result.message.conversationId).emit(
+        'message_recalled',
+        {
+          messageId: result.message.id,
+          conversationId: result.message.conversationId,
+          recalledAt: result.message.recalledAt,
+        },
+      );
+
+      if (result.updatedReplyMessageIds.length > 0) {
+        this.chatGateway.server.to(result.message.conversationId).emit(
+          'reply_previews_updated',
+          {
+            updatedMessageIds: result.updatedReplyMessageIds,
+            previewContent: result.previewContent,
+          },
+        );
+      }
+
+      const conversation = await this.chatRepository.findConversation(
+        result.message.conversationId,
+      );
+
+      if (conversation?.participantIds?.length) {
+        conversation.participantIds.forEach((participantId) => {
+          this.chatGateway.server
+            .to(participantId)
+            .emit('conversation_updated', conversation);
+        });
+      }
+
+      return result.message;
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [RecallMessage] Error: ${error.message}`);
       throw new RpcException(error.message);
     }
   }
