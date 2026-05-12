@@ -1,8 +1,9 @@
 import {
-  Prisma,
   MessageReadStatus,
+  Prisma,
   Message as PrismaMessage,
 } from '@prisma/conversation-client';
+import { Conversation } from '../../domain/entities/conversation.entity';
 import {
   Message,
   type MessageReactionMap,
@@ -23,10 +24,9 @@ export class ChatMapper {
       conversationId: prismaMsg.conversationId,
       senderId: prismaMsg.senderId,
 
-      // 👇 CẬP NHẬT 3 DÒNG NÀY
-      type: prismaMsg.type, // Business Type
-      signalType: prismaMsg.signalType, // Signal Type
-      content: prismaMsg.content, // Ciphertext
+      type: prismaMsg.type,
+      signalType: prismaMsg.signalType,
+      content: prismaMsg.content,
       registrationId: prismaMsg.registrationId ?? undefined,
       createdAt: prismaMsg.createdAt,
       isRecalled: prismaMsg.isRecalled,
@@ -51,7 +51,11 @@ export class ChatMapper {
 
     const entries = Object.entries(value as Record<string, unknown>)
       .map(([userId, reaction]) => {
-        if (!reaction || typeof reaction !== 'object' || Array.isArray(reaction)) {
+        if (
+          !reaction ||
+          typeof reaction !== 'object' ||
+          Array.isArray(reaction)
+        ) {
           return null;
         }
 
@@ -64,7 +68,12 @@ export class ChatMapper {
 
         return [userId, { emoji, createdAt }] as const;
       })
-      .filter((entry): entry is readonly [string, { emoji: string; createdAt: string }] => entry !== null);
+      .filter(
+        (
+          entry,
+        ): entry is readonly [string, { emoji: string; createdAt: string }] =>
+          entry !== null,
+      );
 
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
   }
@@ -92,6 +101,36 @@ export class ChatMapper {
       senderName,
       content,
       type: type as MessageReplyPreview['type'],
+    };
+  }
+  static toDto(domain: Message) {
+    return {
+      id: domain.id,
+      conversationId: domain.conversationId,
+      senderId: domain.senderId,
+      content: domain.content,
+      type: domain.type,
+      signalType: domain.signalType,
+      createdAt: domain.createdAt.toISOString(),
+      createdAtMs: domain.createdAt.getTime(),
+      readBy: domain.readBy.map((r) => ({
+        userId: r.userId,
+        at: r.at.toISOString(),
+      })),
+    };
+  }
+
+  static conversationToDto(domain: Conversation) {
+    return {
+      id: domain.id,
+      creatorId: domain.creatorId,
+      participantIds: domain.participantIds,
+      participants: domain.participants,
+      lastMessage: domain.lastMessage,
+      lastMessageAt: domain.lastMessageAt?.toISOString() ?? null,
+      isGroup: domain.isGroup,
+      createdAt: domain.createdAt.toISOString(),
+      updatedAt: domain.updatedAt.toISOString(),
     };
   }
 }

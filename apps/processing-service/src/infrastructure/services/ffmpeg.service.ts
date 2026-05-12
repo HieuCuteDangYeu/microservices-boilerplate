@@ -30,4 +30,37 @@ export class FfmpegService {
         .run();
     });
   }
+
+  async extractAudio(inputPath: string, outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .noVideo()
+        .audioFrequency(16000)
+        .audioChannels(1)
+        .format('wav')
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
+        .run();
+    });
+  }
+
+  async extractThumbnail(
+    inputPath: string,
+    outputPath: string,
+    timestamp = '00:00:02',
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .seekInput(timestamp)
+        .frames(1)
+        .size('480x?')
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) =>
+          reject(err instanceof Error ? err : new Error(String(err))),
+        )
+        .run();
+    });
+  }
 }

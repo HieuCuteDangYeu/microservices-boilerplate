@@ -80,6 +80,15 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
           queueOptions: { durable: true },
         },
       },
+      {
+        name: 'AI_SERVICE',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+          queue: 'ai_queue',
+          queueOptions: { durable: true },
+        },
+      },
     ]),
   ],
   controllers: [

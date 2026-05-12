@@ -4,13 +4,11 @@ RUN apk add --no-cache openssl
 
 WORKDIR /usr/src/app
 RUN corepack enable
-
-COPY package.json pnpm-lock.yaml ./
-COPY apps/payment-service/prisma ./apps/payment-service/prisma/
-
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
+
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 RUN npx prisma generate --schema=./apps/payment-service/prisma/schema.prisma
 
@@ -23,16 +21,16 @@ RUN apk add --no-cache openssl
 
 WORKDIR /usr/src/app
 RUN corepack enable
+RUN corepack prepare pnpm@9.15.0 --activate
 
-COPY package.json pnpm-lock.yaml ./
-COPY apps/payment-service/prisma ./apps/payment-service/prisma/
+COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
-RUN npx prisma@5.22.0 generate --schema=./apps/payment-service/prisma/schema.prisma
-
 COPY --from=builder /usr/src/app/dist ./dist
+
+RUN npx prisma@5.22.0 generate --schema=./apps/payment-service/prisma/schema.prisma
 
 USER node
 
-CMD ["node", "dist/apps/payment-service/apps/payment-service/src/main"]
+CMD ["node", "dist/apps/payment-service/apps/payment-service/src/main.js"]

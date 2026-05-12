@@ -1,7 +1,7 @@
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { InvalidMediaFileError } from '@content/domain/errors/content.error';
+import type { IProcessingService } from '@content/domain/interfaces/processing-service.interface';
 import { Inject, Injectable } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
 import type { IStorageService } from '../../domain/interfaces/storage.service.interface';
 
@@ -12,8 +12,8 @@ export class CreateReelUseCase {
     private readonly contentRepository: IContentRepository,
     @Inject('IStorageService')
     private readonly storageService: IStorageService,
-    @Inject('PROCESSING_SERVICE')
-    private readonly messageBroker: ClientProxy,
+    @Inject('IProcessingService')
+    private readonly processingService: IProcessingService,
   ) {}
 
   async execute(userId: string, payload: CreateReelDto) {
@@ -31,7 +31,7 @@ export class CreateReelUseCase {
       status: 'PENDING',
     });
 
-    this.messageBroker.emit('reel.created', {
+    this.processingService.emitReelCreated({
       reelId: savedReel.id,
       mediaKey: savedReel.mediaKey,
       userId: userId,

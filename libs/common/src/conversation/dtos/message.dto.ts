@@ -7,6 +7,7 @@ export const MessageSchema = z.object({
   senderId: z.string(),
   content: z.string(),
   type: z.string().default('text'),
+  signalType: z.number().int().optional(),
   createdAt: z.string().datetime(),
   isRecalled: z.boolean().optional(),
   recalledAt: z.string().datetime().optional(),
@@ -27,6 +28,7 @@ export const MessageSchema = z.object({
       }),
     )
     .optional(),
+  createdAtMs: z.number().int(),
   readBy: z
     .array(
       z.object({

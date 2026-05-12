@@ -70,4 +70,15 @@ export class R2Service {
 
     await Promise.all(uploadPromises);
   }
+
+  async uploadThumbnail(localPath: string, s3Key: string): Promise<void> {
+    const fileBuffer = fs.readFileSync(localPath);
+    const command = new PutObjectCommand({
+      Bucket: this.bucketName,
+      Key: s3Key,
+      Body: fileBuffer,
+      ContentType: 'image/jpeg',
+    });
+    await this.s3Client.send(command);
+  }
 }
