@@ -58,6 +58,21 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
         }),
         inject: [ConfigService],
       },
+      {
+        name: 'AUTH_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'auth_queue',
+            queueOptions: { durable: true },
+            heartbeat: 60,
+            retryAttempts: 10,
+            retryDelay: 3000,
+          },
+        }),
+        inject: [ConfigService],
+      },
     ]),
   ],
   controllers: [ConversationMicroserviceController, KeyMicroserviceController],

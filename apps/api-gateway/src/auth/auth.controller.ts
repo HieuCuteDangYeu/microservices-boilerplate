@@ -73,6 +73,24 @@ export class AuthController {
     return request.user!;
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('socket-token')
+  @ApiOperation({
+    summary:
+      'Return the currently valid access token for authenticated WebSocket handshakes',
+  })
+  getSocketToken(@Req() request: AuthenticatedRequest): {
+    accessToken: string;
+  } {
+    const accessToken = request.cookies['access_token'];
+
+    if (!accessToken) {
+      throw new HttpException('No access token found', HttpStatus.UNAUTHORIZED);
+    }
+
+    return { accessToken };
+  }
+
   @Post('confirm')
   @ApiOperation({ summary: 'Confirm user account' })
   async confirmAccount(@Body() dto: ConfirmAccountDto) {

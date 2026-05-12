@@ -7,18 +7,18 @@ export interface ChatParticipant {
   email?: string;
 }
 export class Conversation {
-  id: string;
-  creatorId: string;
-  participantIds: string[];
+  id!: string;
+  creatorId!: string;
+  participantIds: string[] = [];
   participants?: ChatParticipant[];
   lastMessage?: string | null;
   lastMessageAt?: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt!: Date;
+  updatedAt!: Date;
   messages?: Message[]; // Optional relation
-  isGroup: boolean;
+  isGroup!: boolean;
 
-  constructor(partial?: Partial<Conversation>) {
+  constructor(partial: Partial<Conversation> = {}) {
     Object.assign(this, partial);
   }
 }

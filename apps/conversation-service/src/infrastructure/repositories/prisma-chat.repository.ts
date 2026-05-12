@@ -1,10 +1,13 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/conversation-client';
 import Redis from 'ioredis';
 
 // Entities & Interfaces
@@ -12,7 +15,12 @@ import {
   ChatParticipant,
   Conversation,
 } from '../../domain/entities/conversation.entity';
-import { Message } from '../../domain/entities/message.entity';
+import {
+  Message,
+  type MessageReactionMap,
+  type MessageReplyPreview,
+  type RecallMessageResult,
+} from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -32,12 +40,22 @@ interface CachedMessage {
   id: string;
   conversationId: string;
   senderId: string;
+  clientMessageId?: string;
   type: string;
   signalType: number;
   content: string;
   createdAt: string;
+  isRecalled?: boolean;
+  recalledAt?: string;
+  replyToId?: string;
+  replyPreview?: MessageReplyPreview;
   readBy?: CachedReadStatus[];
+  reactions?: MessageReactionMap;
 }
+
+const RECALLED_PREVIEW_CONTENT = 'Tin nhắn đã thu hồi';
+const RECALLED_LAST_MESSAGE = '🚫 Message recalled';
+const RECALL_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class PrismaChatRepository implements IChatRepository {
@@ -57,8 +75,38 @@ export class PrismaChatRepository implements IChatRepository {
 
   // --- 1. CREATE MESSAGE ---
   async createMessage(message: Message): Promise<Message> {
+    await this.assertConversationParticipant(
+      message.conversationId,
+      message.senderId,
+    );
+
+    if (message.clientMessageId) {
+      const existingMessage = await this.prisma.message.findFirst({
+        where: {
+          conversationId: message.conversationId,
+          senderId: message.senderId,
+          clientMessageId: message.clientMessageId,
+        },
+      });
+
+      if (existingMessage) {
+        const domainMessage = ChatMapper.toDomain(existingMessage);
+        if (domainMessage.signalType === 0) {
+          domainMessage.content = this.encryptionRepository.decrypt(
+            domainMessage.content,
+          );
+        }
+
+        return domainMessage;
+      }
+    }
+
     // BƯỚC 1: Chuẩn bị dữ liệu (CPU bound - cực nhanh)
     let contentToSave = message.content;
+    const replyPreview = await this.buildReplyPreview(
+      message.replyToId,
+      message.conversationId,
+    );
 
     // Logic mã hóa
     if (message.signalType === 0) {
@@ -91,10 +139,16 @@ export class PrismaChatRepository implements IChatRepository {
       this.prisma.message.create({
         data: {
           type: message.type,
+          clientMessageId: message.clientMessageId,
           signalType: message.signalType ?? 1,
           content: contentToSave,
           registrationId: message.registrationId,
           senderId: message.senderId,
+          isRecalled: false,
+          replyToId: message.replyToId,
+          replyPreview: replyPreview
+            ? (replyPreview as unknown as Prisma.InputJsonValue)
+            : null,
           conversationId: message.conversationId,
           readBy: [],
         },
@@ -162,10 +216,18 @@ export class PrismaChatRepository implements IChatRepository {
               id: plain.id,
               conversationId: plain.conversationId,
               senderId: plain.senderId,
+              clientMessageId: plain.clientMessageId,
               type: plain.type,
               signalType: plain.signalType,
               content: plain.content,
               createdAt: new Date(plain.createdAt),
+              isRecalled: plain.isRecalled,
+              recalledAt: plain.recalledAt
+                ? new Date(plain.recalledAt)
+                : undefined,
+              replyToId: plain.replyToId,
+              replyPreview: this.normalizeReplyPreview(plain.replyPreview),
+              reactions: this.normalizeReactions(plain.reactions),
 
               // 👇 SỬA LỖI TẠI ĐÂY
               readBy: (plain.readBy || []).map(
@@ -376,12 +438,205 @@ export class PrismaChatRepository implements IChatRepository {
     return ConversationMapper.toDomain(conversation);
   }
 
+  async addReaction(
+    messageId: string,
+    userId: string,
+    emoji: string,
+  ): Promise<Message> {
+    if (!emoji.trim()) {
+      throw new BadRequestException('Emoji is required');
+    }
+
+    const existingMessage = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+
+    if (!existingMessage) {
+      throw new NotFoundException('Message not found');
+    }
+
+    await this.assertConversationParticipant(
+      existingMessage.conversationId,
+      userId,
+    );
+
+    const reactions = this.normalizeReactions(existingMessage.reactions);
+    const nextReactions: MessageReactionMap = {
+      ...(reactions || {}),
+      [userId]: {
+        emoji,
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    const updatedMessage = await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        reactions: nextReactions as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.clearConversationCache(updatedMessage.conversationId);
+    return ChatMapper.toDomain(updatedMessage);
+  }
+
+  async removeReaction(messageId: string, userId: string): Promise<Message> {
+    const existingMessage = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+
+    if (!existingMessage) {
+      throw new NotFoundException('Message not found');
+    }
+
+    await this.assertConversationParticipant(
+      existingMessage.conversationId,
+      userId,
+    );
+
+    const reactions = this.normalizeReactions(existingMessage.reactions);
+    if (!reactions || !reactions[userId]) {
+      return ChatMapper.toDomain(existingMessage);
+    }
+
+    const remainingReactions = { ...reactions };
+    delete remainingReactions[userId];
+
+    const updatedMessage = await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        reactions:
+          Object.keys(remainingReactions).length > 0
+            ? (remainingReactions as unknown as Prisma.InputJsonValue)
+            : null,
+      },
+    });
+
+    await this.clearConversationCache(updatedMessage.conversationId);
+    return ChatMapper.toDomain(updatedMessage);
+  }
+
+  async recallMessage(
+    messageId: string,
+    userId: string,
+  ): Promise<RecallMessageResult> {
+    const existingMessage = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+
+    if (!existingMessage) {
+      throw new NotFoundException('Message not found');
+    }
+
+    await this.assertConversationParticipant(
+      existingMessage.conversationId,
+      userId,
+    );
+
+    if (existingMessage.senderId !== userId) {
+      throw new ForbiddenException('You can only recall your own messages');
+    }
+
+    if (existingMessage.isRecalled) {
+      throw new BadRequestException('Message already recalled');
+    }
+
+    if (existingMessage.type === 'call') {
+      throw new BadRequestException(
+        'This message type does not support recall',
+      );
+    }
+
+    if (Date.now() - existingMessage.createdAt.getTime() > RECALL_WINDOW_MS) {
+      throw new BadRequestException(
+        'Message can only be recalled within 24 hours',
+      );
+    }
+
+    const recalledAt = new Date();
+    const conversationId = existingMessage.conversationId;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const replyMessages = await tx.message.findMany({
+        where: {
+          conversationId,
+          replyToId: messageId,
+        },
+        select: {
+          id: true,
+          replyPreview: true,
+        },
+      });
+
+      const latestMessage = await tx.message.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+
+      const updatedMessage = await tx.message.update({
+        where: { id: messageId },
+        data: {
+          isRecalled: true,
+          recalledAt,
+          reactions: null,
+        },
+      });
+
+      const updatedReplyMessageIds: string[] = [];
+
+      for (const replyMessage of replyMessages) {
+        const nextReplyPreview = this.mergeReplyPreviewContent(
+          replyMessage.replyPreview,
+          RECALLED_PREVIEW_CONTENT,
+        );
+
+        if (!nextReplyPreview) {
+          continue;
+        }
+
+        await tx.message.update({
+          where: { id: replyMessage.id },
+          data: {
+            replyPreview: nextReplyPreview as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        updatedReplyMessageIds.push(replyMessage.id);
+      }
+
+      if (latestMessage?.id === messageId) {
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: {
+            lastMessage: RECALLED_LAST_MESSAGE,
+          },
+        });
+      }
+
+      return {
+        updatedMessage,
+        updatedReplyMessageIds,
+      };
+    });
+
+    await this.clearConversationCache(conversationId);
+
+    return {
+      message: ChatMapper.toDomain(result.updatedMessage),
+      updatedReplyMessageIds: result.updatedReplyMessageIds,
+      previewContent: RECALLED_PREVIEW_CONTENT,
+    };
+  }
+
   async markMessagesAsSeen(
     conversationId: string,
     userId: string,
   ): Promise<number> {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(conversationId);
     if (!isObjectId) throw new BadRequestException('Invalid conversation ID');
+
+    await this.assertConversationParticipant(conversationId, userId);
 
     try {
       const result = await this.prisma.message.updateMany({
@@ -396,16 +651,211 @@ export class PrismaChatRepository implements IChatRepository {
       });
 
       if (result.count > 0) {
-        try {
-          await this.redis.del(`chat:history:${conversationId}`);
-        } catch (e) {
-          this.logger.error(e);
-        }
+        await this.clearConversationCache(conversationId);
       }
       return result.count;
     } catch (error) {
       this.logger.error(error);
       throw new InternalServerErrorException('Could not mark seen');
     }
+  }
+
+  private normalizeReactions(value: unknown): MessageReactionMap | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    const normalized = Object.entries(value as Record<string, unknown>)
+      .map(([userId, reaction]) => {
+        if (
+          !reaction ||
+          typeof reaction !== 'object' ||
+          Array.isArray(reaction)
+        ) {
+          return null;
+        }
+
+        const emoji = (reaction as Record<string, unknown>).emoji;
+        const createdAt = (reaction as Record<string, unknown>).createdAt;
+
+        if (typeof emoji !== 'string' || typeof createdAt !== 'string') {
+          return null;
+        }
+
+        return [userId, { emoji, createdAt }] as const;
+      })
+      .filter(
+        (
+          entry,
+        ): entry is readonly [string, { emoji: string; createdAt: string }] =>
+          entry !== null,
+      );
+
+    return normalized.length > 0 ? Object.fromEntries(normalized) : undefined;
+  }
+
+  private normalizeReplyPreview(
+    value: unknown,
+  ): MessageReplyPreview | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    const senderName = (value as Record<string, unknown>).senderName;
+    const content = (value as Record<string, unknown>).content;
+    const type = (value as Record<string, unknown>).type;
+
+    if (
+      typeof senderName !== 'string' ||
+      typeof content !== 'string' ||
+      !['text', 'image', 'video', 'file', 'call'].includes(String(type))
+    ) {
+      return undefined;
+    }
+
+    return {
+      senderName,
+      content,
+      type: type as MessageReplyPreview['type'],
+    };
+  }
+
+  private mergeReplyPreviewContent(
+    value: unknown,
+    content: string,
+  ): MessageReplyPreview | undefined {
+    const current = this.normalizeReplyPreview(value);
+
+    if (!current) {
+      return undefined;
+    }
+
+    return {
+      ...current,
+      content,
+    };
+  }
+
+  private async clearConversationCache(conversationId: string) {
+    try {
+      await this.redis.del(`chat:history:${conversationId}`);
+    } catch (error) {
+      this.logger.error(error);
+    }
+  }
+
+  async assertConversationParticipant(conversationId: string, userId: string) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { participantIds: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (!conversation.participantIds.includes(userId)) {
+      throw new ForbiddenException(
+        'You are not allowed to access messages in this conversation',
+      );
+    }
+  }
+
+  private async buildReplyPreview(
+    replyToId: string | undefined,
+    conversationId: string,
+  ): Promise<MessageReplyPreview | undefined> {
+    if (!replyToId) {
+      return undefined;
+    }
+
+    const replyTarget = await this.prisma.message.findUnique({
+      where: { id: replyToId },
+    });
+
+    if (!replyTarget || replyTarget.conversationId !== conversationId) {
+      throw new BadRequestException('Reply target is invalid');
+    }
+
+    return {
+      senderName: await this.getUserPreviewName(replyTarget.senderId),
+      content: this.getReplyPreviewContent(replyTarget),
+      type: this.getReplyPreviewType(replyTarget.type),
+    };
+  }
+
+  private getReplyPreviewContent(message: {
+    content: string;
+    type: string;
+    signalType: number;
+    isRecalled: boolean;
+  }) {
+    if (message.isRecalled) {
+      return RECALLED_PREVIEW_CONTENT;
+    }
+
+    if (message.type !== 'text') {
+      return this.getAttachmentPreviewLabel(message.type);
+    }
+
+    if (message.signalType !== 0) {
+      return '🔒 Tin nhắn được bảo mật';
+    }
+
+    try {
+      return this.encryptionRepository.decrypt(message.content);
+    } catch {
+      return '🔒 Tin nhắn được bảo mật';
+    }
+  }
+
+  private getReplyPreviewType(type: string): MessageReplyPreview['type'] {
+    if (['image', 'video', 'file', 'call'].includes(type)) {
+      return type as MessageReplyPreview['type'];
+    }
+
+    return 'text';
+  }
+
+  private getAttachmentPreviewLabel(type: string) {
+    const typeMap: Record<string, string> = {
+      image: '[Hình ảnh]',
+      video: '[Video]',
+      file: '[Tập tin]',
+      call: '📞 Cuộc gọi',
+    };
+
+    return typeMap[type] || 'Tin nhắn mới';
+  }
+
+  private async getUserPreviewName(userId: string) {
+    try {
+      const response = await this.userService.findUsersByIds([userId]);
+
+      let usersList: ChatParticipant[] = [];
+
+      if (Array.isArray(response)) {
+        usersList = response as unknown as ChatParticipant[];
+      } else if (
+        response &&
+        'users' in response &&
+        Array.isArray((response as Record<string, unknown>).users)
+      ) {
+        usersList = (response as Record<string, unknown>)
+          .users as ChatParticipant[];
+      }
+
+      const user = usersList.find((item) => item.id === userId);
+      if (user?.name?.trim()) {
+        return user.name.trim();
+      }
+      if (user?.email?.trim()) {
+        return user.email.split('@')[0];
+      }
+    } catch (error) {
+      this.logger.error(`[getUserPreviewName] Failed for ${userId}`, error);
+    }
+
+    return 'User';
   }
 }

@@ -158,6 +158,24 @@ export class ConversationMicroserviceController {
     }
   }
 
+  @MessagePattern('mark_conversation_seen')
+  async handleMarkConversationSeen(
+    @Payload() data: { conversationId: string; userId: string },
+  ) {
+    try {
+      return {
+        updatedCount: await this.chatRepository.markMessagesAsSeen(
+          data.conversationId,
+          data.userId,
+        ),
+      };
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [MarkConversationSeen] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
   @MessagePattern('get_user_conversations')
   async handleGetUserConversations(
     @Payload() data: { userId: string; limit?: number; cursor?: string },
@@ -171,6 +189,99 @@ export class ConversationMicroserviceController {
     } catch (err: unknown) {
       const error = err as Error;
       this.logger.error(error.message);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('add_reaction')
+  async handleAddReaction(
+    @Payload() data: { messageId: string; userId: string; emoji: string },
+  ) {
+    try {
+      const message = await this.chatRepository.addReaction(
+        data.messageId,
+        data.userId,
+        data.emoji,
+      );
+
+      this.chatGateway.server
+        .to(message.conversationId)
+        .emit('message_reaction_updated', message);
+
+      return message;
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [AddReaction] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('remove_reaction')
+  async handleRemoveReaction(
+    @Payload() data: { messageId: string; userId: string },
+  ) {
+    try {
+      const message = await this.chatRepository.removeReaction(
+        data.messageId,
+        data.userId,
+      );
+
+      this.chatGateway.server
+        .to(message.conversationId)
+        .emit('message_reaction_updated', message);
+
+      return message;
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [RemoveReaction] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('recall_message')
+  async handleRecallMessage(
+    @Payload() data: { messageId: string; userId: string },
+  ) {
+    try {
+      const result = await this.chatRepository.recallMessage(
+        data.messageId,
+        data.userId,
+      );
+
+      this.chatGateway.server
+        .to(result.message.conversationId)
+        .emit('message_recalled', {
+          messageId: result.message.id,
+          conversationId: result.message.conversationId,
+          recalledAt: result.message.recalledAt,
+        });
+
+      if (result.updatedReplyMessageIds.length > 0) {
+        this.chatGateway.server
+          .to(result.message.conversationId)
+          .emit('reply_previews_updated', {
+            updatedMessageIds: result.updatedReplyMessageIds,
+            previewContent: result.previewContent,
+          });
+      }
+
+      const conversation = await this.chatRepository.findConversation(
+        result.message.conversationId,
+      );
+
+      if (conversation?.participantIds?.length) {
+        const conversationDto = ChatMapper.conversationToDto(conversation);
+        conversation.participantIds.forEach((participantId) => {
+          this.chatGateway.server
+            .to(participantId)
+            .emit('conversation_updated', conversationDto);
+        });
+      }
+
+      return result.message;
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [RecallMessage] Error: ${error.message}`);
       throw new RpcException(error.message);
     }
   }

@@ -5,10 +5,30 @@ export const MessageSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
   senderId: z.string(),
+  clientMessageId: z.string().optional(),
   content: z.string(),
   type: z.string().default('text'),
   signalType: z.number().int().optional(),
   createdAt: z.string().datetime(),
+  isRecalled: z.boolean().optional(),
+  recalledAt: z.string().datetime().optional(),
+  replyToId: z.string().optional(),
+  replyPreview: z
+    .object({
+      senderName: z.string(),
+      content: z.string(),
+      type: z.enum(['text', 'image', 'video', 'file', 'call']),
+    })
+    .optional(),
+  reactions: z
+    .record(
+      z.string(),
+      z.object({
+        emoji: z.string(),
+        createdAt: z.string().datetime(),
+      }),
+    )
+    .optional(),
   createdAtMs: z.number().int(),
   readBy: z
     .array(

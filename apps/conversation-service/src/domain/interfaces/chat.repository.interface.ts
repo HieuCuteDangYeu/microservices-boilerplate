@@ -1,8 +1,15 @@
 import { Conversation } from 'apps/conversation-service/src/domain/entities/conversation.entity';
-import { Message } from 'apps/conversation-service/src/domain/entities/message.entity';
+import {
+  Message,
+  type RecallMessageResult,
+} from 'apps/conversation-service/src/domain/entities/message.entity';
 
 export abstract class IChatRepository {
   abstract createMessage(message: Message): Promise<Message>;
+  abstract assertConversationParticipant(
+    conversationId: string,
+    userId: string,
+  ): Promise<void>;
   abstract findMessagesByConversationId(
     conversationId: string,
     limit: number,
@@ -26,4 +33,14 @@ export abstract class IChatRepository {
     limit: number,
     cursor?: string,
   ): Promise<Conversation[]>;
+  abstract addReaction(
+    messageId: string,
+    userId: string,
+    emoji: string,
+  ): Promise<Message>;
+  abstract removeReaction(messageId: string, userId: string): Promise<Message>;
+  abstract recallMessage(
+    messageId: string,
+    userId: string,
+  ): Promise<RecallMessageResult>;
 }
