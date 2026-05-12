@@ -40,6 +40,7 @@ interface CachedMessage {
   id: string;
   conversationId: string;
   senderId: string;
+  clientMessageId?: string;
   type: string;
   signalType: number;
   content: string;
@@ -74,6 +75,32 @@ export class PrismaChatRepository implements IChatRepository {
 
   // --- 1. CREATE MESSAGE ---
   async createMessage(message: Message): Promise<Message> {
+    await this.assertConversationParticipant(
+      message.conversationId,
+      message.senderId,
+    );
+
+    if (message.clientMessageId) {
+      const existingMessage = await this.prisma.message.findFirst({
+        where: {
+          conversationId: message.conversationId,
+          senderId: message.senderId,
+          clientMessageId: message.clientMessageId,
+        },
+      });
+
+      if (existingMessage) {
+        const domainMessage = ChatMapper.toDomain(existingMessage);
+        if (domainMessage.signalType === 0) {
+          domainMessage.content = this.encryptionRepository.decrypt(
+            domainMessage.content,
+          );
+        }
+
+        return domainMessage;
+      }
+    }
+
     // BƯỚC 1: Chuẩn bị dữ liệu (CPU bound - cực nhanh)
     let contentToSave = message.content;
     const replyPreview = await this.buildReplyPreview(
@@ -112,6 +139,7 @@ export class PrismaChatRepository implements IChatRepository {
       this.prisma.message.create({
         data: {
           type: message.type,
+          clientMessageId: message.clientMessageId,
           signalType: message.signalType ?? 1,
           content: contentToSave,
           registrationId: message.registrationId,
@@ -188,6 +216,7 @@ export class PrismaChatRepository implements IChatRepository {
               id: plain.id,
               conversationId: plain.conversationId,
               senderId: plain.senderId,
+              clientMessageId: plain.clientMessageId,
               type: plain.type,
               signalType: plain.signalType,
               content: plain.content,
@@ -426,7 +455,10 @@ export class PrismaChatRepository implements IChatRepository {
       throw new NotFoundException('Message not found');
     }
 
-    await this.assertConversationParticipant(existingMessage.conversationId, userId);
+    await this.assertConversationParticipant(
+      existingMessage.conversationId,
+      userId,
+    );
 
     const reactions = this.normalizeReactions(existingMessage.reactions);
     const nextReactions: MessageReactionMap = {
@@ -457,14 +489,18 @@ export class PrismaChatRepository implements IChatRepository {
       throw new NotFoundException('Message not found');
     }
 
-    await this.assertConversationParticipant(existingMessage.conversationId, userId);
+    await this.assertConversationParticipant(
+      existingMessage.conversationId,
+      userId,
+    );
 
     const reactions = this.normalizeReactions(existingMessage.reactions);
     if (!reactions || !reactions[userId]) {
       return ChatMapper.toDomain(existingMessage);
     }
 
-    const { [userId]: _removed, ...remainingReactions } = reactions;
+    const remainingReactions = { ...reactions };
+    delete remainingReactions[userId];
 
     const updatedMessage = await this.prisma.message.update({
       where: { id: messageId },
@@ -492,7 +528,10 @@ export class PrismaChatRepository implements IChatRepository {
       throw new NotFoundException('Message not found');
     }
 
-    await this.assertConversationParticipant(existingMessage.conversationId, userId);
+    await this.assertConversationParticipant(
+      existingMessage.conversationId,
+      userId,
+    );
 
     if (existingMessage.senderId !== userId) {
       throw new ForbiddenException('You can only recall your own messages');
@@ -503,13 +542,12 @@ export class PrismaChatRepository implements IChatRepository {
     }
 
     if (existingMessage.type === 'call') {
-      throw new BadRequestException('This message type does not support recall');
+      throw new BadRequestException(
+        'This message type does not support recall',
+      );
     }
 
-    if (
-      Date.now() - existingMessage.createdAt.getTime() >
-      RECALL_WINDOW_MS
-    ) {
+    if (Date.now() - existingMessage.createdAt.getTime() > RECALL_WINDOW_MS) {
       throw new BadRequestException(
         'Message can only be recalled within 24 hours',
       );
@@ -598,6 +636,8 @@ export class PrismaChatRepository implements IChatRepository {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(conversationId);
     if (!isObjectId) throw new BadRequestException('Invalid conversation ID');
 
+    await this.assertConversationParticipant(conversationId, userId);
+
     try {
       const result = await this.prisma.message.updateMany({
         where: {
@@ -627,7 +667,11 @@ export class PrismaChatRepository implements IChatRepository {
 
     const normalized = Object.entries(value as Record<string, unknown>)
       .map(([userId, reaction]) => {
-        if (!reaction || typeof reaction !== 'object' || Array.isArray(reaction)) {
+        if (
+          !reaction ||
+          typeof reaction !== 'object' ||
+          Array.isArray(reaction)
+        ) {
           return null;
         }
 
@@ -640,12 +684,19 @@ export class PrismaChatRepository implements IChatRepository {
 
         return [userId, { emoji, createdAt }] as const;
       })
-      .filter((entry): entry is readonly [string, { emoji: string; createdAt: string }] => entry !== null);
+      .filter(
+        (
+          entry,
+        ): entry is readonly [string, { emoji: string; createdAt: string }] =>
+          entry !== null,
+      );
 
     return normalized.length > 0 ? Object.fromEntries(normalized) : undefined;
   }
 
-  private normalizeReplyPreview(value: unknown): MessageReplyPreview | undefined {
+  private normalizeReplyPreview(
+    value: unknown,
+  ): MessageReplyPreview | undefined {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return undefined;
     }
@@ -693,10 +744,7 @@ export class PrismaChatRepository implements IChatRepository {
     }
   }
 
-  private async assertConversationParticipant(
-    conversationId: string,
-    userId: string,
-  ) {
+  async assertConversationParticipant(conversationId: string, userId: string) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       select: { participantIds: true },
@@ -736,14 +784,12 @@ export class PrismaChatRepository implements IChatRepository {
     };
   }
 
-  private getReplyPreviewContent(
-    message: {
-      content: string;
-      type: string;
-      signalType: number;
-      isRecalled: boolean;
-    },
-  ) {
+  private getReplyPreviewContent(message: {
+    content: string;
+    type: string;
+    signalType: number;
+    isRecalled: boolean;
+  }) {
     if (message.isRecalled) {
       return RECALLED_PREVIEW_CONTENT;
     }

@@ -23,6 +23,7 @@ export class Message {
   id!: string;
   conversationId!: string;
   senderId!: string;
+  clientMessageId?: string;
   signalType!: number;
   content!: string;
   registrationId?: number;

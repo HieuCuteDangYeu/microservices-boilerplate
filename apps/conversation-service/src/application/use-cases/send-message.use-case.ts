@@ -16,6 +16,7 @@ export class SendMessageUseCase {
       id: '',
       conversationId: dto.conversationId,
       senderId,
+      clientMessageId: dto.clientMessageId,
       content: dto.content,
       signalType: dto.signalType,
       type: dto.type,
@@ -24,6 +25,7 @@ export class SendMessageUseCase {
     });
 
     const savedMessage = await this.chatRepository.createMessage(newMessage);
+    savedMessage.clientMessageId = dto.clientMessageId;
     this.logger.debug(
       `Message ${savedMessage.id} saved to conversation ${dto.conversationId}`,
     );

@@ -5,6 +5,7 @@ export const MessageSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
   senderId: z.string(),
+  clientMessageId: z.string().optional(),
   content: z.string(),
   type: z.string().default('text'),
   signalType: z.number().int().optional(),

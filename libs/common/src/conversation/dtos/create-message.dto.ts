@@ -4,6 +4,10 @@ import { z } from 'zod';
 export const CreateMessageSchema = z.object({
   // 1. ID cuộc trò chuyện
   conversationId: z.string().min(1, 'Conversation ID is required'),
+  clientMessageId: z
+    .string()
+    .min(1, 'Client message ID cannot be empty')
+    .optional(),
   type: z
     .enum(['text', 'image', 'video', 'file', 'call'])
     .optional()

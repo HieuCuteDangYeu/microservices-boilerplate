@@ -158,6 +158,24 @@ export class ConversationMicroserviceController {
     }
   }
 
+  @MessagePattern('mark_conversation_seen')
+  async handleMarkConversationSeen(
+    @Payload() data: { conversationId: string; userId: string },
+  ) {
+    try {
+      return {
+        updatedCount: await this.chatRepository.markMessagesAsSeen(
+          data.conversationId,
+          data.userId,
+        ),
+      };
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [MarkConversationSeen] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
   @MessagePattern('get_user_conversations')
   async handleGetUserConversations(
     @Payload() data: { userId: string; limit?: number; cursor?: string },
@@ -252,10 +270,11 @@ export class ConversationMicroserviceController {
       );
 
       if (conversation?.participantIds?.length) {
+        const conversationDto = ChatMapper.conversationToDto(conversation);
         conversation.participantIds.forEach((participantId) => {
           this.chatGateway.server
             .to(participantId)
-            .emit('conversation_updated', conversation);
+            .emit('conversation_updated', conversationDto);
         });
       }
 

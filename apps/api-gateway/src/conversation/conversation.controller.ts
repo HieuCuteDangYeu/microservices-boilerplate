@@ -9,11 +9,15 @@ import { MessageDto } from '@common/conversation/dtos/message.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
+  NotImplementedException,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -29,6 +33,13 @@ import {
 } from '@nestjs/swagger';
 import { lastValueFrom } from 'rxjs';
 
+interface ConversationParticipantPayload {
+  id: string;
+  email?: string;
+  picture?: string;
+  avatar?: string;
+}
+
 @ApiTags('Conversations')
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -43,12 +54,33 @@ export class ConversationController {
   @ApiOperation({ summary: 'Tạo cuộc hội thoại mới' })
   @ApiBody({ type: CreateConversationDto })
   async createConversation(
-    @Body() body: CreateConversationDto,
+    @Body()
+    body: {
+      participantIds?: string[];
+      isGroup?: boolean;
+      type?: 'DIRECT' | 'GROUP';
+      name?: string;
+    },
     @CurrentUser() user: AuthUser,
   ): Promise<{ id: string }> {
+    const participantIds = Array.isArray(body?.participantIds)
+      ? body.participantIds.filter(
+          (participantId): participantId is string =>
+            typeof participantId === 'string' &&
+            participantId.trim().length > 0,
+        )
+      : [];
+
+    if (participantIds.length === 0) {
+      throw new BadRequestException(
+        'participantIds must contain at least one target user id',
+      );
+    }
+
     return await lastValueFrom(
       this.conversationClient.send<{ id: string }>('create_conversation', {
-        ...body,
+        participantIds,
+        isGroup: body?.isGroup === true || body?.type === 'GROUP',
         creatorId: user.id,
       }),
     );
@@ -88,6 +120,147 @@ export class ConversationController {
         limit: limit ? Number(limit) : 20,
         cursor,
       }),
+    );
+  }
+
+  @Post(':id/messages')
+  @ApiOperation({ summary: 'Gửi tin nhắn theo conversation id (HTTP)' })
+  @ApiOkResponse({ type: MessageDto })
+  async createMessageForConversation(
+    @Param('id') conversationId: string,
+    @Body()
+    body: {
+      clientMessageId?: string;
+      content?: string;
+      type?: 'text' | 'image' | 'video' | 'file' | 'call';
+      signalType?: number;
+      registrationId?: number;
+      replyToId?: string;
+    },
+    @CurrentUser() user: AuthUser,
+  ): Promise<MessageDto> {
+    if (typeof body?.content !== 'string' || body.content.trim().length === 0) {
+      throw new BadRequestException('Content cannot be empty');
+    }
+
+    const type = body?.type ?? 'text';
+    if (!['text', 'image', 'video', 'file', 'call'].includes(type)) {
+      throw new BadRequestException('Invalid message type');
+    }
+
+    const signalType = body?.signalType ?? 0;
+    if (![0, 1, 3].includes(signalType)) {
+      throw new BadRequestException('Invalid signalType');
+    }
+
+    if (
+      body?.replyToId !== undefined &&
+      (typeof body.replyToId !== 'string' || body.replyToId.trim().length === 0)
+    ) {
+      throw new BadRequestException('replyToId must be a non-empty string');
+    }
+
+    const response = await lastValueFrom(
+      this.conversationClient.send<CreateMessageResponse>('create_message', {
+        conversationId,
+        clientMessageId: body.clientMessageId,
+        content: body.content.trim(),
+        type,
+        signalType,
+        registrationId: body.registrationId,
+        replyToId: body.replyToId,
+        senderId: user.id,
+      }),
+    );
+
+    return response.message;
+  }
+
+  @Patch(':id/messages/:messageId')
+  @ApiOperation({ summary: 'Cập nhật tin nhắn (chưa được hỗ trợ)' })
+  updateMessage(): never {
+    throw new NotImplementedException(
+      'Message editing is not implemented by conversation-service yet',
+    );
+  }
+
+  @Delete(':id/messages/:messageId')
+  @ApiOperation({ summary: 'Xóa tin nhắn (chưa được hỗ trợ)' })
+  deleteMessage(): never {
+    throw new NotImplementedException(
+      'Message deletion is not implemented by conversation-service yet',
+    );
+  }
+
+  @Post(':id/read')
+  @ApiOperation({ summary: 'Đánh dấu hội thoại đã đọc' })
+  async markConversationSeen(
+    @Param('id') conversationId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ updatedCount: number }> {
+    return await lastValueFrom(
+      this.conversationClient.send<{ updatedCount: number }>(
+        'mark_conversation_seen',
+        {
+          conversationId,
+          userId: user.id,
+        },
+      ),
+    );
+  }
+
+  @Get(':id/members')
+  @ApiOperation({ summary: 'Lấy danh sách thành viên hội thoại' })
+  async getConversationMembers(
+    @Param('id') conversationId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<
+    Array<{
+      userId: string;
+      user: { id: string; email: string; picture?: string };
+      joinedAt: string;
+    }>
+  > {
+    const conversation = await lastValueFrom(
+      this.conversationClient.send<{
+        createdAt?: string;
+        participants?: ConversationParticipantPayload[];
+      }>('get_conversation_detail', {
+        id: conversationId,
+        userId: user.id,
+      }),
+    );
+
+    const joinedAt = conversation?.createdAt ?? new Date(0).toISOString();
+
+    return Array.isArray(conversation?.participants)
+      ? conversation.participants.map((participant) => ({
+          userId: participant.id,
+          user: {
+            id: participant.id,
+            email: participant.email ?? '',
+            ...(participant.picture || participant.avatar
+              ? { picture: participant.picture ?? participant.avatar }
+              : {}),
+          },
+          joinedAt,
+        }))
+      : [];
+  }
+
+  @Post(':id/members')
+  @ApiOperation({ summary: 'Thêm thành viên (chưa được hỗ trợ)' })
+  addMember(): never {
+    throw new NotImplementedException(
+      'Adding conversation members is not implemented by conversation-service yet',
+    );
+  }
+
+  @Delete(':id/members/:userId')
+  @ApiOperation({ summary: 'Xóa thành viên (chưa được hỗ trợ)' })
+  removeMember(): never {
+    throw new NotImplementedException(
+      'Removing conversation members is not implemented by conversation-service yet',
     );
   }
 

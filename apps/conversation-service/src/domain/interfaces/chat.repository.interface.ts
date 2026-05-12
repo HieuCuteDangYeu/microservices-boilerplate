@@ -6,6 +6,10 @@ import {
 
 export abstract class IChatRepository {
   abstract createMessage(message: Message): Promise<Message>;
+  abstract assertConversationParticipant(
+    conversationId: string,
+    userId: string,
+  ): Promise<void>;
   abstract findMessagesByConversationId(
     conversationId: string,
     limit: number,
