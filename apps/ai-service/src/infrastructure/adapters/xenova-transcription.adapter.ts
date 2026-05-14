@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   AutomaticSpeechRecognitionPipeline,
@@ -11,16 +11,41 @@ import type { ITranscriptionService } from '../../domain/interfaces/transcriptio
 export class XenovaTranscriptionAdapter
   implements ITranscriptionService, OnModuleInit
 {
+  private readonly logger = new Logger(XenovaTranscriptionAdapter.name);
   private transcriber: AutomaticSpeechRecognitionPipeline | null = null;
+  private readonly chunkLengthSeconds: number;
+  private readonly strideLengthSeconds: number;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) {
+    const configuredChunkLengthSeconds = Number(
+      this.config.get<string>('WHISPER_CHUNK_LENGTH_S') ?? '30',
+    );
+    const configuredStrideLengthSeconds = Number(
+      this.config.get<string>('WHISPER_STRIDE_LENGTH_S') ?? '5',
+    );
+    this.chunkLengthSeconds =
+      Number.isFinite(configuredChunkLengthSeconds) &&
+      configuredChunkLengthSeconds > 0
+        ? configuredChunkLengthSeconds
+        : 30;
+    this.strideLengthSeconds =
+      Number.isFinite(configuredStrideLengthSeconds) &&
+      configuredStrideLengthSeconds >= 0
+        ? configuredStrideLengthSeconds
+        : 5;
+  }
 
   async onModuleInit(): Promise<void> {
     const model = this.config.get<string>(
       'WHISPER_MODEL',
       'Xenova/whisper-base',
     );
+    const startedAt = Date.now();
+    this.logger.log(`Initializing transcription model ${model}`);
     this.transcriber = await pipeline('automatic-speech-recognition', model);
+    this.logger.log(
+      `Initialized transcription model ${model} in ${Date.now() - startedAt}ms`,
+    );
   }
 
   async transcribeAudio(audioBuffer: Buffer): Promise<string> {
@@ -59,9 +84,22 @@ export class XenovaTranscriptionAdapter
       }
     }
 
-    const output = (await this.transcriber(audioData)) as unknown as
+    const audioDurationSeconds =
+      audioData instanceof Float32Array || audioData instanceof Float64Array
+        ? Math.round(audioData.length / 16000)
+        : 0;
+    const startedAt = Date.now();
+
+    const output = (await this.transcriber(audioData, {
+      chunk_length_s: this.chunkLengthSeconds,
+      stride_length_s: this.strideLengthSeconds,
+    })) as unknown as
       | { text: string }
       | { text: string }[];
+
+    this.logger.log(
+      `Transcribed ${audioDurationSeconds}s audio in ${Date.now() - startedAt}ms`,
+    );
 
     return Array.isArray(output) ? output[0].text : output.text;
   }

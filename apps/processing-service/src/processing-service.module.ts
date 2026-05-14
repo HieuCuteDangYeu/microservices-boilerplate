@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AiServiceAdapter } from '@processing/infrastructure/adapters/ai-service.adapter';
 import { ContentServiceAdapter } from '@processing/infrastructure/adapters/content-service.adapter';
@@ -11,24 +11,54 @@ import { R2Service } from './infrastructure/services/r2.service';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
-    ClientsModule.register([
+    ClientsModule.registerAsync([
       {
         name: 'CONTENT_RMQ',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'content_queue',
-          queueOptions: { durable: true },
+        useFactory: (configService: ConfigService) => {
+          const heartbeat = Number(
+            configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+          );
+
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [
+                configService.get<string>('RABBITMQ_URL') ||
+                  'amqp://localhost:5672',
+              ],
+              queue: 'content_queue',
+              queueOptions: { durable: true },
+              heartbeat: Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              retryAttempts: 10,
+              retryDelay: 3000,
+            },
+          };
         },
+        inject: [ConfigService],
       },
       {
         name: 'AI_RMQ',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'ai_queue',
-          queueOptions: { durable: true },
+        useFactory: (configService: ConfigService) => {
+          const heartbeat = Number(
+            configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+          );
+
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [
+                configService.get<string>('RABBITMQ_URL') ||
+                  'amqp://localhost:5672',
+              ],
+              queue: 'ai_queue',
+              queueOptions: { durable: true },
+              heartbeat: Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              retryAttempts: 10,
+              retryDelay: 3000,
+            },
+          };
         },
+        inject: [ConfigService],
       },
     ]),
   ],

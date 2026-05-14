@@ -17,32 +17,44 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ClientsModule.registerAsync([
       {
         name: 'CONTENT_RMQ',
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
-            queue: 'content_queue',
-            queueOptions: { durable: true },
-            heartbeat: 60,
-            retryAttempts: 10,
-            retryDelay: 3000,
-          },
-        }),
+        useFactory: (config: ConfigService) => {
+          const heartbeat = Number(
+            config.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+          );
+
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+              queue: 'content_queue',
+              queueOptions: { durable: true },
+              heartbeat: Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              retryAttempts: 10,
+              retryDelay: 3000,
+            },
+          };
+        },
         inject: [ConfigService],
       },
       {
         name: 'CONVERSATION_RMQ',
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
-            queue: 'conversation_queue',
-            queueOptions: { durable: true },
-            heartbeat: 60,
-            retryAttempts: 10,
-            retryDelay: 3000,
-          },
-        }),
+        useFactory: (config: ConfigService) => {
+          const heartbeat = Number(
+            config.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+          );
+
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+              queue: 'conversation_queue',
+              queueOptions: { durable: true },
+              heartbeat: Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              retryAttempts: 10,
+              retryDelay: 3000,
+            },
+          };
+        },
         inject: [ConfigService],
       },
     ]),

@@ -1,13 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import type { IAiService } from '../../domain/interfaces/ai-service.interface';
 
 @Injectable()
 export class AiServiceAdapter implements IAiService {
-  private static readonly AI_RPC_TIMEOUT_MS = 120_000;
+  private readonly aiRpcTimeoutMs: number;
 
-  constructor(@Inject('AI_RMQ') private readonly aiBroker: ClientProxy) {}
+  constructor(
+    @Inject('AI_RMQ') private readonly aiBroker: ClientProxy,
+    private readonly configService: ConfigService,
+  ) {
+    const configuredTimeoutMs = Number(
+      this.configService.get<string>('AI_RPC_TIMEOUT_MS') ?? '300000',
+    );
+    this.aiRpcTimeoutMs =
+      Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+        ? configuredTimeoutMs
+        : 300_000;
+  }
 
   async generateEmbedding(text: string): Promise<number[]> {
     const response = await firstValueFrom(
@@ -15,7 +27,7 @@ export class AiServiceAdapter implements IAiService {
         .send<{ embedding: number[] }>('ai.generate_embedding', {
           text,
         })
-        .pipe(timeout(AiServiceAdapter.AI_RPC_TIMEOUT_MS)),
+        .pipe(timeout(this.aiRpcTimeoutMs)),
     );
 
     return response.embedding;
@@ -27,7 +39,7 @@ export class AiServiceAdapter implements IAiService {
         .send<{ transcript: string }>('ai.transcribe_audio', {
           audioKey,
         })
-        .pipe(timeout(AiServiceAdapter.AI_RPC_TIMEOUT_MS)),
+        .pipe(timeout(this.aiRpcTimeoutMs)),
     );
     return response.transcript;
   }

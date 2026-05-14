@@ -2,7 +2,7 @@ import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-cas
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
-import { Controller, Inject } from '@nestjs/common';
+import { Controller, Inject, Logger } from '@nestjs/common';
 import {
   ClientProxy,
   MessagePattern,
@@ -13,6 +13,8 @@ import { GenerateEmbeddingUseCase } from '../../application/use-cases/generate-e
 
 @Controller()
 export class AiController {
+  private readonly logger = new Logger(AiController.name);
+
   constructor(
     private readonly generateEmbeddingUseCase: GenerateEmbeddingUseCase,
     private readonly transcribeAudioUseCase: TranscribeAudioUseCase,
@@ -44,8 +46,13 @@ export class AiController {
         throw new Error('Invalid audio key payload received from RabbitMQ');
       }
 
+      const startedAt = Date.now();
+      this.logger.log(`Received transcription request for ${payload.audioKey}`);
       const transcript = await this.transcribeAudioUseCase.execute(
         payload.audioKey,
+      );
+      this.logger.log(
+        `Completed transcription request for ${payload.audioKey} in ${Date.now() - startedAt}ms`,
       );
       return { transcript };
     } catch (err: unknown) {
