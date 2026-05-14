@@ -1,12 +1,18 @@
 export interface IContentService {
-  emitProcessingStarted(data: { reelId: string; status: 'PROCESSING' }): void;
+  emitProcessingStarted(data: {
+    reelId: string;
+    status: 'PROCESSING';
+  }): Promise<void>;
   emitProcessingCompleted(data: {
     reelId: string;
     status: 'COMPLETED';
     transcript?: string;
     embedding?: number[];
     thumbnailKey?: string;
-  }): void;
+  }): Promise<void>;
 
-  emitProcessingFailed(data: { reelId: string; status: 'FAILED' }): void;
+  emitProcessingFailed(data: {
+    reelId: string;
+    status: 'FAILED';
+  }): Promise<void>;
 }
