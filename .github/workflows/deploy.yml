@@ -53,6 +53,8 @@ jobs:
           host: ${{ secrets.DROPLET_IP }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 60m
+          script_stop: true
           script: |
             mkdir -p /var/www/microservices
             cd /var/www/microservices
@@ -66,5 +68,5 @@ jobs:
             export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
 
             docker compose pull
-
             docker compose up -d --remove-orphans
+            docker image prune -f
