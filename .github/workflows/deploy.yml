@@ -54,9 +54,8 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 60m
-          script_stop: true
           script: |
-            set -euxo pipefail
+            set -e
 
             echo "Checking server..."
             whoami
@@ -77,9 +76,6 @@ jobs:
 
             export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
             echo "DOCKERHUB_USERNAME is set"
-
-            echo "Current files:"
-            ls -la
 
             echo "Compose config check:"
             docker compose config
