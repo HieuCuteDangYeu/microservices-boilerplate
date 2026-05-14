@@ -1,4 +1,4 @@
 export interface IAiService {
   generateEmbedding(text: string): Promise<number[]>;
-  transcribeAudio(audioBuffer: Buffer): Promise<string>;
+  transcribeAudio(audioKey: string): Promise<string>;
 }

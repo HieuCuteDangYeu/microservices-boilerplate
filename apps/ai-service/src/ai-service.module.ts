@@ -6,6 +6,7 @@ import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter
 import { XenovaEmbeddingAdapter } from '@ai/infrastructure/adapters/xenova-embedding.adapter';
 import { XenovaTranscriptionAdapter } from '@ai/infrastructure/adapters/xenova-transcription.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
+import { R2AudioStorageService } from '@ai/infrastructure/services/r2-audio-storage.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
@@ -58,6 +59,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'ITranscriptionService',
       useClass: XenovaTranscriptionAdapter,
+    },
+    {
+      provide: 'IAudioStorageService',
+      useClass: R2AudioStorageService,
     },
     {
       provide: 'ILlmService',

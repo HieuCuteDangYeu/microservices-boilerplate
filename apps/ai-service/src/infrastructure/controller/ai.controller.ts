@@ -11,11 +11,6 @@ import {
 } from '@nestjs/microservices';
 import { GenerateEmbeddingUseCase } from '../../application/use-cases/generate-embedding.use-case';
 
-interface SerializedBuffer {
-  type: 'Buffer';
-  data: number[];
-}
-
 @Controller()
 export class AiController {
   constructor(
@@ -43,27 +38,15 @@ export class AiController {
   }
 
   @MessagePattern('ai.transcribe_audio')
-  async handleTranscribeAudio(
-    @Payload() payload: { audioBuffer: Buffer | SerializedBuffer },
-  ) {
+  async handleTranscribeAudio(@Payload() payload: { audioKey: string }) {
     try {
-      let buffer: Buffer;
-
-      if (Buffer.isBuffer(payload.audioBuffer)) {
-        buffer = payload.audioBuffer;
-      } else if (
-        payload.audioBuffer &&
-        'data' in payload.audioBuffer &&
-        Array.isArray(payload.audioBuffer.data)
-      ) {
-        buffer = Buffer.from(payload.audioBuffer.data);
-      } else {
-        throw new Error(
-          'Unrecognized audio buffer format received from RabbitMQ',
-        );
+      if (!payload || typeof payload.audioKey !== 'string') {
+        throw new Error('Invalid audio key payload received from RabbitMQ');
       }
 
-      const transcript = await this.transcribeAudioUseCase.execute(buffer);
+      const transcript = await this.transcribeAudioUseCase.execute(
+        payload.audioKey,
+      );
       return { transcript };
     } catch (err: unknown) {
       const error = err as Error;
