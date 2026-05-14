@@ -56,17 +56,41 @@ jobs:
           command_timeout: 60m
           script_stop: true
           script: |
+            set -euxo pipefail
+
+            echo "Checking server..."
+            whoami
+            pwd
+            docker --version
+            docker compose version
+            df -h
+
             mkdir -p /var/www/microservices
             cd /var/www/microservices
 
             if [ ! -d ".git" ]; then
-              git clone https://github.com/hieucutedangyeu/microservices-boilerplate.git .
+              git clone https://github.com/HieuCuteDangYeu/microservices-boilerplate.git .
             else
+              git status
               git pull origin master
             fi
 
             export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+            echo "DOCKERHUB_USERNAME is set"
 
+            echo "Current files:"
+            ls -la
+
+            echo "Compose config check:"
+            docker compose config
+
+            echo "Pulling images..."
             docker compose pull
+
+            echo "Starting services..."
             docker compose up -d --remove-orphans
+
+            echo "Cleaning old images..."
             docker image prune -f
+
+            echo "Deploy complete"
