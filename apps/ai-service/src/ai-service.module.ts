@@ -1,10 +1,10 @@
 import { GenerateEmbeddingUseCase } from '@ai/application/use-cases/generate-embedding.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
+import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
 import { XenovaEmbeddingAdapter } from '@ai/infrastructure/adapters/xenova-embedding.adapter';
-import { XenovaTranscriptionAdapter } from '@ai/infrastructure/adapters/xenova-transcription.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { R2AudioStorageService } from '@ai/infrastructure/services/r2-audio-storage.service';
 import { Module } from '@nestjs/common';
@@ -28,7 +28,8 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
               urls: [config.getOrThrow<string>('RABBITMQ_URL')],
               queue: 'content_queue',
               queueOptions: { durable: true },
-              heartbeat: Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              heartbeat:
+                Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
               retryAttempts: 10,
               retryDelay: 3000,
             },
@@ -49,7 +50,8 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
               urls: [config.getOrThrow<string>('RABBITMQ_URL')],
               queue: 'conversation_queue',
               queueOptions: { durable: true },
-              heartbeat: Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              heartbeat:
+                Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
               retryAttempts: 10,
               retryDelay: 3000,
             },
@@ -70,7 +72,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'ITranscriptionService',
-      useClass: XenovaTranscriptionAdapter,
+      useClass: CloudflareTranscriptionAdapter,
     },
     {
       provide: 'IAudioStorageService',

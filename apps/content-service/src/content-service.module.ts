@@ -9,7 +9,7 @@ import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.us
 import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { CreateReelUseCase } from './application/use-cases/create-reel.use-case';
 import { ContentController } from './infrastructure/controllers/content.controller';
@@ -21,18 +21,31 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
       isGlobal: true,
       envFilePath: '.env',
     }),
-    ClientsModule.register([
+    ClientsModule.registerAsync([
       {
         name: 'PROCESSING_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'processing_queue',
-          queueOptions: { durable: true },
-          heartbeat: 60,
-          retryAttempts: 10,
-          retryDelay: 3000,
+        useFactory: (configService: ConfigService) => {
+          const heartbeat = Number(
+            configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+          );
+
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [
+                configService.get<string>('RABBITMQ_URL') ||
+                  'amqp://localhost:5672',
+              ],
+              queue: 'processing_queue',
+              queueOptions: { durable: true },
+              heartbeat:
+                Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              retryAttempts: 10,
+              retryDelay: 3000,
+            },
+          };
         },
+        inject: [ConfigService],
       },
     ]),
   ],

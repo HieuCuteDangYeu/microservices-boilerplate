@@ -81,15 +81,4 @@ export class R2Service {
     });
     await this.s3Client.send(command);
   }
-
-  async uploadAudio(localPath: string, s3Key: string): Promise<void> {
-    const fileBuffer = fs.readFileSync(localPath);
-    const command = new PutObjectCommand({
-      Bucket: this.bucketName,
-      Key: s3Key,
-      Body: fileBuffer,
-      ContentType: 'audio/wav',
-    });
-    await this.s3Client.send(command);
-  }
 }

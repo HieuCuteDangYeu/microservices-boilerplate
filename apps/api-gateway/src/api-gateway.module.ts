@@ -8,8 +8,36 @@ import { MediaController } from '@gateway/media/media.controller';
 import { PaymentController } from '@gateway/payment/payment.controller';
 import { UserController } from '@gateway/users/user.controller';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+
+function createRmqClientRegistration(name: string, queue: string) {
+  return {
+    name,
+    useFactory: (configService: ConfigService) => {
+      const heartbeat = Number(
+        configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+      );
+
+      return {
+        transport: Transport.RMQ as const,
+        options: {
+          urls: [
+            configService.get<string>('RABBITMQ_URL') ||
+              'amqp://localhost:5672',
+          ],
+          queue,
+          queueOptions: { durable: true },
+          heartbeat:
+            Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+          retryAttempts: 10,
+          retryDelay: 3000,
+        },
+      };
+    },
+    inject: [ConfigService],
+  };
+}
 
 @Module({
   imports: [
@@ -17,78 +45,14 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    ClientsModule.register([
-      {
-        name: 'USER_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'user_queue',
-          queueOptions: {
-            durable: true,
-          },
-        },
-      },
-      {
-        name: 'AUTH_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'auth_queue',
-          queueOptions: {
-            durable: true,
-          },
-        },
-      },
-      {
-        name: 'MEDIA_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'media_queue',
-          queueOptions: {
-            durable: true,
-          },
-        },
-      },
-      {
-        name: 'PAYMENT_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'payment_queue',
-          queueOptions: {
-            durable: true,
-          },
-        },
-      },
-      {
-        name: 'CONVERSATION_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'conversation_queue',
-          queueOptions: { durable: true },
-        },
-      },
-      {
-        name: 'CONTENT_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'content_queue',
-          queueOptions: { durable: true },
-        },
-      },
-      {
-        name: 'AI_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'ai_queue',
-          queueOptions: { durable: true },
-        },
-      },
+    ClientsModule.registerAsync([
+      createRmqClientRegistration('USER_SERVICE', 'user_queue'),
+      createRmqClientRegistration('AUTH_SERVICE', 'auth_queue'),
+      createRmqClientRegistration('MEDIA_SERVICE', 'media_queue'),
+      createRmqClientRegistration('PAYMENT_SERVICE', 'payment_queue'),
+      createRmqClientRegistration('CONVERSATION_SERVICE', 'conversation_queue'),
+      createRmqClientRegistration('CONTENT_SERVICE', 'content_queue'),
+      createRmqClientRegistration('AI_SERVICE', 'ai_queue'),
     ]),
   ],
   controllers: [

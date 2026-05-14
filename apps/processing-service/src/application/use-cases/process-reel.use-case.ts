@@ -86,12 +86,10 @@ export class ProcessReelUseCase {
       if (fs.existsSync(thumbnailPath)) fs.unlinkSync(thumbnailPath);
 
       await this.ffmpegService.extractAudio(inputPath, audioPath);
-      const audioKey = `${s3Prefix}/audio.wav`;
-      await this.r2Service.uploadAudio(audioPath, audioKey);
-      this.logger.log(`[Reel ${reelId}] Uploaded audio ${audioKey}`);
+      const audioBuffer = fs.readFileSync(audioPath);
       if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
 
-      const transcriptText = await this.aiService.transcribeAudio(audioKey);
+      const transcriptText = await this.aiService.transcribeAudio(audioBuffer);
       this.logger.log(`[Reel ${reelId}] Audio transcription completed`);
 
       const embedding = await this.aiService.generateEmbedding(transcriptText);

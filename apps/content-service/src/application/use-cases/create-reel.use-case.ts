@@ -40,12 +40,15 @@ export class CreateReelUseCase {
         userId: userId,
       });
     } catch (error: unknown) {
-      await this.contentRepository.updateReelStatus(savedReel.id, 'FAILED');
+      const failedReel = await this.contentRepository.updateReelStatus(
+        savedReel.id,
+        'FAILED',
+      );
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Failed to enqueue reel ${savedReel.id} for processing: ${message}`,
       );
-      throw new Error('Failed to enqueue reel for processing');
+      return failedReel;
     }
 
     return savedReel;
