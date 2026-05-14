@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import type { IContentService } from '../../domain/interfaces/content-service.interface';
+import { createRmqError } from './rmq-error.util';
 
 @Injectable()
 export class ContentServiceAdapter implements IContentService {
@@ -13,9 +14,13 @@ export class ContentServiceAdapter implements IContentService {
     reelId: string;
     status: 'PROCESSING';
   }): Promise<void> {
-    await firstValueFrom(
-      this.messageBroker.emit('reel.processing_started', data),
-    );
+    try {
+      await firstValueFrom(
+        this.messageBroker.emit('reel.processing_started', data),
+      );
+    } catch (error: unknown) {
+      throw createRmqError('Failed to emit reel.processing_started', error);
+    }
   }
 
   async emitProcessingCompleted(data: {
@@ -25,17 +30,25 @@ export class ContentServiceAdapter implements IContentService {
     embedding?: number[];
     thumbnailKey?: string;
   }): Promise<void> {
-    await firstValueFrom(
-      this.messageBroker.emit('reel.processing_completed', data),
-    );
+    try {
+      await firstValueFrom(
+        this.messageBroker.emit('reel.processing_completed', data),
+      );
+    } catch (error: unknown) {
+      throw createRmqError('Failed to emit reel.processing_completed', error);
+    }
   }
 
   async emitProcessingFailed(data: {
     reelId: string;
     status: 'FAILED';
   }): Promise<void> {
-    await firstValueFrom(
-      this.messageBroker.emit('reel.processing_failed', data),
-    );
+    try {
+      await firstValueFrom(
+        this.messageBroker.emit('reel.processing_failed', data),
+      );
+    } catch (error: unknown) {
+      throw createRmqError('Failed to emit reel.processing_failed', error);
+    }
   }
 }

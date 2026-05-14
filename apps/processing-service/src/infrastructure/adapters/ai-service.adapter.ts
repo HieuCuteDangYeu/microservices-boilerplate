@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import type { IAiService } from '../../domain/interfaces/ai-service.interface';
+import { createRmqError } from './rmq-error.util';
 
 @Injectable()
 export class AiServiceAdapter implements IAiService {
@@ -22,25 +23,33 @@ export class AiServiceAdapter implements IAiService {
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
-    const response = await firstValueFrom(
-      this.aiBroker
-        .send<{ embedding: number[] }>('ai.generate_embedding', {
-          text,
-        })
-        .pipe(timeout(this.aiRpcTimeoutMs)),
-    );
+    try {
+      const response = await firstValueFrom(
+        this.aiBroker
+          .send<{ embedding: number[] }>('ai.generate_embedding', {
+            text,
+          })
+          .pipe(timeout(this.aiRpcTimeoutMs)),
+      );
 
-    return response.embedding;
+      return response.embedding;
+    } catch (error: unknown) {
+      throw createRmqError('AI embedding request failed', error);
+    }
   }
 
   async transcribeAudio(audioKey: string): Promise<string> {
-    const response = await firstValueFrom(
-      this.aiBroker
-        .send<{ transcript: string }>('ai.transcribe_audio', {
-          audioKey,
-        })
-        .pipe(timeout(this.aiRpcTimeoutMs)),
-    );
-    return response.transcript;
+    try {
+      const response = await firstValueFrom(
+        this.aiBroker
+          .send<{ transcript: string }>('ai.transcribe_audio', {
+            audioKey,
+          })
+          .pipe(timeout(this.aiRpcTimeoutMs)),
+      );
+      return response.transcript;
+    } catch (error: unknown) {
+      throw createRmqError('AI transcription request failed', error);
+    }
   }
 }

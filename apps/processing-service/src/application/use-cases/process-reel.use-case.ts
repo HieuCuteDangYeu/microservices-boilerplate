@@ -11,6 +11,34 @@ import { R2Service } from '../../infrastructure/services/r2.service';
 export class ProcessReelUseCase {
   private readonly logger = new Logger(ProcessReelUseCase.name);
 
+  private describeError(error: unknown): {
+    message: string;
+    stack?: string;
+  } {
+    if (error instanceof Error) {
+      return {
+        message: error.message,
+        stack: error.stack,
+      };
+    }
+
+    if (typeof error === 'object' && error !== null) {
+      const record = error as Record<string, unknown>;
+      const message =
+        typeof record['message'] === 'string'
+          ? record['message']
+          : JSON.stringify(error);
+      const stack =
+        typeof record['stack'] === 'string' ? record['stack'] : undefined;
+
+      return { message, stack };
+    }
+
+    return {
+      message: String(error),
+    };
+  }
+
   constructor(
     private readonly r2Service: R2Service,
     private readonly ffmpegService: FfmpegService,
@@ -77,8 +105,7 @@ export class ProcessReelUseCase {
       });
       this.logger.log(`[Reel ${reelId}] Processing completed successfully`);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      const stack = error instanceof Error ? error.stack : undefined;
+      const { message, stack } = this.describeError(error);
       this.logger.error(
         `[Reel ${reelId}] Processing failed: ${message}`,
         stack,
@@ -90,10 +117,8 @@ export class ProcessReelUseCase {
           status: 'FAILED',
         });
       } catch (emitError: unknown) {
-        const emitMessage =
-          emitError instanceof Error ? emitError.message : String(emitError);
-        const emitStack =
-          emitError instanceof Error ? emitError.stack : undefined;
+        const { message: emitMessage, stack: emitStack } =
+          this.describeError(emitError);
         this.logger.error(
           `[Reel ${reelId}] Failed to emit reel.processing_failed: ${emitMessage}`,
           emitStack,
