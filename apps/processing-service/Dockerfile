@@ -1,6 +1,8 @@
-FROM node:20-alpine AS builder
+FROM node:20-bullseye AS builder
 
-RUN apk add --no-cache ffmpeg
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 RUN corepack enable
@@ -13,9 +15,11 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm run build processing-service
 
 
-FROM node:20-alpine AS production
+FROM node:20-bullseye AS production
 
-RUN apk add --no-cache ffmpeg
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 RUN corepack enable
