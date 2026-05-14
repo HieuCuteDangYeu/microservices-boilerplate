@@ -3,5 +3,5 @@ export interface IProcessingService {
     reelId: string;
     mediaKey: string;
     userId: string;
-  }): void;
+  }): Promise<void>;
 }

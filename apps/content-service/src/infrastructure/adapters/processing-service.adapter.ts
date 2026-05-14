@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
 import type { IProcessingService } from '../../domain/interfaces/processing-service.interface';
 
 @Injectable()
@@ -8,11 +9,11 @@ export class ProcessingServiceAdapter implements IProcessingService {
     @Inject('PROCESSING_SERVICE') private readonly messageBroker: ClientProxy,
   ) {}
 
-  emitReelCreated(data: {
+  async emitReelCreated(data: {
     reelId: string;
     mediaKey: string;
     userId: string;
-  }): void {
-    this.messageBroker.emit('reel.created', data);
+  }): Promise<void> {
+    await firstValueFrom(this.messageBroker.emit('reel.created', data));
   }
 }
