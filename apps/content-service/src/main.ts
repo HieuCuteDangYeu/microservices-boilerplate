@@ -3,6 +3,8 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ContentServiceModule } from './content-service.module';
 
 async function bootstrap() {
+  const heartbeat = Number(process.env.RABBITMQ_HEARTBEAT_SECONDS ?? '300');
+
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     ContentServiceModule,
     {
@@ -13,6 +15,10 @@ async function bootstrap() {
         queueOptions: {
           durable: true,
         },
+        heartbeat:
+          Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+        retryAttempts: 10,
+        retryDelay: 3000,
       },
     },
   );

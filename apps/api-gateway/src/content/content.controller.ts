@@ -15,6 +15,7 @@ import {
   HttpException,
   HttpStatus,
   Inject,
+  Logger,
   Param,
   Patch,
   Post,
@@ -32,6 +33,7 @@ import { catchError, lastValueFrom } from 'rxjs';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ContentController {
+  private readonly logger = new Logger(ContentController.name);
   private readonly cdnDomain: string;
 
   constructor(
@@ -220,6 +222,9 @@ export class ContentController {
     if (isRpcError(error)) {
       throw new HttpException(error.message, error.statusCode);
     }
+
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.error(`Content microservice request failed: ${message}`);
     throw new HttpException(
       'Internal Server Error',
       HttpStatus.INTERNAL_SERVER_ERROR,
