@@ -438,6 +438,35 @@ export class PrismaChatRepository implements IChatRepository {
     return ConversationMapper.toDomain(conversation);
   }
 
+  async hasSharedConversation(
+    userId1: string,
+    userId2: string,
+  ): Promise<boolean> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        participantIds: { hasEvery: [userId1, userId2] },
+      },
+      select: { id: true },
+    });
+
+    return Boolean(conversation);
+  }
+
+  async findPresenceAudienceUserIds(userId: string): Promise<string[]> {
+    const conversations = await this.prisma.conversation.findMany({
+      where: { participantIds: { has: userId } },
+      select: { participantIds: true },
+    });
+
+    return [
+      ...new Set(
+        conversations
+          .flatMap((conversation) => conversation.participantIds)
+          .filter((participantId) => participantId !== userId),
+      ),
+    ];
+  }
+
   async addReaction(
     messageId: string,
     userId: string,
