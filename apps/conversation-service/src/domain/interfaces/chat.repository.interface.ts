@@ -23,6 +23,11 @@ export abstract class IChatRepository {
     conversationId: string,
     userId: string,
   ): Promise<number>;
+  abstract hasSharedConversation(
+    userId1: string,
+    userId2: string,
+  ): Promise<boolean>;
+  abstract findPresenceAudienceUserIds(userId: string): Promise<string[]>;
   abstract findPrivateConversation(
     userId1: string,
     userId2: string,

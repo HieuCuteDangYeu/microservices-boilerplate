@@ -12,6 +12,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { catchError, lastValueFrom, of, timeout } from 'rxjs';
+import Redis from 'ioredis';
 import { Server, Socket } from 'socket.io';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
@@ -19,25 +20,41 @@ import { Message } from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { ChatMapper } from '../repositories/chat.mapper';
 
+interface PresencePayload {
+  userId?: string;
+  userIds?: string[];
+  conversationId?: string;
+}
+
 @WebSocketGateway({ cors: { origin: '*' } })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
+  private static readonly LAST_SEEN_KEY_PREFIX = 'presence:last-seen:';
 
   constructor(
     private readonly sendMessageUseCase: SendMessageUseCase,
     private readonly triggerBotReplyUseCase: TriggerBotReplyUseCase,
     @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
     @Inject('AUTH_SERVICE_RMQ') private readonly authClient: ClientProxy,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   // --- 1. HANDLE CONNECTION ---
   async handleConnection(client: Socket) {
     const userId = await this.resolveUserId(client);
     if (userId) {
-      void client.join(userId);
+      const wasOnlineBefore = await this.isUserOnline(userId);
+
+      await client.join(userId);
+      await this.clearLastSeenAt(userId);
+
+      if (!wasOnlineBefore) {
+        await this.emitPresenceStateToAudience(userId, null);
+      }
+
       console.log(`Client connected: ${client.id} (User: ${userId})`);
       return;
     }
@@ -46,7 +63,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // --- 2. HANDLE DISCONNECT ---
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
+    const userId = this.getResolvedUserId(client);
+
+    if (userId) {
+      const isStillOnline = await this.isUserOnline(userId);
+
+      if (!isStillOnline) {
+        const lastSeenAt = new Date().toISOString();
+        await this.setLastSeenAt(userId, lastSeenAt);
+        await this.emitPresenceStateToAudience(userId, lastSeenAt);
+      }
+    }
+
     console.log(`Client disconnected: ${client.id}`);
   }
 
@@ -259,7 +288,184 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('check_presence')
+  async handleCheckPresence(
+    @MessageBody()
+    payload: string | PresencePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const requesterId = await this.resolveUserId(client);
+    if (!requesterId) return;
+
+    const targetUserIds = this.normalizePresenceTargets(payload);
+    const conversationId =
+      typeof payload === 'object' && payload !== null
+        ? payload.conversationId
+        : undefined;
+
+    if (targetUserIds.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      targetUserIds.map(async (targetUserId) => {
+        const canAccessPresence = await this.canAccessPresence({
+          requesterId,
+          targetUserId,
+          conversationId,
+        });
+
+        if (!canAccessPresence) {
+          return;
+        }
+
+        client.emit(
+          'presence_update',
+          await this.buildPresencePayload(targetUserId),
+        );
+      }),
+    );
+  }
+
   // --- PRIVATE HELPERS ---
+  private getLastSeenKey(userId: string): string {
+    return `${ChatGateway.LAST_SEEN_KEY_PREFIX}${userId}`;
+  }
+
+  private async getLastSeenAt(userId: string): Promise<string | null> {
+    const value = await this.redis.get(this.getLastSeenKey(userId));
+
+    if (!value) {
+      return null;
+    }
+
+    return Number.isNaN(new Date(value).getTime()) ? null : value;
+  }
+
+  private async setLastSeenAt(
+    userId: string,
+    lastSeenAt: string,
+  ): Promise<void> {
+    await this.redis.set(this.getLastSeenKey(userId), lastSeenAt);
+  }
+
+  private async clearLastSeenAt(userId: string): Promise<void> {
+    await this.redis.del(this.getLastSeenKey(userId));
+  }
+
+  private async buildPresencePayload(userId: string): Promise<{
+    userId: string;
+    isOnline: boolean;
+    lastSeenAt: string | null;
+  }> {
+    const isOnline = await this.isUserOnline(userId);
+
+    return {
+      userId,
+      isOnline,
+      lastSeenAt: isOnline ? null : await this.getLastSeenAt(userId),
+    };
+  }
+
+  private async canAccessPresence({
+    requesterId,
+    targetUserId,
+    conversationId,
+  }: {
+    requesterId: string;
+    targetUserId: string;
+    conversationId?: string;
+  }): Promise<boolean> {
+    if (!requesterId || !targetUserId || requesterId === targetUserId) {
+      return false;
+    }
+
+    if (conversationId) {
+      try {
+        await Promise.all([
+          this.chatRepository.assertConversationParticipant(
+            conversationId,
+            requesterId,
+          ),
+          this.chatRepository.assertConversationParticipant(
+            conversationId,
+            targetUserId,
+          ),
+        ]);
+
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    return this.chatRepository.hasSharedConversation(requesterId, targetUserId);
+  }
+
+  private async emitPresenceStateToAudience(
+    userId: string,
+    lastSeenAt: string | null,
+  ): Promise<void> {
+    const audienceUserIds =
+      await this.chatRepository.findPresenceAudienceUserIds(userId);
+
+    if (!audienceUserIds.length) {
+      return;
+    }
+
+    const payload = {
+      userId,
+      lastSeenAt,
+    };
+
+    const eventName = lastSeenAt ? 'user:offline' : 'user:online';
+
+    audienceUserIds.forEach((audienceUserId) => {
+      this.server.to(audienceUserId).emit(eventName, payload);
+    });
+  }
+
+  private normalizePresenceTargets(
+    payload: string | PresencePayload,
+  ): string[] {
+    if (typeof payload === 'string' && payload.trim()) {
+      return [payload.trim()];
+    }
+
+    const payloadObject =
+      typeof payload === 'object' && payload !== null ? payload : undefined;
+    const rawIds = [
+      payloadObject?.userId,
+      ...(Array.isArray(payloadObject?.userIds) ? payloadObject.userIds : []),
+    ];
+
+    return Array.from(
+      new Set(
+        rawIds.filter(
+          (userId): userId is string =>
+            typeof userId === 'string' && userId.trim().length > 0,
+        ),
+      ),
+    );
+  }
+
+  private getResolvedUserId(client: Socket): string | null {
+    const socketData = client.data as Record<string, unknown>;
+    const cachedUserId = socketData['userId'];
+    return typeof cachedUserId === 'string' && cachedUserId
+      ? cachedUserId
+      : null;
+  }
+
+  private async isUserOnline(userId: string): Promise<boolean> {
+    if (!userId) {
+      return false;
+    }
+
+    const sockets = await this.server.in(userId).fetchSockets();
+    return sockets.length > 0;
+  }
+
   private relaySignal(
     client: Socket,
     event: string,
@@ -308,8 +514,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async resolveUserId(client: Socket): Promise<string | null> {
     const socketData = client.data as Record<string, unknown>;
-    const cachedUserId = socketData['userId'];
-    if (typeof cachedUserId === 'string' && cachedUserId) {
+    const cachedUserId = this.getResolvedUserId(client);
+    if (cachedUserId) {
       return cachedUserId;
     }
 
