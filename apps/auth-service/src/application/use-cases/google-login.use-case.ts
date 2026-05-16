@@ -3,13 +3,16 @@ import { GoogleProfile } from '@common/auth/interfaces/google-profile.interface'
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
-import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
 
 @Injectable()
 export class GoogleLoginUseCase {
+  private readonly logger = new Logger(GoogleLoginUseCase.name);
+
   constructor(
     @Inject('IUserService') private readonly userService: IUserService,
     @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
@@ -67,7 +70,15 @@ export class GoogleLoginUseCase {
 
       const roles = await this.authRepository.getUserRole(userId);
 
-      await this.roleCache.setUserRoles(userId, roles);
+      try {
+        await this.roleCache.setUserRoles(userId, roles);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to cache roles for user ${userId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
 
       const payload = {
         sub: userId,
@@ -80,6 +91,7 @@ export class GoogleLoginUseCase {
       });
       const refreshToken = await this.jwtService.signAsync(payload, {
         expiresIn: '7d',
+        jwtid: randomUUID(),
       });
 
       const expiresAt = new Date();

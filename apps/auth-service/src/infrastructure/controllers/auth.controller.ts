@@ -9,6 +9,9 @@ import { ResetPasswordUseCase } from '@auth/application/use-cases/reset-password
 import { VerifyGoogleTokenUseCase } from '@auth/application/use-cases/verify-google-token.use-case';
 import { VerifyTokenUseCase } from '@auth/application/use-cases/verify-token.use-case';
 import { AccountNotVerifiedError } from '@auth/domain/errors/account-not-verified.error';
+import { GoogleAuthNotConfiguredError } from '@auth/domain/errors/google-auth-not-configured.error';
+import { InvalidCredentialsError } from '@auth/domain/errors/invalid-credentials.error';
+import { InvalidGoogleTokenError } from '@auth/domain/errors/invalid-google-token.error';
 import { InvalidResetTokenError } from '@auth/domain/errors/invalid-reset-token.error';
 import { InvalidTokenError } from '@auth/domain/errors/invalid-token.error';
 import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
@@ -79,9 +82,18 @@ export class AuthController {
         });
       }
 
+      if (error instanceof InvalidCredentialsError) {
+        throw new RpcException({
+          statusCode: 401,
+          message: error.message,
+        });
+      }
+
+      console.error('Login failed:', error);
+
       throw new RpcException({
-        statusCode: 401,
-        message: 'Invalid credentials',
+        statusCode: 500,
+        message: 'Login failed',
       });
     }
   }
@@ -173,9 +185,31 @@ export class AuthController {
       return await this.verifyGoogleTokenUseCase.execute(dto.idToken);
     } catch (error) {
       console.error(error);
+
+      if (error instanceof InvalidGoogleTokenError) {
+        throw new RpcException({
+          statusCode: 401,
+          message: error.message,
+        });
+      }
+
+      if (error instanceof GoogleAuthNotConfiguredError) {
+        throw new RpcException({
+          statusCode: 500,
+          message: error.message,
+        });
+      }
+
+      if (error instanceof SagaCompensationError) {
+        throw new RpcException({
+          statusCode: 500,
+          message: error.message,
+        });
+      }
+
       throw new RpcException({
-        statusCode: 401,
-        message: 'Invalid Google token',
+        statusCode: 500,
+        message: 'Internal Server Error',
       });
     }
   }

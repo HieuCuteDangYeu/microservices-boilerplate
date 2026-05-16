@@ -1,6 +1,8 @@
 import { GoogleProfile } from '@common/auth/interfaces/google-profile.interface';
 import { Injectable } from '@nestjs/common';
 import { OAuth2Client } from 'google-auth-library';
+import { GoogleAuthNotConfiguredError } from '../../domain/errors/google-auth-not-configured.error';
+import { InvalidGoogleTokenError } from '../../domain/errors/invalid-google-token.error';
 import { GoogleLoginUseCase } from './google-login.use-case';
 
 @Injectable()
@@ -12,35 +14,50 @@ export class VerifyGoogleTokenUseCase {
   }
 
   async execute(idToken: string) {
-    try {
-      const validAudiences = [
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_IOS_CLIENT_ID,
-        process.env.GOOGLE_ANDROID_CLIENT_ID,
-      ].filter(Boolean) as string[];
+    const validAudiences = [
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_IOS_CLIENT_ID,
+      process.env.GOOGLE_ANDROID_CLIENT_ID,
+    ].filter(Boolean) as string[];
 
+    if (validAudiences.length === 0) {
+      throw new GoogleAuthNotConfiguredError();
+    }
+
+    let payload:
+      | {
+          email?: string;
+          picture?: string;
+          sub?: string;
+        }
+      | undefined;
+
+    try {
       const ticket = await this.googleClient.verifyIdToken({
         idToken,
         audience: validAudiences,
       });
 
-      const payload = ticket.getPayload();
-
+      payload = ticket.getPayload();
       if (!payload || !payload.email || !payload.sub) {
-        throw new Error('Invalid Google token payload');
+        throw new InvalidGoogleTokenError();
       }
-
-      const profile: GoogleProfile = {
-        email: payload.email,
-        picture: payload.picture,
-        providerId: payload.sub,
-        provider: 'google',
-      };
-
-      return await this.googleLoginUseCase.execute(profile);
     } catch (error) {
       console.error('Google token verification failed:', error);
-      throw error;
+      if (error instanceof InvalidGoogleTokenError) {
+        throw error;
+      }
+
+      throw new InvalidGoogleTokenError();
     }
+
+    const profile: GoogleProfile = {
+      email: payload.email,
+      picture: payload.picture,
+      providerId: payload.sub,
+      provider: 'google',
+    };
+
+    return await this.googleLoginUseCase.execute(profile);
   }
 }
