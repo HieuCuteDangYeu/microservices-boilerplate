@@ -1,0 +1,188 @@
+import { isRpcError } from '@common/constants/rpc-error.types';
+import { SendFriendRequestDto } from '@common/friend/dtos/send-friend-request.dto';
+import {
+  FriendRequestSummary,
+  FriendSummary,
+  FriendshipActionResponse,
+  FriendshipStatusResponse,
+} from '@common/friend/interfaces/friend.types';
+import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
+import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '@gateway/auth/guards/roles.guard';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { catchError, lastValueFrom } from 'rxjs';
+
+@ApiTags('Friends')
+@Controller('friends')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.ADMIN, Role.USER)
+export class FriendController {
+  constructor(
+    @Inject('FRIEND_SERVICE') private readonly friendClient: ClientProxy,
+  ) {}
+
+  @Post('requests')
+  @ApiOperation({ summary: 'Send a friend request to another user' })
+  async sendRequest(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: SendFriendRequestDto,
+  ): Promise<FriendshipActionResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendshipActionResponse>('friend.send_request', {
+          userId: request.user!.id,
+          recipientId: dto.recipientId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Post('requests/:requestId/accept')
+  @ApiOperation({ summary: 'Accept an incoming friend request' })
+  async acceptRequest(
+    @Req() request: AuthenticatedRequest,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+  ): Promise<FriendshipActionResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendshipActionResponse>('friend.accept_request', {
+          userId: request.user!.id,
+          requestId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Post('requests/:requestId/reject')
+  @ApiOperation({ summary: 'Reject an incoming friend request' })
+  async rejectRequest(
+    @Req() request: AuthenticatedRequest,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+  ): Promise<FriendshipActionResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendshipActionResponse>('friend.reject_request', {
+          userId: request.user!.id,
+          requestId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Delete('requests/:requestId')
+  @ApiOperation({ summary: 'Cancel an outgoing friend request' })
+  async cancelRequest(
+    @Req() request: AuthenticatedRequest,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+  ): Promise<FriendshipActionResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendshipActionResponse>('friend.cancel_request', {
+          userId: request.user!.id,
+          requestId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Get('requests/incoming')
+  @ApiOperation({ summary: 'List incoming friend requests' })
+  async listIncomingRequests(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<FriendRequestSummary[]> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendRequestSummary[]>('friend.list_incoming_requests', {
+          userId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Get('requests/outgoing')
+  @ApiOperation({ summary: 'List outgoing friend requests' })
+  async listOutgoingRequests(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<FriendRequestSummary[]> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendRequestSummary[]>('friend.list_outgoing_requests', {
+          userId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'List accepted friends' })
+  async listFriends(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<FriendSummary[]> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendSummary[]>('friend.list_friends', {
+          userId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Delete(':userId')
+  @ApiOperation({ summary: 'Remove an accepted friend' })
+  async removeFriend(
+    @Req() request: AuthenticatedRequest,
+    @Param('userId', ParseUUIDPipe) friendUserId: string,
+  ): Promise<FriendshipActionResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendshipActionResponse>('friend.remove', {
+          userId: request.user!.id,
+          friendUserId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Get('status/:userId')
+  @ApiOperation({ summary: 'Get friendship status with another user' })
+  async getStatus(
+    @Req() request: AuthenticatedRequest,
+    @Param('userId', ParseUUIDPipe) otherUserId: string,
+  ): Promise<FriendshipStatusResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<FriendshipStatusResponse>('friend.get_status', {
+          userId: request.user!.id,
+          otherUserId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  private handleMicroserviceError(error: unknown): never {
+    if (isRpcError(error)) {
+      throw new HttpException(error.message, error.statusCode);
+    }
+
+    throw new HttpException(
+      'Internal Server Error',
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}

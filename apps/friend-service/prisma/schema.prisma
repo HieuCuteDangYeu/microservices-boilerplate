@@ -1,0 +1,33 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/@prisma/friend-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("FRIEND_DATABASE_URL")
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+}
+
+model Friendship {
+  id          String           @id @default(uuid())
+  requesterId String
+  recipientId String
+  userOneId   String
+  userTwoId   String
+  status      FriendshipStatus @default(PENDING)
+  respondedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([userOneId, userTwoId])
+  @@index([requesterId, status])
+  @@index([recipientId, status])
+  @@index([userOneId, status])
+  @@index([userTwoId, status])
+}

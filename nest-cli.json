@@ -58,6 +58,16 @@
         "webpack": false
       }
     },
+    "friend-service": {
+      "type": "application",
+      "root": "apps/friend-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/friend-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/friend-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "conversation-service": {
       "type": "application",
       "root": "apps/conversation-service",

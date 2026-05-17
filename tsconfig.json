@@ -25,6 +25,7 @@
       "@auth/*": ["apps/auth-service/src/*"],
       "@common/*": ["libs/common/src/*"],
       "@content/*": ["apps/content-service/src/*"],
+      "@friend/*": ["apps/friend-service/src/*"],
       "@gateway/*": ["apps/api-gateway/src/*"],
       "@mail/*": ["apps/mail-service/src/*"],
       "@media/*": ["apps/media-service/src/*"],
@@ -34,6 +35,7 @@
       "@prisma/conversation-client": [
         "node_modules/@prisma/conversation-client"
       ],
+      "@prisma/friend-client": ["node_modules/@prisma/friend-client"],
       "@prisma/mail-client": ["node_modules/@prisma/mail-client"],
       "@prisma/media-client": ["node_modules/@prisma/media-client"],
       "@prisma/payment-client": ["node_modules/@prisma/payment-client"],
