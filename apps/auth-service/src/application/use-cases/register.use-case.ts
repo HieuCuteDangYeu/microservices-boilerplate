@@ -3,6 +3,7 @@ import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import { Inject, Injectable } from '@nestjs/common';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
+import { UsernameAlreadyTakenError } from '@user/domain/errors/username-already-taken.error';
 import { randomInt } from 'crypto';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 import type { IMailService } from '../../domain/interfaces/mail-service.interface';
@@ -52,7 +53,10 @@ export class RegisterUseCase {
         }
       }
 
-      if (error instanceof UserAlreadyExistsError) {
+      if (
+        error instanceof UserAlreadyExistsError ||
+        error instanceof UsernameAlreadyTakenError
+      ) {
         throw error;
       }
 

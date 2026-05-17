@@ -18,7 +18,12 @@ export class FindUserByEmailUseCase {
     return {
       id: user.id,
       email: user.email,
+      fullName: user.fullName,
+      username: user.username,
       isVerified: user.isVerified,
+      picture: user.picture,
+      provider: user.provider,
+      providerId: user.providerId,
     };
   }
 }

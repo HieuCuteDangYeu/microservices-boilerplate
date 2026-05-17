@@ -1,5 +1,7 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
+import { CheckUsernameAvailabilityDto } from '@common/user/dtos/check-username-availability.dto';
 import { CreateUserDto } from '@common/user/dtos/create-user.dto';
+import { SearchPublicUsersDto } from '@common/user/dtos/search-public-users.dto';
 import { UpdateAvatarDto } from '@common/user/dtos/update-avatar.dto';
 import { UpdateUserDto } from '@common/user/dtos/update-user.dto';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
@@ -8,10 +10,13 @@ import {
   DeleteUserResponse,
 } from '@common/user/interfaces/delete-user.types';
 import { PaginatedUsersResponse } from '@common/user/interfaces/find-all-users.types';
+import { PrivateUserProfile } from '@common/user/interfaces/private-user-profile.types';
+import { PublicUserProfile } from '@common/user/interfaces/public-user-profile.types';
 import {
   UpdateUserPayload,
   UpdateUserResponse,
 } from '@common/user/interfaces/update-user.types';
+import { UsernameAvailabilityResponse } from '@common/user/interfaces/username-availability.types';
 import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
@@ -40,7 +45,9 @@ import { PaginationDto } from './dto/pagination.dto';
 export interface MicroserviceUser {
   id: string;
   email: string;
-  name?: string | null;
+  fullName: string;
+  username: string;
+  picture?: string | null;
   avatarKey?: string | null;
   password?: string | null;
   [key: string]: unknown;
@@ -67,9 +74,70 @@ export class UserController {
     );
   }
 
+  @Get('me')
+  @ApiOperation({ summary: 'Get the current user private profile' })
+  @Roles(Role.ADMIN, Role.USER)
+  async getMe(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<PrivateUserProfile> {
+    return await lastValueFrom(
+      this.userClient
+        .send<PrivateUserProfile>('user.get_private_profile', {
+          userId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Get('username-availability')
+  @ApiOperation({ summary: 'Check username availability' })
+  @Roles(Role.ADMIN, Role.USER)
+  async checkUsernameAvailability(
+    @Query() query: CheckUsernameAvailabilityDto,
+  ): Promise<UsernameAvailabilityResponse> {
+    return await lastValueFrom(
+      this.userClient
+        .send<UsernameAvailabilityResponse>(
+          'user.check_username_availability',
+          query,
+        )
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Get('discover')
+  @ApiOperation({ summary: 'Search public users for friend discovery' })
+  @Roles(Role.ADMIN, Role.USER)
+  async discoverUsers(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: SearchPublicUsersDto,
+  ): Promise<PublicUserProfile[]> {
+    return await lastValueFrom(
+      this.userClient
+        .send<PublicUserProfile[]>('user.search_public', {
+          ...query,
+          excludeUserId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Get('public/:username')
+  @ApiOperation({ summary: 'Lookup a public profile by username' })
+  @Roles(Role.ADMIN, Role.USER)
+  async findPublicProfile(
+    @Param('username') username: string,
+  ): Promise<PublicUserProfile> {
+    return await lastValueFrom(
+      this.userClient
+        .send<PublicUserProfile>('user.find_public_by_username', { username })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
   @Get()
   @ApiOperation({ summary: 'Get all users' })
-  @Roles(Role.ADMIN, Role.USER)
+  @Roles(Role.ADMIN)
   async findAll(
     @Query() query: PaginationDto,
   ): Promise<PaginatedUsersResponse> {

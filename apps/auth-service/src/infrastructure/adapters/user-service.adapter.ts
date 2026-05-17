@@ -12,6 +12,7 @@ import { ValidateUserResponse } from '@common/user/interfaces/validate-user-resp
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
+import { UsernameAlreadyTakenError } from '@user/domain/errors/username-already-taken.error';
 import { catchError, lastValueFrom, of, throwError } from 'rxjs';
 import { IUserService } from '../../domain/interfaces/user-service.interface';
 
@@ -25,6 +26,8 @@ export class UserServiceAdapter implements IUserService {
     const payload: CreateUserPayloadDto = {
       email: dto.email,
       password: dto.password,
+      fullName: dto.fullName,
+      username: dto.username,
       isVerified: false,
     };
 
@@ -32,6 +35,15 @@ export class UserServiceAdapter implements IUserService {
       this.rmqClient.send<CreateUserResponse>('create_user', payload).pipe(
         catchError((err) => {
           if (isRpcError(err) && err.statusCode === 409) {
+            if (
+              typeof err.message === 'string' &&
+              err.message.toLowerCase().includes('username')
+            ) {
+              return throwError(
+                () => new UsernameAlreadyTakenError(dto.username ?? 'unknown'),
+              );
+            }
+
             return throwError(() => new UserAlreadyExistsError(dto.email));
           }
 

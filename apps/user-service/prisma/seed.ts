@@ -17,10 +17,17 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { email: DEFAULT_ADMIN_EMAIL },
-    update: {},
+    update: {
+      fullName: 'Admin User',
+      username: 'admin',
+      password: hashedPassword,
+      isVerified: true,
+    },
     create: {
       id: DEFAULT_ADMIN_ID,
       email: DEFAULT_ADMIN_EMAIL,
+      fullName: 'Admin User',
+      username: 'admin',
       password: hashedPassword,
       isVerified: true,
       createdAt: new Date(),
@@ -31,10 +38,17 @@ async function main() {
 
   const bot = await prisma.user.upsert({
     where: { email: BOT_USER_EMAIL },
-    update: {},
+    update: {
+      fullName: 'System Bot',
+      username: 'system_bot',
+      password: hashedPassword,
+      isVerified: true,
+    },
     create: {
       id: BOT_USER_ID,
       email: BOT_USER_EMAIL,
+      fullName: 'System Bot',
+      username: 'system_bot',
       password: hashedPassword,
       isVerified: true,
       createdAt: new Date(),

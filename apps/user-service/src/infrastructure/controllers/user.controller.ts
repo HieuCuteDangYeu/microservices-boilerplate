@@ -1,6 +1,8 @@
 import { LoginDto } from '@common/auth/dtos/login.dto';
+import { CheckUsernameAvailabilityDto } from '@common/user/dtos/check-username-availability.dto';
 import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
+import { SearchPublicUsersDto } from '@common/user/dtos/search-public-users.dto';
 import { UpdateAvatarDto } from '@common/user/dtos/update-avatar.dto';
 import type { DeleteUserPayload } from '@common/user/interfaces/delete-user.types';
 import type { FindAllUsersPayload } from '@common/user/interfaces/find-all-users.types';
@@ -13,20 +15,29 @@ import {
   Payload,
   RpcException,
 } from '@nestjs/microservices';
+import { CheckUsernameAvailabilityUseCase } from '@user/application/use-cases/check-username-availability.use-case';
 import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
+import { FindPrivateUserProfileUseCase } from '@user/application/use-cases/find-private-user-profile.use-case';
+import { FindPublicUserByUsernameUseCase } from '@user/application/use-cases/find-public-user-by-username.use-case';
+import { FindPublicUsersByIdsUseCase } from '@user/application/use-cases/find-public-users-by-ids.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
+import { SearchPublicUsersUseCase } from '@user/application/use-cases/search-public-users.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { ValidateUserUseCase } from '@user/application/use-cases/validate-user.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { InvalidAvatarFileError } from '@user/domain/errors/invalid-avatar-file.error';
+import { InvalidFullNameError } from '@user/domain/errors/invalid-full-name.error';
+import { InvalidUsernameError } from '@user/domain/errors/invalid-username.error';
 import { RoleAssignmentError } from '@user/domain/errors/role-assignment.error';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
+import { UsernameAlreadyTakenError } from '@user/domain/errors/username-already-taken.error';
+import { UsernameNotFoundError } from '@user/domain/errors/username-not-found.error';
 import { CreateUserUseCase } from '../../application/use-cases/create-user.use-case';
 import { ValidateUsersListUseCase } from './../../application/use-cases/validate-users-list.use-case';
 
@@ -43,8 +54,13 @@ export class UserController {
     private readonly createSocialUserUseCase: CreateSocialUserUseCase,
     private readonly updateUserAvatarUseCase: UpdateUserAvatarUseCase,
     private readonly findUserByIdUseCase: FindUserByIdUseCase,
+    private readonly findPublicUsersByIdsUseCase: FindPublicUsersByIdsUseCase,
     private readonly findUsersByIdsUseCase: FindUsersByIdsUseCase,
     private readonly validateUsersListUseCase: ValidateUsersListUseCase,
+    private readonly findPrivateUserProfileUseCase: FindPrivateUserProfileUseCase,
+    private readonly findPublicUserByUsernameUseCase: FindPublicUserByUsernameUseCase,
+    private readonly searchPublicUsersUseCase: SearchPublicUsersUseCase,
+    private readonly checkUsernameAvailabilityUseCase: CheckUsernameAvailabilityUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -52,19 +68,7 @@ export class UserController {
     try {
       return await this.createUserUseCase.execute(data);
     } catch (error) {
-      if (error instanceof UserAlreadyExistsError) {
-        throw new RpcException({
-          statusCode: 409,
-          message: error.message,
-        });
-      }
-      if (error instanceof RoleAssignmentError) {
-        throw new RpcException({
-          statusCode: 500,
-          message: 'User creation failed due to role system error',
-        });
-      }
-      throw error;
+      this.handleDomainError(error);
     }
   }
 
@@ -78,13 +82,7 @@ export class UserController {
     try {
       return await this.updateUserUseCase.execute(payload);
     } catch (error) {
-      if (error instanceof UserNotFoundError) {
-        throw new RpcException({
-          statusCode: 404,
-          message: error.message,
-        });
-      }
-      throw error;
+      this.handleDomainError(error);
     }
   }
 
@@ -93,13 +91,7 @@ export class UserController {
     try {
       return await this.deleteUserUseCase.execute(payload);
     } catch (error) {
-      if (error instanceof UserNotFoundError) {
-        throw new RpcException({
-          statusCode: 404,
-          message: error.message,
-        });
-      }
-      throw error;
+      this.handleDomainError(error);
     }
   }
 
@@ -138,24 +130,7 @@ export class UserController {
         data.payload,
       );
     } catch (error) {
-      if (error instanceof UserNotFoundError) {
-        throw new RpcException({
-          message: error.message,
-          statusCode: 404,
-        });
-      }
-
-      if (error instanceof InvalidAvatarFileError) {
-        throw new RpcException({
-          message: error.message,
-          statusCode: 400,
-        });
-      }
-
-      throw new RpcException({
-        message: 'An unexpected error occurred while updating the avatar',
-        statusCode: 500,
-      });
+      this.handleDomainError(error);
     }
   }
 
@@ -169,10 +144,101 @@ export class UserController {
     return await this.findUsersByIdsUseCase.execute(ids);
   }
 
+  @MessagePattern('user.find_public_by_ids')
+  async findPublicByIds(@Payload() ids: string[]) {
+    return await this.findPublicUsersByIdsUseCase.execute(ids);
+  }
+
+  @MessagePattern('user.get_private_profile')
+  async getPrivateProfile(@Payload() data: { userId: string }) {
+    try {
+      return await this.findPrivateUserProfileUseCase.execute(data.userId);
+    } catch (error) {
+      this.handleDomainError(error);
+    }
+  }
+
+  @MessagePattern('user.find_public_by_username')
+  async findPublicByUsername(@Payload() data: { username: string }) {
+    try {
+      return await this.findPublicUserByUsernameUseCase.execute(data.username);
+    } catch (error) {
+      this.handleDomainError(error);
+    }
+  }
+
+  @MessagePattern('user.search_public')
+  async searchPublicUsers(
+    @Payload()
+    data: SearchPublicUsersDto & { excludeUserId?: string },
+  ) {
+    return await this.searchPublicUsersUseCase.execute(
+      data.query,
+      data.limit,
+      data.excludeUserId,
+    );
+  }
+
+  @MessagePattern('user.check_username_availability')
+  async checkUsernameAvailability(
+    @Payload() data: CheckUsernameAvailabilityDto,
+  ) {
+    try {
+      return await this.checkUsernameAvailabilityUseCase.execute(data.username);
+    } catch (error) {
+      this.handleDomainError(error);
+    }
+  }
+
   @MessagePattern('user.validate_list')
   async handleValidateList(
     @Payload() data: { ids: string[] },
   ): Promise<boolean> {
     return await this.validateUsersListUseCase.execute(data.ids);
+  }
+
+  private handleDomainError(error: unknown): never {
+    if (
+      error instanceof UserNotFoundError ||
+      error instanceof UsernameNotFoundError
+    ) {
+      throw new RpcException({
+        statusCode: 404,
+        message: error.message,
+      });
+    }
+
+    if (
+      error instanceof UserAlreadyExistsError ||
+      error instanceof UsernameAlreadyTakenError
+    ) {
+      throw new RpcException({
+        statusCode: 409,
+        message: error.message,
+      });
+    }
+
+    if (
+      error instanceof InvalidAvatarFileError ||
+      error instanceof InvalidUsernameError ||
+      error instanceof InvalidFullNameError
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof RoleAssignmentError) {
+      throw new RpcException({
+        statusCode: 500,
+        message: 'User creation failed due to role system error',
+      });
+    }
+
+    throw new RpcException({
+      statusCode: 500,
+      message: 'Internal Server Error',
+    });
   }
 }

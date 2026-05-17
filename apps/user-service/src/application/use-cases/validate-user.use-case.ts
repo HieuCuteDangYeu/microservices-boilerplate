@@ -22,6 +22,9 @@ export class ValidateUserUseCase {
     return {
       id: user.id,
       email: user.email,
+      fullName: user.fullName,
+      username: user.username,
+      picture: user.picture,
       isVerified: user.isVerified,
     };
   }
