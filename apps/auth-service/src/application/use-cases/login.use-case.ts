@@ -44,7 +44,10 @@ export class LoginUseCase {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
+      fullName: user.fullName,
+      username: user.username,
       picture: user.picture ?? undefined,
+      isVerified: user.isVerified,
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {

@@ -7,7 +7,6 @@ import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-c
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
-import { FindPrivateUserProfileUseCase } from '@user/application/use-cases/find-private-user-profile.use-case';
 import { FindPublicUserByUsernameUseCase } from '@user/application/use-cases/find-public-user-by-username.use-case';
 import { FindPublicUsersByIdsUseCase } from '@user/application/use-cases/find-public-users-by-ids.use-case';
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
@@ -58,7 +57,6 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     CreateSocialUserUseCase,
     UpdateUserAvatarUseCase,
     FindUserByIdUseCase,
-    FindPrivateUserProfileUseCase,
     FindPublicUserByUsernameUseCase,
     FindPublicUsersByIdsUseCase,
     FindUsersByIdsUseCase,

@@ -3,9 +3,9 @@ import { GoogleProfile } from '@common/auth/interfaces/google-profile.interface'
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { UpdateUserPayload } from '@common/user/interfaces/update-user.types';
-import { randomUUID } from 'crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'crypto';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
 
@@ -84,7 +84,10 @@ export class GoogleLoginUseCase {
       const payload = {
         sub: userId,
         email: user.email,
+        fullName: user.fullName,
+        username: user.username,
         picture: user.picture,
+        isVerified: user.isVerified,
       };
 
       const accessToken = await this.jwtService.signAsync(payload, {

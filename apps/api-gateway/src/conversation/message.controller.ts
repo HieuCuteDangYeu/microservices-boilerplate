@@ -1,3 +1,8 @@
+import { CurrentUser } from '@common/auth/decorators/current-user.decorator';
+import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
+import { AddReactionDto } from '@common/conversation/dtos/add-reaction.dto';
+import { MessageDto } from '@common/conversation/dtos/message.dto';
+import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
   Body,
   Controller,
@@ -16,11 +21,6 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { CurrentUser } from '@common/auth/decorators/current-user.decorator';
-import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
-import { AddReactionDto } from '@common/conversation/dtos/add-reaction.dto';
-import { MessageDto } from '@common/conversation/dtos/message.dto';
-import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import { lastValueFrom } from 'rxjs';
 
 @ApiTags('Messages')
@@ -34,7 +34,9 @@ export class MessageController {
   ) {}
 
   @Post(':messageId/reactions')
-  @ApiOperation({ summary: 'Add or replace the current user reaction for a message' })
+  @ApiOperation({
+    summary: 'Add or replace the current user reaction for a message',
+  })
   @ApiBody({ type: AddReactionDto })
   @ApiOkResponse({ type: MessageDto })
   async addReaction(

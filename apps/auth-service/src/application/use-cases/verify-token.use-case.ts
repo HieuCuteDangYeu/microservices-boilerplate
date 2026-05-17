@@ -4,6 +4,7 @@ import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
+import type { IUserService } from '../../domain/interfaces/user-service.interface';
 
 @Injectable()
 export class VerifyTokenUseCase {
@@ -12,6 +13,7 @@ export class VerifyTokenUseCase {
   constructor(
     private readonly jwtService: JwtService,
     @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
+    @Inject('IUserService') private readonly userService: IUserService,
     @Inject('IUserRoleRepository')
     private readonly roleCache: IUserRoleRepository,
   ) {}
@@ -45,10 +47,29 @@ export class VerifyTokenUseCase {
       }
     }
 
+    let fullName = payload.fullName;
+    let username = payload.username;
+    let picture = payload.picture;
+    let isVerified = payload.isVerified;
+
+    if (fullName === undefined || username === undefined) {
+      const user = await this.userService.findByEmail(payload.email);
+
+      if (user) {
+        fullName = user.fullName;
+        username = user.username;
+        picture = user.picture ?? picture;
+        isVerified = user.isVerified ?? isVerified;
+      }
+    }
+
     return {
       id: payload.sub,
       email: payload.email,
-      picture: payload.picture,
+      fullName,
+      username,
+      picture,
+      isVerified,
       roles: roles,
     };
   }

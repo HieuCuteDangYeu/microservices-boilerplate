@@ -19,7 +19,6 @@ import { CheckUsernameAvailabilityUseCase } from '@user/application/use-cases/ch
 import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
-import { FindPrivateUserProfileUseCase } from '@user/application/use-cases/find-private-user-profile.use-case';
 import { FindPublicUserByUsernameUseCase } from '@user/application/use-cases/find-public-user-by-username.use-case';
 import { FindPublicUsersByIdsUseCase } from '@user/application/use-cases/find-public-users-by-ids.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
@@ -57,7 +56,6 @@ export class UserController {
     private readonly findPublicUsersByIdsUseCase: FindPublicUsersByIdsUseCase,
     private readonly findUsersByIdsUseCase: FindUsersByIdsUseCase,
     private readonly validateUsersListUseCase: ValidateUsersListUseCase,
-    private readonly findPrivateUserProfileUseCase: FindPrivateUserProfileUseCase,
     private readonly findPublicUserByUsernameUseCase: FindPublicUserByUsernameUseCase,
     private readonly searchPublicUsersUseCase: SearchPublicUsersUseCase,
     private readonly checkUsernameAvailabilityUseCase: CheckUsernameAvailabilityUseCase,
@@ -147,15 +145,6 @@ export class UserController {
   @MessagePattern('user.find_public_by_ids')
   async findPublicByIds(@Payload() ids: string[]) {
     return await this.findPublicUsersByIdsUseCase.execute(ids);
-  }
-
-  @MessagePattern('user.get_private_profile')
-  async getPrivateProfile(@Payload() data: { userId: string }) {
-    try {
-      return await this.findPrivateUserProfileUseCase.execute(data.userId);
-    } catch (error) {
-      this.handleDomainError(error);
-    }
   }
 
   @MessagePattern('user.find_public_by_username')

@@ -54,7 +54,10 @@ export class RefreshTokenUseCase {
       const newPayload: JwtPayload = {
         sub: payload.sub,
         email: payload.email,
+        fullName: payload.fullName,
+        username: payload.username,
         picture: payload.picture ?? undefined,
+        isVerified: payload.isVerified,
       };
 
       const accessToken = await this.jwtService.signAsync(newPayload, {

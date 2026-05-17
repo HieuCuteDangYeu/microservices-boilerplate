@@ -10,7 +10,6 @@ import {
   DeleteUserResponse,
 } from '@common/user/interfaces/delete-user.types';
 import { PaginatedUsersResponse } from '@common/user/interfaces/find-all-users.types';
-import { PrivateUserProfile } from '@common/user/interfaces/private-user-profile.types';
 import { PublicUserProfile } from '@common/user/interfaces/public-user-profile.types';
 import {
   UpdateUserPayload,
@@ -71,21 +70,6 @@ export class UserController {
           this.handleMicroserviceError(error);
         }),
       ),
-    );
-  }
-
-  @Get('me')
-  @ApiOperation({ summary: 'Get the current user private profile' })
-  @Roles(Role.ADMIN, Role.USER)
-  async getMe(
-    @Req() request: AuthenticatedRequest,
-  ): Promise<PrivateUserProfile> {
-    return await lastValueFrom(
-      this.userClient
-        .send<PrivateUserProfile>('user.get_private_profile', {
-          userId: request.user!.id,
-        })
-        .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 
