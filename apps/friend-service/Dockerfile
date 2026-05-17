@@ -10,9 +10,9 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
-RUN pnpm run prisma:generate:friend
+RUN npx prisma generate --schema=./apps/friend-service/prisma/schema.prisma
 
-RUN pnpm run build friend-service
+RUN pnpm run build:friend
 
 
 FROM node:20-alpine AS production
@@ -29,7 +29,7 @@ RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 COPY --from=builder /usr/src/app/dist ./dist
 
-RUN pnpm run prisma:generate:friend
+RUN npx prisma@5.22.0 generate --schema=./apps/friend-service/prisma/schema.prisma
 
 USER node
 
