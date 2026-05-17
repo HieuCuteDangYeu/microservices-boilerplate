@@ -14,6 +14,8 @@ export class FindUsersByIdsUseCase {
     return users.map((user) => ({
       id: user.id!,
       email: user.email,
+      fullName: user.fullName,
+      username: user.username,
       picture: user.picture,
     }));
   }

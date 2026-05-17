@@ -2,6 +2,8 @@ export class User {
   constructor(
     public readonly id: string | null,
     public readonly email: string,
+    public readonly fullName: string,
+    public readonly username: string,
     public readonly password: string | null,
     public readonly isVerified: boolean,
     public readonly createdAt: Date | null,

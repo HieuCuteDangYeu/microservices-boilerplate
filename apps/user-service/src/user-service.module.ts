@@ -1,12 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { CheckUsernameAvailabilityUseCase } from '@user/application/use-cases/check-username-availability.use-case';
 import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
+import { FindPrivateUserProfileUseCase } from '@user/application/use-cases/find-private-user-profile.use-case';
+import { FindPublicUserByUsernameUseCase } from '@user/application/use-cases/find-public-user-by-username.use-case';
+import { FindPublicUsersByIdsUseCase } from '@user/application/use-cases/find-public-users-by-ids.use-case';
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
+import { SearchPublicUsersUseCase } from '@user/application/use-cases/search-public-users.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { ValidateUserUseCase } from '@user/application/use-cases/validate-user.use-case';
@@ -53,7 +58,12 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     CreateSocialUserUseCase,
     UpdateUserAvatarUseCase,
     FindUserByIdUseCase,
+    FindPrivateUserProfileUseCase,
+    FindPublicUserByUsernameUseCase,
+    FindPublicUsersByIdsUseCase,
     FindUsersByIdsUseCase,
+    SearchPublicUsersUseCase,
+    CheckUsernameAvailabilityUseCase,
     ValidateUsersListUseCase,
     {
       provide: 'IUserRepository',

@@ -5,12 +5,26 @@ import { User } from '../../domain/entities/user.entity';
 import {
   FindAllParams,
   IUserRepository,
+  SearchPublicUsersParams,
 } from '../../domain/interfaces/user.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UserRepository implements IUserRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  private toPicture(avatarKey: string | null): string | null {
+    if (!avatarKey) {
+      return null;
+    }
+
+    if (avatarKey.startsWith('http')) {
+      return avatarKey;
+    }
+
+    const cdnDomain = process.env.R2_PUBLIC_DOMAIN || '';
+    return `${cdnDomain}/${avatarKey}`;
+  }
 
   async save(user: User): Promise<User> {
     const dbAvatarKey = user.picture
@@ -20,6 +34,8 @@ export class UserRepository implements IUserRepository {
     const saved = await this.prisma.user.create({
       data: {
         email: user.email,
+        fullName: user.fullName,
+        username: user.username,
         password: user.password,
         isVerified: user.isVerified,
         avatarKey: dbAvatarKey,
@@ -42,25 +58,24 @@ export class UserRepository implements IUserRepository {
     return found ? this.toDomain(found) : null;
   }
 
+  async findByUsername(username: string): Promise<User | null> {
+    const found = await this.prisma.user.findUnique({
+      where: { username },
+    });
+
+    return found ? this.toDomain(found) : null;
+  }
+
   private toDomain(prismaUser: PrismaUser): User {
-    const cdnDomain = process.env.R2_PUBLIC_DOMAIN || '';
-    let computedPicture: string | null = null;
-
-    if (prismaUser.avatarKey) {
-      if (prismaUser.avatarKey.startsWith('http')) {
-        computedPicture = prismaUser.avatarKey;
-      } else {
-        computedPicture = `${cdnDomain}/${prismaUser.avatarKey}`;
-      }
-    }
-
     return new User(
       prismaUser.id,
       prismaUser.email,
+      prismaUser.fullName,
+      prismaUser.username,
       prismaUser.password,
       prismaUser.isVerified,
       prismaUser.createdAt,
-      computedPicture,
+      this.toPicture(prismaUser.avatarKey),
       prismaUser.provider,
       prismaUser.providerId,
     );
@@ -73,7 +88,11 @@ export class UserRepository implements IUserRepository {
 
     const where: Prisma.UserWhereInput = search
       ? {
-          OR: [{ email: { contains: search, mode: 'insensitive' } }],
+          OR: [
+            { email: { contains: search, mode: 'insensitive' } },
+            { username: { contains: search.toLowerCase() } },
+            { fullName: { contains: search, mode: 'insensitive' } },
+          ],
         }
       : {};
 
@@ -88,13 +107,56 @@ export class UserRepository implements IUserRepository {
         select: {
           id: true,
           email: true,
+          fullName: true,
+          username: true,
+          avatarKey: true,
           createdAt: true,
         },
       }),
       this.prisma.user.count({ where }),
     ]);
 
-    return { users, total };
+    return {
+      users: users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        username: user.username,
+        picture: this.toPicture(user.avatarKey),
+        createdAt: user.createdAt,
+      })),
+      total,
+    };
+  }
+
+  async searchPublicUsers(params: SearchPublicUsersParams): Promise<User[]> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: params.excludeUserId ? { not: params.excludeUserId } : undefined,
+        OR: [
+          { username: { contains: params.query.toLowerCase() } },
+          { fullName: { contains: params.query, mode: 'insensitive' } },
+        ],
+      },
+      take: params.limit,
+      orderBy: [{ username: 'asc' }, { fullName: 'asc' }],
+    });
+
+    return users.map((user) => this.toDomain(user));
+  }
+
+  async isUsernameAvailable(
+    username: string,
+    excludeUserId?: string,
+  ): Promise<boolean> {
+    const count = await this.prisma.user.count({
+      where: {
+        username,
+        id: excludeUserId ? { not: excludeUserId } : undefined,
+      },
+    });
+
+    return count === 0;
   }
 
   async update(id: string, data: Partial<User>): Promise<User> {

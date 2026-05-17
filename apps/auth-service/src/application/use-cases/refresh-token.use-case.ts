@@ -1,13 +1,16 @@
 import type { IUserRoleRepository } from '@auth/domain/interfaces/user-role.repository,interface';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
-import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InvalidTokenError } from '../../domain/errors/invalid-token.error';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
 
 @Injectable()
 export class RefreshTokenUseCase {
+  private readonly logger = new Logger(RefreshTokenUseCase.name);
+
   constructor(
     @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
     @Inject('IUserRoleRepository')
@@ -38,7 +41,15 @@ export class RefreshTokenUseCase {
 
       const roles = await this.authRepository.getUserRole(payload.sub);
 
-      await this.roleCache.setUserRoles(payload.sub, roles);
+      try {
+        await this.roleCache.setUserRoles(payload.sub, roles);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to cache roles for user ${payload.sub}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
 
       const newPayload: JwtPayload = {
         sub: payload.sub,
@@ -51,6 +62,7 @@ export class RefreshTokenUseCase {
       });
       const refreshToken = await this.jwtService.signAsync(newPayload, {
         expiresIn: '7d',
+        jwtid: randomUUID(),
       });
 
       const expiresAt = new Date();

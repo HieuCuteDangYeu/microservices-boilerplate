@@ -5,10 +5,12 @@ export class UpdateUserDto extends createZodDto(
   UserDomainSchema.pick({
     email: true,
     password: true,
+    fullName: true,
+    username: true,
     picture: true,
   }).partial(),
 ) {}
 
 export class InternalUpdateUserDto extends createZodDto(
-  UserDomainSchema.omit({ id: true, createdAt: true }).partial(),
+  UserDomainSchema.omit({ id: true, createdAt: true, role: true }).partial(),
 ) {}

@@ -16,9 +16,11 @@ export class RoleController {
   ) {}
 
   @MessagePattern('auth.assign_role')
-  async assignRole(userId: string, roleName: string): Promise<void> {
+  async assignRole(
+    @Payload() data: { userId: string; roleName: string },
+  ): Promise<void> {
     try {
-      await this.assignRoleUseCase.execute(userId, roleName);
+      await this.assignRoleUseCase.execute(data.userId, data.roleName);
     } catch (error) {
       console.error(error);
       throw new RpcException('Failed to assign role');
