@@ -15,6 +15,7 @@ jobs:
           [
             api-gateway,
             user-service,
+            friend-service,
             auth-service,
             media-service,
             payment-service,

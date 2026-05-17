@@ -4,6 +4,7 @@ import { ContentController } from '@gateway/content/content.controller';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
 import { MessageController } from '@gateway/conversation/message.controller';
+import { FriendController } from '@gateway/friends/friend.controller';
 import { MediaController } from '@gateway/media/media.controller';
 import { PaymentController } from '@gateway/payment/payment.controller';
 import { UserController } from '@gateway/users/user.controller';
@@ -53,11 +54,13 @@ function createRmqClientRegistration(name: string, queue: string) {
       createRmqClientRegistration('CONVERSATION_SERVICE', 'conversation_queue'),
       createRmqClientRegistration('CONTENT_SERVICE', 'content_queue'),
       createRmqClientRegistration('AI_SERVICE', 'ai_queue'),
+      createRmqClientRegistration('FRIEND_SERVICE', 'friend_queue'),
     ]),
   ],
   controllers: [
     UserController,
     AuthController,
+    FriendController,
     MediaController,
     PaymentController,
     ConversationController,

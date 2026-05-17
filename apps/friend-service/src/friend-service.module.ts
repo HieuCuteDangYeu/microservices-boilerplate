@@ -1,0 +1,61 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ClientsModule, Transport } from '@nestjs/microservices';
+import { AcceptFriendRequestUseCase } from '@friend/application/use-cases/accept-friend-request.use-case';
+import { CancelFriendRequestUseCase } from '@friend/application/use-cases/cancel-friend-request.use-case';
+import { GetFriendshipStatusUseCase } from '@friend/application/use-cases/get-friendship-status.use-case';
+import { ListFriendsUseCase } from '@friend/application/use-cases/list-friends.use-case';
+import { ListIncomingFriendRequestsUseCase } from '@friend/application/use-cases/list-incoming-friend-requests.use-case';
+import { ListOutgoingFriendRequestsUseCase } from '@friend/application/use-cases/list-outgoing-friend-requests.use-case';
+import { RejectFriendRequestUseCase } from '@friend/application/use-cases/reject-friend-request.use-case';
+import { RemoveFriendUseCase } from '@friend/application/use-cases/remove-friend.use-case';
+import { SendFriendRequestUseCase } from '@friend/application/use-cases/send-friend-request.use-case';
+import { UserServiceAdapter } from '@friend/infrastructure/adapters/user-service.adapter';
+import { FriendController } from '@friend/infrastructure/controllers/friend.controller';
+import { PrismaService } from '@friend/infrastructure/prisma/prisma.service';
+import { FriendRepository } from '@friend/infrastructure/repositories/friend.repository';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
+    ClientsModule.registerAsync([
+      {
+        name: 'USER_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'user_queue',
+            queueOptions: { durable: true },
+          },
+        }),
+        inject: [ConfigService],
+      },
+    ]),
+  ],
+  controllers: [FriendController],
+  providers: [
+    PrismaService,
+    SendFriendRequestUseCase,
+    AcceptFriendRequestUseCase,
+    RejectFriendRequestUseCase,
+    CancelFriendRequestUseCase,
+    ListIncomingFriendRequestsUseCase,
+    ListOutgoingFriendRequestsUseCase,
+    ListFriendsUseCase,
+    RemoveFriendUseCase,
+    GetFriendshipStatusUseCase,
+    {
+      provide: 'IFriendRepository',
+      useClass: FriendRepository,
+    },
+    {
+      provide: 'IUserService',
+      useClass: UserServiceAdapter,
+    },
+  ],
+})
+export class FriendServiceModule {}

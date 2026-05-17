@@ -31,6 +31,18 @@ services:
     networks:
       - microservices-net
 
+  friend-service:
+    image: ${DOCKERHUB_USERNAME}/friend-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/friend-service/Dockerfile
+    restart: always
+    environment:
+      - FRIEND_DATABASE_URL=${FRIEND_DATABASE_URL}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+    networks:
+      - microservices-net
+
   auth-service:
     image: ${DOCKERHUB_USERNAME}/auth-service:latest
     build:
