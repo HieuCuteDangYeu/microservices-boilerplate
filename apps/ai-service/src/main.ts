@@ -13,7 +13,8 @@ async function bootstrap() {
         urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
         queue: 'ai_queue',
         queueOptions: { durable: true },
-        heartbeat: Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+        heartbeat:
+          Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
         retryAttempts: 10,
         retryDelay: 3000,
       },

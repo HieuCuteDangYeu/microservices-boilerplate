@@ -7,10 +7,11 @@ services:
     restart: always
     ports:
       - '3000:3000'
-    environment:
-      - PORT=3000
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -20,14 +21,11 @@ services:
       context: .
       dockerfile: ./apps/user-service/Dockerfile
     restart: always
-    environment:
-      - USER_DATABASE_URL=${USER_DATABASE_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
-      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -37,9 +35,11 @@ services:
       context: .
       dockerfile: ./apps/friend-service/Dockerfile
     restart: always
-    environment:
-      - FRIEND_DATABASE_URL=${FRIEND_DATABASE_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -49,18 +49,11 @@ services:
       context: .
       dockerfile: ./apps/auth-service/Dockerfile
     restart: always
-    environment:
-      - AUTH_DATABASE_URL=${AUTH_DATABASE_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - FRONTEND_URL=${FRONTEND_URL}
-      - RESEND_CONFIRM_ACCOUNT_TEMPLATE_ID=${RESEND_CONFIRM_ACCOUNT_TEMPLATE_ID}
-      - RESEND_RESET_PASSWORD_TEMPLATE_ID=${RESEND_RESET_PASSWORD_TEMPLATE_ID}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID}
-      - GOOGLE_ANDROID_CLIENT_ID=${GOOGLE_ANDROID_CLIENT_ID}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -70,13 +63,11 @@ services:
       context: .
       dockerfile: ./apps/media-service/Dockerfile
     restart: always
-    environment:
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
-      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -86,18 +77,11 @@ services:
       context: .
       dockerfile: ./apps/processing-service/Dockerfile
     restart: always
-    environment:
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - RABBITMQ_HEARTBEAT_SECONDS=${RABBITMQ_HEARTBEAT_SECONDS:-300}
-      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID}
-      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
-      - CLOUDFLARE_AI_TRANSCRIPTION_MODEL=${CLOUDFLARE_AI_TRANSCRIPTION_MODEL:-@cf/openai/whisper-large-v3-turbo}
-      - CLOUDFLARE_AI_TRANSCRIPTION_LANGUAGE=${CLOUDFLARE_AI_TRANSCRIPTION_LANGUAGE:-}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
-      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -107,13 +91,11 @@ services:
       context: .
       dockerfile: ./apps/content-service/Dockerfile
     restart: always
-    environment:
-      - CONTENT_DATABASE_URL=${CONTENT_DATABASE_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -125,11 +107,11 @@ services:
     restart: always
     ports:
       - '3006:3000'
-    environment:
-      - PAYMENT_DATABASE_URL=${PAYMENT_DATABASE_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -139,10 +121,11 @@ services:
       context: .
       dockerfile: ./apps/mail-service/Dockerfile
     restart: always
-    environment:
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - RESEND_API_KEY=${RESEND_API_KEY}
-      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -154,15 +137,11 @@ services:
     restart: always
     ports:
       - '3005:3005'
-    environment:
-      - CONVERSATION_PORT=${CONVERSATION_PORT}
-      - CONVERSATION_DATABASE_URL=${CONVERSATION_DATABASE_URL}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - FRONTEND_URL=${FRONTEND_URL}
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-net
 
@@ -172,20 +151,40 @@ services:
       context: .
       dockerfile: ./apps/ai-service/Dockerfile
     restart: always
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    restart: unless-stopped
     environment:
-      - RABBITMQ_URL=${RABBITMQ_URL}
-      - RABBITMQ_HEARTBEAT_SECONDS=${RABBITMQ_HEARTBEAT_SECONDS:-300}
-      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID}
-      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
-      - CLOUDFLARE_AI_TRANSCRIPTION_MODEL=${CLOUDFLARE_AI_TRANSCRIPTION_MODEL:-@cf/openai/whisper-large-v3-turbo}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - '127.0.0.1:15672:15672'
+    expose:
+      - '5672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - microservices-net
 
 networks:
   microservices-net:
     driver: bridge
+
+volumes:
+  rabbitmq_data:
