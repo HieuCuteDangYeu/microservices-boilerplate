@@ -161,7 +161,6 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management
-    container_name: rabbitmq
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
