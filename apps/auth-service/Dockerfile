@@ -10,7 +10,7 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
-RUN npx prisma generate --schema=./apps/auth-service/prisma/schema.prisma
+RUN pnpm exec prisma generate --schema=./apps/auth-service/prisma/schema.prisma
 
 RUN pnpm run build auth-service
 
@@ -28,8 +28,8 @@ COPY . .
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 COPY --from=builder /usr/src/app/dist ./dist
-
-RUN npx prisma@5.22.0 generate --schema=./apps/auth-service/prisma/schema.prisma
+COPY --from=builder /usr/src/app/node_modules/@prisma/auth-client ./node_modules/@prisma/auth-client
+COPY --from=builder /usr/src/app/node_modules/.prisma ./node_modules/.prisma
 
 USER node
 
