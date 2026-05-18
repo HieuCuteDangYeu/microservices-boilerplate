@@ -29,7 +29,6 @@ RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/node_modules/@prisma/payment-client ./node_modules/@prisma/payment-client
-COPY --from=builder /usr/src/app/node_modules/.prisma ./node_modules/.prisma
 
 USER node
 
