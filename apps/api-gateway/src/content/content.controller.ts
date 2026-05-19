@@ -197,6 +197,7 @@ export class ContentController {
       userId: reel.userId,
       mediaKey: reel.mediaKey,
       title: reel.title,
+      description: reel.description,
       tags: reel.tags,
       status: reel.status,
       visibility: reel.visibility,
