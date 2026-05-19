@@ -1,8 +1,15 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
+const userIdSchema = z
+  .string()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    'Invalid userId format',
+  );
+
 export const ListReelsQuerySchema = z.object({
-  userId: z.string().uuid().optional(),
+  userId: userIdSchema.optional(),
   visibility: z.enum(['public', 'private']).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   cursor: z
