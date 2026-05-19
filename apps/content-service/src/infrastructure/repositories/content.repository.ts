@@ -143,13 +143,14 @@ export class ContentRepository
         userId: true,
         mediaKey: true,
         title: true,
+        description: true,
         tags: true,
         status: true,
         visibility: true,
         viewCount: true,
         thumbnailKey: true,
         createdAt: true,
-        // transcript, embedding, description excluded from list query
+        // transcript and embedding are excluded from list query
       },
     });
 
