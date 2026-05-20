@@ -6,9 +6,5 @@ export class RegisterDto extends createZodDto(
     email: true,
     password: true,
     fullName: true,
-    username: true,
-  }).partial({
-    fullName: true,
-    username: true,
   }),
 ) {}

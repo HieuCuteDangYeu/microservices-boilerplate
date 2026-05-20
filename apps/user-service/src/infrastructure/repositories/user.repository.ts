@@ -133,6 +133,7 @@ export class UserRepository implements IUserRepository {
     const users = await this.prisma.user.findMany({
       where: {
         id: params.excludeUserId ? { not: params.excludeUserId } : undefined,
+        username: { not: null },
         OR: [
           { username: { contains: params.query.toLowerCase() } },
           { fullName: { contains: params.query, mode: 'insensitive' } },

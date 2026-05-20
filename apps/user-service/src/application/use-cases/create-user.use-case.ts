@@ -2,8 +2,6 @@ import { CreateUserPayloadDto } from '@common/user/dtos/create-user.dto';
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import {
-  buildUsernameCandidate,
-  buildUsernameBase,
   deriveFullName,
   normalizeFullName,
   normalizeUsername,
@@ -36,7 +34,7 @@ export class CreateUserUseCase {
       : deriveFullName(dto.email);
     const username = dto.username
       ? await this.ensureExplicitUsername(dto.username)
-      : await this.generateUsername(fullName, dto.email);
+      : null;
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&background=random`;
 
     const newUser = new User(
@@ -73,7 +71,7 @@ export class CreateUserUseCase {
         }
 
         if (target.includes('username')) {
-          throw new UsernameAlreadyTakenError(username);
+          throw new UsernameAlreadyTakenError(username ?? 'username');
         }
       }
 
@@ -118,35 +116,5 @@ export class CreateUserUseCase {
     }
 
     return normalizedUsername;
-  }
-
-  private async generateUsername(
-    fullName: string,
-    email: string,
-  ): Promise<string> {
-    const base = buildUsernameBase(fullName || email.split('@')[0] || 'user');
-
-    if (await this.userRepository.isUsernameAvailable(base)) {
-      return base;
-    }
-
-    const emailBase = buildUsernameBase(email.split('@')[0] || base);
-
-    if (
-      emailBase !== base &&
-      (await this.userRepository.isUsernameAvailable(emailBase))
-    ) {
-      return emailBase;
-    }
-
-    for (let attempt = 1; attempt <= 100; attempt += 1) {
-      const candidate = buildUsernameCandidate(base, attempt);
-
-      if (await this.userRepository.isUsernameAvailable(candidate)) {
-        return candidate;
-      }
-    }
-
-    return buildUsernameCandidate(base, Date.now().toString().slice(-6));
   }
 }

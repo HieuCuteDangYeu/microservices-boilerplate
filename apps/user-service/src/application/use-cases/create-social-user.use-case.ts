@@ -2,14 +2,11 @@ import { CreateSocialUserDto } from '@common/user/dtos/create-social-user.dto';
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import {
-  buildUsernameCandidate,
-  buildUsernameBase,
   deriveFullName,
   normalizeFullName,
 } from '@user/application/utils/public-identity.utils';
 import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.error';
 import { User } from '../../domain/entities/user.entity';
-import { UsernameAlreadyTakenError } from '../../domain/errors/username-already-taken.error';
 import type { IUserRepository } from '../../domain/interfaces/user.repository.interface';
 
 @Injectable()
@@ -23,14 +20,13 @@ export class CreateSocialUserUseCase {
     const fullName = dto.fullName
       ? normalizeFullName(dto.fullName)
       : deriveFullName(dto.email);
-    const username = await this.generateUsername(fullName, dto.email);
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&background=random`;
 
     const newUser = new User(
       null,
       dto.email,
       fullName,
-      username,
+      null,
       null,
       dto.isVerified,
       null,
@@ -58,10 +54,6 @@ export class CreateSocialUserUseCase {
         if (target.includes('email')) {
           throw new UserAlreadyExistsError(dto.email);
         }
-
-        if (target.includes('username')) {
-          throw new UsernameAlreadyTakenError(username);
-        }
       }
 
       throw error;
@@ -81,26 +73,5 @@ export class CreateSocialUserUseCase {
       provider: savedUser.provider,
       providerId: savedUser.providerId,
     };
-  }
-
-  private async generateUsername(
-    fullName: string,
-    email: string,
-  ): Promise<string> {
-    const base = buildUsernameBase(fullName || email.split('@')[0] || 'user');
-
-    if (await this.userRepository.isUsernameAvailable(base)) {
-      return base;
-    }
-
-    for (let attempt = 1; attempt <= 100; attempt += 1) {
-      const candidate = buildUsernameCandidate(base, attempt);
-
-      if (await this.userRepository.isUsernameAvailable(candidate)) {
-        return candidate;
-      }
-    }
-
-    return buildUsernameCandidate(base, Date.now().toString().slice(-6));
   }
 }

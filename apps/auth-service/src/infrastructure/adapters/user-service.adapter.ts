@@ -27,7 +27,6 @@ export class UserServiceAdapter implements IUserService {
       email: dto.email,
       password: dto.password,
       fullName: dto.fullName,
-      username: dto.username,
       isVerified: false,
     };
 
@@ -40,7 +39,7 @@ export class UserServiceAdapter implements IUserService {
               err.message.toLowerCase().includes('username')
             ) {
               return throwError(
-                () => new UsernameAlreadyTakenError(dto.username ?? 'unknown'),
+                () => new UsernameAlreadyTakenError('username'),
               );
             }
 

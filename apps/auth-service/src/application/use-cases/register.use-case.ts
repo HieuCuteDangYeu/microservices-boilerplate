@@ -36,6 +36,8 @@ export class RegisterUseCase {
       return {
         id: result.id,
         email: result.email,
+        fullName: result.fullName,
+        username: result.username,
         message: 'User registered successfully',
       };
     } catch (error) {

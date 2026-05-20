@@ -2,7 +2,7 @@ export interface UserResponse {
   id: string;
   email: string;
   fullName: string;
-  username: string;
+  username: string | null;
   picture: string | null;
   createdAt: Date;
 }

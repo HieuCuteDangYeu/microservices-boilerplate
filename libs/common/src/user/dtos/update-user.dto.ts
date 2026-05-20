@@ -7,7 +7,6 @@ export class UpdateUserDto extends createZodDto(
     password: true,
     fullName: true,
     username: true,
-    picture: true,
   }).partial(),
 ) {}
 

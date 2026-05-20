@@ -2,7 +2,7 @@ export interface ValidateUserResponse {
   id: string;
   email: string;
   fullName?: string;
-  username?: string;
+  username?: string | null;
   isVerified?: boolean;
   provider?: string | null;
   providerId?: string | null;
