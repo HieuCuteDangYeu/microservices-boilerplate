@@ -1,5 +1,4 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
-import { CheckUsernameAvailabilityDto } from '@common/user/dtos/check-username-availability.dto';
 import { CreateUserDto } from '@common/user/dtos/create-user.dto';
 import { SearchPublicUsersDto } from '@common/user/dtos/search-public-users.dto';
 import { UpdateAvatarDto } from '@common/user/dtos/update-avatar.dto';
@@ -15,7 +14,6 @@ import {
   UpdateUserPayload,
   UpdateUserResponse,
 } from '@common/user/interfaces/update-user.types';
-import { UsernameAvailabilityResponse } from '@common/user/interfaces/username-availability.types';
 import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
@@ -70,22 +68,6 @@ export class UserController {
           this.handleMicroserviceError(error);
         }),
       ),
-    );
-  }
-
-  @Get('username-availability')
-  @ApiOperation({ summary: 'Check username availability' })
-  @Roles(Role.ADMIN, Role.USER)
-  async checkUsernameAvailability(
-    @Query() query: CheckUsernameAvailabilityDto,
-  ): Promise<UsernameAvailabilityResponse> {
-    return await lastValueFrom(
-      this.userClient
-        .send<UsernameAvailabilityResponse>(
-          'user.check_username_availability',
-          query,
-        )
-        .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 

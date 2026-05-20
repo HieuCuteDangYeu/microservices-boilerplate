@@ -8,7 +8,9 @@ import { VerifyGoogleTokenDto } from '@common/auth/dtos/verify-google-token.dto'
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
+import { CheckUsernameAvailabilityDto } from '@common/user/dtos/check-username-availability.dto';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
+import { UsernameAvailabilityResponse } from '@common/user/interfaces/username-availability.types';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
@@ -19,6 +21,7 @@ import {
   HttpStatus,
   Inject,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -33,6 +36,7 @@ import { catchError, lastValueFrom } from 'rxjs';
 export class AuthController {
   constructor(
     @Inject('AUTH_SERVICE') private readonly authClient: ClientProxy,
+    @Inject('USER_SERVICE') private readonly userClient: ClientProxy,
   ) {}
 
   @Post('register')
@@ -44,6 +48,21 @@ export class AuthController {
           this.handleMicroserviceError(error);
         }),
       ),
+    );
+  }
+
+  @Get('username-availability')
+  @ApiOperation({ summary: 'Check username availability during registration' })
+  async checkUsernameAvailability(
+    @Query() query: CheckUsernameAvailabilityDto,
+  ): Promise<UsernameAvailabilityResponse> {
+    return await lastValueFrom(
+      this.userClient
+        .send<UsernameAvailabilityResponse>(
+          'user.check_username_availability',
+          query,
+        )
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 
