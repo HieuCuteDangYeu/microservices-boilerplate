@@ -1,11 +1,12 @@
 import type { IUserRoleRepository } from '@auth/domain/interfaces/user-role.repository,interface';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { TokenResponse } from '@common/auth/interfaces/token.interface';
-import { randomUUID } from 'crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'crypto';
 import { InvalidTokenError } from '../../domain/errors/invalid-token.error';
 import type { IAuthRepository } from '../../domain/interfaces/auth.repository.interface';
+import type { IUserService } from '../../domain/interfaces/user-service.interface';
 
 @Injectable()
 export class RefreshTokenUseCase {
@@ -13,6 +14,7 @@ export class RefreshTokenUseCase {
 
   constructor(
     @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
+    @Inject('IUserService') private readonly userService: IUserService,
     @Inject('IUserRoleRepository')
     private readonly roleCache: IUserRoleRepository,
     private readonly jwtService: JwtService,
@@ -51,13 +53,19 @@ export class RefreshTokenUseCase {
         );
       }
 
+      const user = await this.userService.findById(payload.sub);
+
+      if (!user) {
+        throw new InvalidTokenError();
+      }
+
       const newPayload: JwtPayload = {
-        sub: payload.sub,
-        email: payload.email,
-        fullName: payload.fullName,
-        username: payload.username,
-        picture: payload.picture ?? undefined,
-        isVerified: payload.isVerified,
+        sub: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        username: user.username,
+        picture: user.picture ?? undefined,
+        isVerified: user.isVerified,
       };
 
       const accessToken = await this.jwtService.signAsync(newPayload, {
@@ -79,7 +87,13 @@ export class RefreshTokenUseCase {
 
       return { accessToken, refreshToken };
     } catch (error) {
-      console.error(error);
+      if (!(error instanceof InvalidTokenError)) {
+        this.logger.error(
+          'Failed to refresh token',
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+
       throw new InvalidTokenError();
     }
   }

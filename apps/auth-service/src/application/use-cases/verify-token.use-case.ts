@@ -1,4 +1,5 @@
 import type { IUserRoleRepository } from '@auth/domain/interfaces/user-role.repository,interface';
+import { InvalidTokenError } from '@auth/domain/errors/invalid-token.error';
 import { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { JwtPayload } from '@common/auth/interfaces/jwt-payload.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -47,29 +48,19 @@ export class VerifyTokenUseCase {
       }
     }
 
-    let fullName = payload.fullName;
-    let username = payload.username;
-    let picture = payload.picture;
-    let isVerified = payload.isVerified;
+    const user = await this.userService.findById(payload.sub);
 
-    if (fullName === undefined || username === undefined) {
-      const user = await this.userService.findByEmail(payload.email);
-
-      if (user) {
-        fullName = user.fullName;
-        username = user.username;
-        picture = user.picture ?? picture;
-        isVerified = user.isVerified ?? isVerified;
-      }
+    if (!user) {
+      throw new InvalidTokenError();
     }
 
     return {
-      id: payload.sub,
-      email: payload.email,
-      fullName,
-      username,
-      picture,
-      isVerified,
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      username: user.username,
+      picture: user.picture ?? undefined,
+      isVerified: user.isVerified,
       roles: roles,
     };
   }
