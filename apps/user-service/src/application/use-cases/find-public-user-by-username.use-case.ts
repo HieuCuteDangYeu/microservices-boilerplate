@@ -23,6 +23,7 @@ export class FindPublicUserByUsernameUseCase {
       fullName: user.fullName,
       username: user.username,
       picture: user.picture,
+      isVerified: user.isVerified,
     };
   }
 }

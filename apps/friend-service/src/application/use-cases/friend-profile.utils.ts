@@ -14,6 +14,7 @@ export function getPublicProfile(
       fullName: 'Unknown User',
       username: 'unknown_user',
       picture: null,
+      isVerified: false,
     }
   );
 }

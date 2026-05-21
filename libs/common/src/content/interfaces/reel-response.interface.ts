@@ -1,19 +1,33 @@
+export interface ReelAuthorSummary {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  isVerified: boolean | null;
+}
+
 export interface ReelListItem {
   id: string;
   userId: string;
   mediaKey: string;
   title?: string;
+  description?: string;
   tags: string[];
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   visibility: 'public' | 'private';
   viewCount: number;
   thumbnailKey?: string;
+  thumbnailUrl?: string;
+  streamUrl: string;
   createdAt: string;
 }
 
 export interface ReelDetail extends ReelListItem {
-  description?: string;
   transcript?: string;
+}
+
+export interface ReelFeedListItem extends ReelListItem {
+  author: ReelAuthorSummary;
 }
 
 export interface PaginatedReels<T> {

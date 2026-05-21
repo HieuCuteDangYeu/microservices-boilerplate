@@ -3,4 +3,5 @@ export interface PublicUserProfile {
   fullName: string;
   username: string | null;
   picture: string | null;
+  isVerified: boolean;
 }

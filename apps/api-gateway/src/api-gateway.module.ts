@@ -1,5 +1,6 @@
 import { AuthController } from '@gateway/auth/auth.controller';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { ReelAuthorService } from '@gateway/content/reel-author.service';
 import { ContentController } from '@gateway/content/content.controller';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
@@ -68,6 +69,6 @@ function createRmqClientRegistration(name: string, queue: string) {
     GatewayKeyController,
     ContentController,
   ],
-  providers: [JwtAuthGuard],
+  providers: [JwtAuthGuard, ReelAuthorService],
 })
 export class ApiGatewayModule {}

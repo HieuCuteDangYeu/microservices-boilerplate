@@ -2,6 +2,12 @@ import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
 import { UpdateReelDto } from '@common/content/dtos/update-reel.dto';
+import {
+  PaginatedReels,
+  ReelDetail,
+  ReelFeedListItem,
+  ReelListItem,
+} from '@common/content/interfaces/reel-response.interface';
 import { Reel } from '@content/domain/entities/reel.entity';
 import {
   JwtAuthGuard,
@@ -27,6 +33,7 @@ import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { catchError, lastValueFrom } from 'rxjs';
+import { ReelAuthorService } from './reel-author.service';
 
 @ApiTags('Content')
 @Controller('content')
@@ -39,6 +46,7 @@ export class ContentController {
   constructor(
     @Inject('CONTENT_SERVICE') private readonly contentClient: ClientProxy,
     private readonly configService: ConfigService,
+    private readonly reelAuthorService: ReelAuthorService,
   ) {
     this.cdnDomain = this.configService
       .getOrThrow<string>('R2_PUBLIC_DOMAIN')
@@ -68,7 +76,7 @@ export class ContentController {
   async listReels(
     @Req() request: AuthenticatedRequest,
     @Query() query: ListReelsQueryDto,
-  ) {
+  ): Promise<PaginatedReels<ReelFeedListItem>> {
     if (
       query.visibility === 'private' &&
       query.userId !== request.user!.id &&
@@ -97,8 +105,15 @@ export class ContentController {
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
 
+    const authorsById = await this.reelAuthorService.loadAuthorMap(
+      result.items.map((reel) => reel.userId),
+    );
+
     return {
-      items: result.items.map((r) => this._enrichReel(r)),
+      items: result.items.map((reel) => ({
+        ...this._enrichReel(reel),
+        author: this.reelAuthorService.resolveAuthor(authorsById, reel.userId),
+      })),
       nextCursor: result.nextCursor,
     };
   }
@@ -183,7 +198,18 @@ export class ContentController {
     return { success: true };
   }
 
-  private _enrichReel(reel: Reel, opts: { includeTranscript?: boolean } = {}) {
+  private _enrichReel(
+    reel: Reel,
+    opts?: { includeTranscript?: false },
+  ): ReelListItem;
+  private _enrichReel(
+    reel: Reel,
+    opts: { includeTranscript: true },
+  ): ReelDetail;
+  private _enrichReel(
+    reel: Reel,
+    opts: { includeTranscript?: boolean } = {},
+  ): ReelListItem | ReelDetail {
     const extIndex = reel.mediaKey.lastIndexOf('.');
     const folderPath =
       extIndex !== -1 ? reel.mediaKey.substring(0, extIndex) : reel.mediaKey;
@@ -191,8 +217,12 @@ export class ContentController {
     const thumbnailUrl = reel.thumbnailKey
       ? `${this.cdnDomain}/${reel.thumbnailKey}`
       : undefined;
+    const createdAt =
+      reel.createdAt instanceof Date
+        ? reel.createdAt.toISOString()
+        : new Date(reel.createdAt as unknown as string).toISOString();
 
-    const result: Record<string, unknown> = {
+    const result: ReelListItem = {
       id: reel.id,
       userId: reel.userId,
       mediaKey: reel.mediaKey,
@@ -208,12 +238,14 @@ export class ContentController {
       thumbnailKey: reel.thumbnailKey,
       thumbnailUrl,
       streamUrl,
-      createdAt: reel.createdAt,
+      createdAt,
     };
 
     if (opts.includeTranscript) {
-      result['description'] = reel.description;
-      result['transcript'] = reel.transcript;
+      return {
+        ...result,
+        transcript: reel.transcript,
+      };
     }
 
     return result;
