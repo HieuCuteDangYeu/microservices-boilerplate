@@ -1,9 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  FeatureExtractionPipeline,
-  pipeline,
-} from '@xenova/transformers';
+import { FeatureExtractionPipeline, pipeline } from '@xenova/transformers';
 import type { IAiService } from '../../domain/interfaces/ai-service.interface';
 
 interface CloudflareAiError {
@@ -30,10 +27,12 @@ export class CloudflareAiAdapter implements IAiService, OnModuleInit {
   private extractor: FeatureExtractionPipeline | null = null;
 
   constructor(private readonly configService: ConfigService) {
-    const accountId =
-      this.configService.getOrThrow<string>('CLOUDFLARE_ACCOUNT_ID');
-    this.apiToken =
-      this.configService.getOrThrow<string>('CLOUDFLARE_API_TOKEN');
+    const accountId = this.configService.getOrThrow<string>(
+      'CLOUDFLARE_ACCOUNT_ID',
+    );
+    this.apiToken = this.configService.getOrThrow<string>(
+      'CLOUDFLARE_API_TOKEN',
+    );
     const model =
       this.configService.get<string>('CLOUDFLARE_AI_TRANSCRIPTION_MODEL') ||
       '@cf/openai/whisper-large-v3-turbo';
@@ -110,7 +109,9 @@ export class CloudflareAiAdapter implements IAiService, OnModuleInit {
     rawBody: string,
   ): CloudflareAiResponse<CloudflareTranscriptionResult> {
     try {
-      return JSON.parse(rawBody) as CloudflareAiResponse<CloudflareTranscriptionResult>;
+      return JSON.parse(
+        rawBody,
+      ) as CloudflareAiResponse<CloudflareTranscriptionResult>;
     } catch {
       return {};
     }

@@ -1,9 +1,23 @@
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { Injectable } from '@nestjs/common';
 import ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
 
+const ensureBinaryIsExecutable = (binaryPath: string) => {
+  const currentMode = fs.statSync(binaryPath).mode & 0o777;
+
+  if ((currentMode & 0o111) === 0o111) {
+    return;
+  }
+
+  fs.chmodSync(binaryPath, currentMode | 0o755);
+};
+
+ensureBinaryIsExecutable(ffmpegInstaller.path);
+ensureBinaryIsExecutable(ffprobeInstaller.path);
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+ffmpeg.setFfprobePath(ffprobeInstaller.path);
 
 @Injectable()
 export class FfmpegService {
@@ -61,6 +75,45 @@ export class FfmpegService {
           reject(err instanceof Error ? err : new Error(String(err))),
         )
         .run();
+    });
+  }
+
+  async getVideoMetadata(inputPath: string): Promise<{
+    durationMs?: number;
+    width?: number;
+    height?: number;
+  }> {
+    return new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(inputPath, (error, metadata) => {
+        if (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+
+        const videoStream = metadata.streams.find(
+          (stream) => stream.codec_type === 'video',
+        );
+
+        const durationSeconds =
+          typeof metadata.format?.duration === 'number'
+            ? metadata.format.duration
+            : undefined;
+
+        resolve({
+          durationMs:
+            durationSeconds !== undefined
+              ? Math.max(0, Math.round(durationSeconds * 1000))
+              : undefined,
+          width:
+            typeof videoStream?.width === 'number'
+              ? videoStream.width
+              : undefined,
+          height:
+            typeof videoStream?.height === 'number'
+              ? videoStream.height
+              : undefined,
+        });
+      });
     });
   }
 }

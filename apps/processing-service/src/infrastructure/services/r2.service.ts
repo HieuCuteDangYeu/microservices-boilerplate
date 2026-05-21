@@ -14,6 +14,10 @@ import { pipeline } from 'stream/promises';
 export class R2Service {
   private readonly s3Client: S3Client;
   private readonly bucketName = process.env.R2_BUCKET_NAME!;
+  private readonly publicDomain = process.env.R2_PUBLIC_DOMAIN!.replace(
+    /\/+$/,
+    '',
+  );
 
   constructor() {
     this.s3Client = new S3Client({
@@ -71,7 +75,10 @@ export class R2Service {
     await Promise.all(uploadPromises);
   }
 
-  async uploadThumbnail(localPath: string, s3Key: string): Promise<void> {
+  async uploadThumbnail(
+    localPath: string,
+    s3Key: string,
+  ): Promise<{ key: string; url: string }> {
     const fileBuffer = fs.readFileSync(localPath);
     const command = new PutObjectCommand({
       Bucket: this.bucketName,
@@ -80,5 +87,15 @@ export class R2Service {
       ContentType: 'image/jpeg',
     });
     await this.s3Client.send(command);
+
+    return {
+      key: s3Key,
+      url: this.getPublicUrl(s3Key),
+    };
+  }
+
+  getPublicUrl(key: string): string {
+    const normalizedKey = key.replace(/^\/+/, '');
+    return `${this.publicDomain}/${normalizedKey}`;
   }
 }
