@@ -1,12 +1,15 @@
+import { FinalizeUploadDto } from '@common/media/dtos/finalize-upload.dto';
 import { GetPresignedUrlDto } from '@common/media/dtos/get-presigned-url.dto';
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import { FinalizeChatUploadUseCase } from '../../application/use-cases/finalize-chat-upload.use-case';
 import { GetPresignedUrlUseCase } from '../../application/use-cases/get-presigned-url.use-case';
 
 @Controller()
 export class MediaController {
   constructor(
     private readonly getPresignedUrlUseCase: GetPresignedUrlUseCase,
+    private readonly finalizeChatUploadUseCase: FinalizeChatUploadUseCase,
   ) {}
 
   @MessagePattern('media.get_presigned_url')
@@ -17,6 +20,7 @@ export class MediaController {
       return await this.getPresignedUrlUseCase.execute(
         data.userId,
         data.fileType,
+        data.purpose,
       );
     } catch (error) {
       if (
@@ -33,6 +37,31 @@ export class MediaController {
         statusCode: 500,
         message:
           error instanceof Error ? error.message : 'Internal Server Error',
+      });
+    }
+  }
+
+  @MessagePattern('media.finalize_chat_upload')
+  async handleFinalizeChatUpload(
+    @Payload() data: FinalizeUploadDto & { userId: string },
+  ) {
+    try {
+      return await this.finalizeChatUploadUseCase.execute(
+        data.userId,
+        data.key,
+        data.fileType,
+        data.thumbnailKey,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Internal Server Error';
+
+      const statusCode =
+        message === 'You are not allowed to finalize this upload.' ? 403 : 500;
+
+      throw new RpcException({
+        statusCode,
+        message,
       });
     }
   }

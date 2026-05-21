@@ -1,8 +1,11 @@
+import { FinalizeChatUploadUseCase } from '@media/application/use-cases/finalize-chat-upload.use-case';
+import { ProcessingServiceAdapter } from '@media/infrastructure/adapters/processing-service.adapter';
 import { GetPresignedUrlUseCase } from '@media/application/use-cases/get-presigned-url.use-case';
 import { MediaController } from '@media/infrastructure/controllers/media.controller';
 import { S3Service } from '@media/infrastructure/services/s3.service';
+import { VideoProcessingService } from '@media/infrastructure/services/video-processing.service';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 
 @Module({
@@ -11,19 +14,44 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    ClientsModule.register([
+    ClientsModule.registerAsync([
       {
-        name: 'MEDIA_RMQ',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-          queue: 'user_queue',
-          queueOptions: { durable: true },
+        name: 'PROCESSING_RMQ',
+        useFactory: (configService: ConfigService) => {
+          const heartbeat = Number(
+            configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+          );
+
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [
+                configService.get<string>('RABBITMQ_URL') ||
+                  'amqp://localhost:5672',
+              ],
+              queue: 'processing_queue',
+              queueOptions: { durable: true },
+              heartbeat:
+                Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+              retryAttempts: 10,
+              retryDelay: 3000,
+            },
+          };
         },
+        inject: [ConfigService],
       },
     ]),
   ],
   controllers: [MediaController],
-  providers: [GetPresignedUrlUseCase, S3Service],
+  providers: [
+    FinalizeChatUploadUseCase,
+    GetPresignedUrlUseCase,
+    S3Service,
+    VideoProcessingService,
+    {
+      provide: 'IVideoProcessingQueue',
+      useClass: ProcessingServiceAdapter,
+    },
+  ],
 })
 export class MediaServiceModule {}
