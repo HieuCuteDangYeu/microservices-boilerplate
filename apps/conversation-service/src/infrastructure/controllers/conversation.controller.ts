@@ -1,5 +1,9 @@
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
+import type {
+  CompletedVideoProcessingPayload,
+  FailedVideoProcessingPayload,
+} from '@common/media/dtos/video-processing-result.dto';
 import { Controller, Inject, Logger } from '@nestjs/common';
 import {
   EventPattern,
@@ -283,6 +287,54 @@ export class ConversationMicroserviceController {
       const error = err as Error;
       this.logger.error(`❌ [RecallMessage] Error: ${error.message}`);
       throw new RpcException(error.message);
+    }
+  }
+
+  @EventPattern('media.video_processing_completed')
+  async handleMediaProcessingCompleted(
+    @Payload() data: CompletedVideoProcessingPayload,
+  ) {
+    try {
+      const result = await this.chatRepository.syncMediaProcessingResult(
+        data.fileKey,
+        data.media,
+      );
+
+      result.conversationIds.forEach((conversationId) => {
+        this.chatGateway.emitMediaProcessingCompleted(conversationId, {
+          fileKey: data.fileKey,
+          messageIds: result.messageIds,
+          media: result.media,
+        });
+      });
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(
+        `❌ [MediaProcessingCompleted] Error: ${error.message}`,
+      );
+    }
+  }
+
+  @EventPattern('media.video_processing_failed')
+  async handleMediaProcessingFailed(
+    @Payload() data: FailedVideoProcessingPayload,
+  ) {
+    try {
+      const result = await this.chatRepository.syncMediaProcessingResult(
+        data.fileKey,
+        data.media,
+      );
+
+      result.conversationIds.forEach((conversationId) => {
+        this.chatGateway.emitMediaProcessingFailed(conversationId, {
+          fileKey: data.fileKey,
+          messageIds: result.messageIds,
+          media: result.media,
+        });
+      });
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [MediaProcessingFailed] Error: ${error.message}`);
     }
   }
 

@@ -59,6 +59,7 @@ model Message {
   signalType     Int      @map("signal_type")
 
   content           String   
+  media             Json?
 
   registrationId Int?     // ID thiết bị người gửi
   senderId       String

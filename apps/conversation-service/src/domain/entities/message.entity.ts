@@ -13,6 +13,19 @@ export interface MessageReplyPreview {
   type: 'text' | 'image' | 'video' | 'file' | 'call';
 }
 
+export interface MessageMedia {
+  fileKey?: string;
+  fileUrl: string;
+  thumbnailKey?: string;
+  thumbnailUrl?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  status?: 'ready' | 'processing' | 'failed';
+  failureReason?: string;
+}
+
 export interface RecallMessageResult {
   message: Message;
   updatedReplyMessageIds: string[];
@@ -26,6 +39,7 @@ export class Message {
   clientMessageId?: string;
   signalType!: number;
   content!: string;
+  media?: MessageMedia;
   registrationId?: number;
   type!: string;
   createdAt!: Date;

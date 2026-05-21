@@ -6,6 +6,7 @@ import {
 import { Conversation } from '../../domain/entities/conversation.entity';
 import {
   Message,
+  type MessageMedia,
   type MessageReactionMap,
   type MessageReplyPreview,
 } from '../../domain/entities/message.entity';
@@ -14,6 +15,7 @@ import { ReadStatus } from '../../domain/entities/read-status.entity';
 export class ChatMapper {
   static toDomain(
     prismaMsg: PrismaMessage & {
+      media?: Prisma.JsonValue | null;
       readBy?: MessageReadStatus[];
       replyPreview?: Prisma.JsonValue | null;
       reactions?: Prisma.JsonValue | null;
@@ -27,6 +29,7 @@ export class ChatMapper {
       type: prismaMsg.type,
       signalType: prismaMsg.signalType,
       content: prismaMsg.content,
+      media: ChatMapper.toMedia(prismaMsg.media),
       registrationId: prismaMsg.registrationId ?? undefined,
       createdAt: prismaMsg.createdAt,
       isRecalled: prismaMsg.isRecalled,
@@ -78,6 +81,44 @@ export class ChatMapper {
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
   }
 
+  private static toMedia(
+    value: Prisma.JsonValue | null | undefined,
+  ): MessageMedia | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    const fileUrl = (value as Record<string, unknown>).fileUrl;
+    if (typeof fileUrl !== 'string' || !fileUrl) {
+      return undefined;
+    }
+
+    const fileKey = (value as Record<string, unknown>).fileKey;
+    const thumbnailKey = (value as Record<string, unknown>).thumbnailKey;
+    const thumbnailUrl = (value as Record<string, unknown>).thumbnailUrl;
+    const mimeType = (value as Record<string, unknown>).mimeType;
+    const width = (value as Record<string, unknown>).width;
+    const height = (value as Record<string, unknown>).height;
+    const durationMs = (value as Record<string, unknown>).durationMs;
+    const status = (value as Record<string, unknown>).status;
+    const failureReason = (value as Record<string, unknown>).failureReason;
+
+    return {
+      ...(typeof fileKey === 'string' ? { fileKey } : {}),
+      fileUrl,
+      ...(typeof thumbnailKey === 'string' ? { thumbnailKey } : {}),
+      ...(typeof thumbnailUrl === 'string' ? { thumbnailUrl } : {}),
+      ...(typeof mimeType === 'string' ? { mimeType } : {}),
+      ...(typeof width === 'number' ? { width } : {}),
+      ...(typeof height === 'number' ? { height } : {}),
+      ...(typeof durationMs === 'number' ? { durationMs } : {}),
+      ...(status === 'ready' || status === 'processing' || status === 'failed'
+        ? { status }
+        : {}),
+      ...(typeof failureReason === 'string' ? { failureReason } : {}),
+    };
+  }
+
   private static toReplyPreview(
     value: Prisma.JsonValue | null | undefined,
   ): MessageReplyPreview | undefined {
@@ -110,6 +151,7 @@ export class ChatMapper {
       senderId: domain.senderId,
       clientMessageId: domain.clientMessageId,
       content: domain.content,
+      media: domain.media,
       type: domain.type,
       signalType: domain.signalType,
       createdAt: domain.createdAt.toISOString(),

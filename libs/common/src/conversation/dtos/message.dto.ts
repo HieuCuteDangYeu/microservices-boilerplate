@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { MessageMediaSchema } from './message-media.schema';
 
 export const MessageSchema = z.object({
   id: z.string(),
@@ -7,6 +8,7 @@ export const MessageSchema = z.object({
   senderId: z.string(),
   clientMessageId: z.string().optional(),
   content: z.string(),
+  media: MessageMediaSchema.optional(),
   type: z.string().default('text'),
   signalType: z.number().int().optional(),
   createdAt: z.string().datetime(),

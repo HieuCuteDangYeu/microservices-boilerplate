@@ -1,8 +1,15 @@
 import { Conversation } from 'apps/conversation-service/src/domain/entities/conversation.entity';
 import {
   Message,
+  type MessageMedia,
   type RecallMessageResult,
 } from 'apps/conversation-service/src/domain/entities/message.entity';
+
+export interface MediaProcessingSyncResult {
+  conversationIds: string[];
+  messageIds: string[];
+  media: MessageMedia;
+}
 
 export abstract class IChatRepository {
   abstract createMessage(message: Message): Promise<Message>;
@@ -48,4 +55,8 @@ export abstract class IChatRepository {
     messageId: string,
     userId: string,
   ): Promise<RecallMessageResult>;
+  abstract syncMediaProcessingResult(
+    fileKey: string,
+    media: MessageMedia,
+  ): Promise<MediaProcessingSyncResult>;
 }

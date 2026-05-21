@@ -17,11 +17,15 @@ import {
 } from '../../domain/entities/conversation.entity';
 import {
   Message,
+  type MessageMedia,
   type MessageReactionMap,
   type MessageReplyPreview,
   type RecallMessageResult,
 } from '../../domain/entities/message.entity';
-import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
+import {
+  IChatRepository,
+  type MediaProcessingSyncResult,
+} from '../../domain/interfaces/chat.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Mappers
@@ -44,6 +48,7 @@ interface CachedMessage {
   type: string;
   signalType: number;
   content: string;
+  media?: MessageMedia;
   createdAt: string;
   isRecalled?: boolean;
   recalledAt?: string;
@@ -56,6 +61,7 @@ interface CachedMessage {
 const RECALLED_PREVIEW_CONTENT = 'Tin nhắn đã thu hồi';
 const RECALLED_LAST_MESSAGE = '🚫 Message recalled';
 const RECALL_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MEDIA_PROCESSING_TTL_SECONDS = 60 * 60 * 24;
 
 @Injectable()
 export class PrismaChatRepository implements IChatRepository {
@@ -142,6 +148,9 @@ export class PrismaChatRepository implements IChatRepository {
           clientMessageId: message.clientMessageId,
           signalType: message.signalType ?? 1,
           content: contentToSave,
+          media: message.media
+            ? (message.media as unknown as Prisma.InputJsonValue)
+            : null,
           registrationId: message.registrationId,
           senderId: message.senderId,
           isRecalled: false,
@@ -164,11 +173,13 @@ export class PrismaChatRepository implements IChatRepository {
     ]);
 
     // BƯỚC 3: Map về Domain Model
-    const domainMsg = ChatMapper.toDomain(savedMsg);
+    let domainMsg = ChatMapper.toDomain(savedMsg);
     // Nếu là normal mode, trả về content gốc cho người gửi (đỡ phải decrypt lại)
     if (message.signalType === 0) {
       domainMsg.content = message.content;
     }
+
+    domainMsg = await this.syncPendingMediaTracking(domainMsg);
 
     // BƯỚC 4: Cập nhật Redis dạng "Fire-and-Forget"
     // KHÔNG dùng await ở đây. Để nó chạy ngầm, lỗi thì log lại sau.
@@ -196,6 +207,89 @@ export class PrismaChatRepository implements IChatRepository {
     await pipeline.exec();
   }
 
+  async syncMediaProcessingResult(
+    fileKey: string,
+    media: MessageMedia,
+  ): Promise<MediaProcessingSyncResult> {
+    const normalizedFileKey = this.normalizeMediaFileKey(fileKey);
+    const mergedMedia = this.mergeMessageMedia(undefined, {
+      ...media,
+      fileKey: normalizedFileKey,
+    });
+
+    await this.redis.set(
+      this.mediaResultKey(normalizedFileKey),
+      JSON.stringify(mergedMedia),
+      'EX',
+      MEDIA_PROCESSING_TTL_SECONDS,
+    );
+
+    const pendingRefs = await this.redis.hgetall(
+      this.pendingMediaKey(normalizedFileKey),
+    );
+    const messageIds = Object.keys(pendingRefs);
+
+    if (messageIds.length === 0) {
+      return {
+        conversationIds: [],
+        messageIds: [],
+        media: mergedMedia,
+      };
+    }
+
+    const existingMessages = await this.prisma.message.findMany({
+      where: {
+        id: { in: messageIds },
+      },
+    });
+
+    if (existingMessages.length === 0) {
+      await this.redis.del(this.pendingMediaKey(normalizedFileKey));
+
+      return {
+        conversationIds: [],
+        messageIds: [],
+        media: mergedMedia,
+      };
+    }
+
+    const updatedMessages = existingMessages.map((messageRecord) => {
+      const currentMedia = ChatMapper.toDomain(messageRecord).media;
+      const nextMedia = this.mergeMessageMedia(currentMedia, mergedMedia);
+
+      return {
+        id: messageRecord.id,
+        conversationId: messageRecord.conversationId,
+        media: nextMedia,
+      };
+    });
+
+    await this.prisma.$transaction(
+      updatedMessages.map((messageRecord) =>
+        this.prisma.message.update({
+          where: { id: messageRecord.id },
+          data: {
+            media: messageRecord.media as unknown as Prisma.InputJsonValue,
+          },
+        }),
+      ),
+    );
+
+    const conversationIds = [
+      ...new Set(
+        updatedMessages.map((messageRecord) => messageRecord.conversationId),
+      ),
+    ];
+    await this.clearConversationCaches(conversationIds);
+    await this.redis.del(this.pendingMediaKey(normalizedFileKey));
+
+    return {
+      conversationIds,
+      messageIds: updatedMessages.map((messageRecord) => messageRecord.id),
+      media: mergedMedia,
+    };
+  }
+
   // --- 2. FIND MESSAGES ---
   async findMessagesByConversationId(
     conversationId: string,
@@ -220,6 +314,7 @@ export class PrismaChatRepository implements IChatRepository {
               type: plain.type,
               signalType: plain.signalType,
               content: plain.content,
+              media: this.normalizeMedia(plain.media),
               createdAt: new Date(plain.createdAt),
               isRecalled: plain.isRecalled,
               recalledAt: plain.recalledAt
@@ -549,6 +644,10 @@ export class PrismaChatRepository implements IChatRepository {
     messageId: string,
     userId: string,
   ): Promise<RecallMessageResult> {
+    if (!this.isValidMessageObjectId(messageId)) {
+      throw new BadRequestException('Invalid message ID');
+    }
+
     const existingMessage = await this.prisma.message.findUnique({
       where: { id: messageId },
     });
@@ -723,6 +822,42 @@ export class PrismaChatRepository implements IChatRepository {
     return normalized.length > 0 ? Object.fromEntries(normalized) : undefined;
   }
 
+  private normalizeMedia(value: unknown): MessageMedia | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    const fileUrl = (value as Record<string, unknown>).fileUrl;
+    if (typeof fileUrl !== 'string' || !fileUrl) {
+      return undefined;
+    }
+
+    const fileKey = (value as Record<string, unknown>).fileKey;
+    const thumbnailKey = (value as Record<string, unknown>).thumbnailKey;
+    const thumbnailUrl = (value as Record<string, unknown>).thumbnailUrl;
+    const mimeType = (value as Record<string, unknown>).mimeType;
+    const width = (value as Record<string, unknown>).width;
+    const height = (value as Record<string, unknown>).height;
+    const durationMs = (value as Record<string, unknown>).durationMs;
+    const status = (value as Record<string, unknown>).status;
+    const failureReason = (value as Record<string, unknown>).failureReason;
+
+    return {
+      ...(typeof fileKey === 'string' ? { fileKey } : {}),
+      fileUrl,
+      ...(typeof thumbnailKey === 'string' ? { thumbnailKey } : {}),
+      ...(typeof thumbnailUrl === 'string' ? { thumbnailUrl } : {}),
+      ...(typeof mimeType === 'string' ? { mimeType } : {}),
+      ...(typeof width === 'number' ? { width } : {}),
+      ...(typeof height === 'number' ? { height } : {}),
+      ...(typeof durationMs === 'number' ? { durationMs } : {}),
+      ...(status === 'ready' || status === 'processing' || status === 'failed'
+        ? { status }
+        : {}),
+      ...(typeof failureReason === 'string' ? { failureReason } : {}),
+    };
+  }
+
   private normalizeReplyPreview(
     value: unknown,
   ): MessageReplyPreview | undefined {
@@ -773,6 +908,22 @@ export class PrismaChatRepository implements IChatRepository {
     }
   }
 
+  private async clearConversationCaches(conversationIds: string[]) {
+    if (conversationIds.length === 0) {
+      return;
+    }
+
+    try {
+      const pipeline = this.redis.pipeline();
+      conversationIds.forEach((conversationId) => {
+        pipeline.del(`chat:history:${conversationId}`);
+      });
+      await pipeline.exec();
+    } catch (error) {
+      this.logger.error(error);
+    }
+  }
+
   async assertConversationParticipant(conversationId: string, userId: string) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -811,6 +962,139 @@ export class PrismaChatRepository implements IChatRepository {
       content: this.getReplyPreviewContent(replyTarget),
       type: this.getReplyPreviewType(replyTarget.type),
     };
+  }
+
+  private async syncPendingMediaTracking(message: Message): Promise<Message> {
+    if (
+      !message.media?.fileKey ||
+      message.media.status !== 'processing' ||
+      typeof message.media.fileUrl !== 'string'
+    ) {
+      return message;
+    }
+
+    const normalizedFileKey = this.normalizeMediaFileKey(message.media.fileKey);
+    const storedMedia = await this.getStoredMediaResult(normalizedFileKey);
+
+    if (!storedMedia) {
+      await this.registerPendingMediaReference(
+        normalizedFileKey,
+        message.id,
+        message.conversationId,
+      );
+      return message;
+    }
+
+    const nextMedia = this.mergeMessageMedia(message.media, storedMedia);
+
+    await this.prisma.message.update({
+      where: { id: message.id },
+      data: {
+        media: nextMedia as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    message.media = nextMedia;
+    return message;
+  }
+
+  private async registerPendingMediaReference(
+    fileKey: string,
+    messageId: string,
+    conversationId: string,
+  ) {
+    await this.redis.hset(
+      this.pendingMediaKey(fileKey),
+      messageId,
+      conversationId,
+    );
+    await this.redis.expire(
+      this.pendingMediaKey(fileKey),
+      MEDIA_PROCESSING_TTL_SECONDS,
+    );
+  }
+
+  private async getStoredMediaResult(
+    fileKey: string,
+  ): Promise<MessageMedia | undefined> {
+    const raw = await this.redis.get(this.mediaResultKey(fileKey));
+
+    if (!raw) {
+      return undefined;
+    }
+
+    try {
+      return this.normalizeMedia(JSON.parse(raw));
+    } catch {
+      return undefined;
+    }
+  }
+
+  private mergeMessageMedia(
+    current: MessageMedia | undefined,
+    patch: MessageMedia,
+  ): MessageMedia {
+    const fileUrl = patch.fileUrl || current?.fileUrl;
+    const failureReason =
+      patch.status === 'failed'
+        ? (patch.failureReason ?? current?.failureReason)
+        : patch.failureReason;
+
+    if (!fileUrl) {
+      throw new InternalServerErrorException(
+        'Message media fileUrl is missing',
+      );
+    }
+
+    const mergedMedia: MessageMedia = {
+      ...((patch.fileKey ?? current?.fileKey)
+        ? { fileKey: patch.fileKey ?? current?.fileKey }
+        : {}),
+      fileUrl,
+      ...((patch.thumbnailKey ?? current?.thumbnailKey)
+        ? { thumbnailKey: patch.thumbnailKey ?? current?.thumbnailKey }
+        : {}),
+      ...((patch.thumbnailUrl ?? current?.thumbnailUrl)
+        ? { thumbnailUrl: patch.thumbnailUrl ?? current?.thumbnailUrl }
+        : {}),
+      ...((patch.mimeType ?? current?.mimeType)
+        ? { mimeType: patch.mimeType ?? current?.mimeType }
+        : {}),
+      ...((current?.width ?? patch.width)
+        ? { width: current?.width ?? patch.width }
+        : {}),
+      ...((current?.height ?? patch.height)
+        ? { height: current?.height ?? patch.height }
+        : {}),
+      ...((current?.durationMs ?? patch.durationMs)
+        ? { durationMs: current?.durationMs ?? patch.durationMs }
+        : {}),
+      ...((patch.status ?? current?.status)
+        ? { status: patch.status ?? current?.status }
+        : {}),
+    };
+
+    if (failureReason) {
+      mergedMedia.failureReason = failureReason;
+    }
+
+    return mergedMedia;
+  }
+
+  private normalizeMediaFileKey(fileKey: string): string {
+    return fileKey.replace(/^\/+/, '');
+  }
+
+  private isValidMessageObjectId(messageId: string): boolean {
+    return /^[0-9a-fA-F]{24}$/.test(messageId);
+  }
+
+  private pendingMediaKey(fileKey: string): string {
+    return `chat:media:pending:${fileKey}`;
+  }
+
+  private mediaResultKey(fileKey: string): string {
+    return `chat:media:result:${fileKey}`;
   }
 
   private getReplyPreviewContent(message: {

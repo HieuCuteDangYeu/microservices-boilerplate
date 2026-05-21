@@ -133,6 +133,18 @@ export class ConversationController {
       clientMessageId?: string;
       content?: string;
       type?: 'text' | 'image' | 'video' | 'file' | 'call';
+      media?: {
+        fileKey?: string;
+        fileUrl: string;
+        thumbnailKey?: string;
+        thumbnailUrl?: string;
+        mimeType?: string;
+        width?: number;
+        height?: number;
+        durationMs?: number;
+        status?: 'ready' | 'processing' | 'failed';
+        failureReason?: string;
+      };
       signalType?: number;
       registrationId?: number;
       replyToId?: string;
@@ -165,6 +177,7 @@ export class ConversationController {
         conversationId,
         clientMessageId: body.clientMessageId,
         content: body.content.trim(),
+        media: body.media,
         type,
         signalType,
         registrationId: body.registrationId,
@@ -272,6 +285,10 @@ export class ConversationController {
     @Param('messageId') messageId: string,
     @CurrentUser() user: AuthUser,
   ): Promise<MessageDto> {
+    if (!/^[0-9a-fA-F]{24}$/.test(messageId)) {
+      throw new BadRequestException('Invalid message ID');
+    }
+
     const source$ = this.conversationClient.send('recall_message', {
       conversationId,
       messageId,

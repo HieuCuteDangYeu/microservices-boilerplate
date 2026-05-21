@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { MessageMediaSchema } from './message-media.schema';
 
 export const CreateMessageSchema = z.object({
   // 1. ID cuộc trò chuyện
@@ -20,6 +21,7 @@ export const CreateMessageSchema = z.object({
         'Signal Type must be 0 (Normal), 1 (Whisper) or 3 (PreKeyWhisper)',
     }),
   content: z.string().min(1, 'Ciphertext content cannot be empty'),
+  media: MessageMediaSchema.optional(),
   registrationId: z.number().int().optional(),
   replyToId: z.string().min(1, 'Reply message ID cannot be empty').optional(),
 });

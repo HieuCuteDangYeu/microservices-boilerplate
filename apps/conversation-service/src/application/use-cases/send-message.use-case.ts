@@ -18,6 +18,7 @@ export class SendMessageUseCase {
       senderId,
       clientMessageId: dto.clientMessageId,
       content: dto.content,
+      media: dto.media,
       signalType: dto.signalType,
       type: dto.type,
       createdAt: new Date(),

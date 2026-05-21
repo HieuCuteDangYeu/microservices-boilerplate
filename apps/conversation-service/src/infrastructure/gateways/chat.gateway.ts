@@ -16,7 +16,10 @@ import Redis from 'ioredis';
 import { Server, Socket } from 'socket.io';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
-import { Message } from '../../domain/entities/message.entity';
+import {
+  Message,
+  type MessageMedia,
+} from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { ChatMapper } from '../repositories/chat.mapper';
 
@@ -79,6 +82,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`Client disconnected: ${client.id}`);
   }
 
+  emitMediaProcessingCompleted(
+    conversationId: string,
+    payload: {
+      fileKey: string;
+      messageIds: string[];
+      media: MessageMedia;
+    },
+  ) {
+    this.server.to(conversationId).emit('media_processing_completed', {
+      conversationId,
+      ...payload,
+    });
+  }
+
+  emitMediaProcessingFailed(
+    conversationId: string,
+    payload: {
+      fileKey: string;
+      messageIds: string[];
+      media: MessageMedia;
+    },
+  ) {
+    this.server.to(conversationId).emit('media_processing_failed', {
+      conversationId,
+      ...payload,
+    });
+  }
+
   // --- 3. HANDLE MESSAGE (CORE) ---
   @SubscribeMessage('send_message')
   async handleMessage(
@@ -110,6 +141,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       senderId,
       clientMessageId: payload.clientMessageId,
       content: payload.content,
+      media: payload.media,
       type: payload.type,
       signalType: payload.signalType,
       replyToId: payload.replyToId,
@@ -131,8 +163,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           payload.conversationId,
         );
         if (conversation) {
-          conversation.lastMessage =
-            savedMessage.content ?? savedMessage.type ?? null;
           conversation.lastMessageAt = savedMessage.createdAt;
           this.server
             .to(payload.conversationId)
@@ -154,8 +184,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 savedMessage.conversationId,
               );
               if (conversation) {
-                conversation.lastMessage =
-                  result.botReply.content ?? result.botReply.type ?? null;
                 conversation.lastMessageAt = result.botReply.createdAt;
                 this.server
                   .to(savedMessage.conversationId)
