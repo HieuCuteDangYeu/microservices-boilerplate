@@ -13,7 +13,7 @@ export interface IFriendRepository {
   updateStatus(
     id: string,
     status: FriendshipRecordStatus,
-    respondedAt: Date,
+    respondedAt: Date | null,
   ): Promise<Friendship>;
   delete(id: string): Promise<void>;
 }

@@ -10,6 +10,7 @@ import { ListOutgoingFriendRequestsUseCase } from '@friend/application/use-cases
 import { RejectFriendRequestUseCase } from '@friend/application/use-cases/reject-friend-request.use-case';
 import { RemoveFriendUseCase } from '@friend/application/use-cases/remove-friend.use-case';
 import { SendFriendRequestUseCase } from '@friend/application/use-cases/send-friend-request.use-case';
+import { ConversationServiceAdapter } from '@friend/infrastructure/adapters/conversation-service.adapter';
 import { UserServiceAdapter } from '@friend/infrastructure/adapters/user-service.adapter';
 import { FriendController } from '@friend/infrastructure/controllers/friend.controller';
 import { PrismaService } from '@friend/infrastructure/prisma/prisma.service';
@@ -29,6 +30,18 @@ import { FriendRepository } from '@friend/infrastructure/repositories/friend.rep
           options: {
             urls: [config.getOrThrow<string>('RABBITMQ_URL')],
             queue: 'user_queue',
+            queueOptions: { durable: true },
+          },
+        }),
+        inject: [ConfigService],
+      },
+      {
+        name: 'CONVERSATION_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'conversation_queue',
             queueOptions: { durable: true },
           },
         }),
@@ -55,6 +68,10 @@ import { FriendRepository } from '@friend/infrastructure/repositories/friend.rep
     {
       provide: 'IUserService',
       useClass: UserServiceAdapter,
+    },
+    {
+      provide: 'IConversationService',
+      useClass: ConversationServiceAdapter,
     },
   ],
 })

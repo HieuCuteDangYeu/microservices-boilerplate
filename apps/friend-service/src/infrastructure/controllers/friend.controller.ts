@@ -17,6 +17,7 @@ import { FriendRequestNotFoundError } from '@friend/domain/errors/friend-request
 import { FriendUserNotFoundError } from '@friend/domain/errors/friend-user-not-found.error';
 import { FriendshipAlreadyExistsError } from '@friend/domain/errors/friendship-already-exists.error';
 import { FriendshipNotFoundError } from '@friend/domain/errors/friendship-not-found.error';
+import { SagaCompensationError } from '@common/domain/errors/saga.error';
 
 @Controller()
 export class FriendController {
@@ -166,6 +167,13 @@ export class FriendController {
     if (error instanceof FriendActionForbiddenError) {
       throw new RpcException({
         statusCode: 403,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof SagaCompensationError) {
+      throw new RpcException({
+        statusCode: 500,
         message: error.message,
       });
     }

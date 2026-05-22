@@ -10,6 +10,7 @@ export interface FriendshipActionResponse {
   message: string;
   status: FriendshipState;
   id?: string;
+  conversationId?: string;
 }
 
 export interface FriendshipStatusResponse {

@@ -93,7 +93,7 @@ export class FriendRepository implements IFriendRepository {
   async updateStatus(
     id: string,
     status: 'PENDING' | 'ACCEPTED',
-    respondedAt: Date,
+    respondedAt: Date | null,
   ): Promise<Friendship> {
     const friendship = await this.prisma.friendship.update({
       where: { id },
