@@ -33,4 +33,4 @@ COPY --from=builder /usr/src/app/dist ./dist
 
 USER node
 
-CMD ["node", "dist/apps/processing-service/main.js"]
+CMD ["node", "dist/apps/processing-service/apps/processing-service/src/main.js"]
