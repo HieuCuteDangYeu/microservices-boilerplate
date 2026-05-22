@@ -1,10 +1,13 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
+import { FriendPaginationDto } from '@common/friend/dtos/friend-pagination.dto';
+import { ListFriendsDto } from '@common/friend/dtos/list-friends.dto';
 import { SendFriendRequestDto } from '@common/friend/dtos/send-friend-request.dto';
 import {
   FriendRequestSummary,
-  FriendSummary,
   FriendshipActionResponse,
   FriendshipStatusResponse,
+  FriendSummary,
+  PaginatedFriendResults,
 } from '@common/friend/interfaces/friend.types';
 import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
@@ -21,11 +24,12 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { catchError, lastValueFrom } from 'rxjs';
 
 @ApiTags('Friends')
@@ -103,41 +107,63 @@ export class FriendController {
 
   @Get('requests/incoming')
   @ApiOperation({ summary: 'List incoming friend requests' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   async listIncomingRequests(
     @Req() request: AuthenticatedRequest,
-  ): Promise<FriendRequestSummary[]> {
+    @Query() query: FriendPaginationDto,
+  ): Promise<PaginatedFriendResults<FriendRequestSummary>> {
     return await lastValueFrom(
       this.friendClient
-        .send<FriendRequestSummary[]>('friend.list_incoming_requests', {
-          userId: request.user!.id,
-        })
+        .send<PaginatedFriendResults<FriendRequestSummary>>(
+          'friend.list_incoming_requests',
+          {
+            userId: request.user!.id,
+            limit: query.limit,
+            cursor: query.cursor,
+          },
+        )
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 
   @Get('requests/outgoing')
   @ApiOperation({ summary: 'List outgoing friend requests' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   async listOutgoingRequests(
     @Req() request: AuthenticatedRequest,
-  ): Promise<FriendRequestSummary[]> {
+    @Query() query: FriendPaginationDto,
+  ): Promise<PaginatedFriendResults<FriendRequestSummary>> {
     return await lastValueFrom(
       this.friendClient
-        .send<FriendRequestSummary[]>('friend.list_outgoing_requests', {
-          userId: request.user!.id,
-        })
+        .send<PaginatedFriendResults<FriendRequestSummary>>(
+          'friend.list_outgoing_requests',
+          {
+            userId: request.user!.id,
+            limit: query.limit,
+            cursor: query.cursor,
+          },
+        )
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 
   @Get()
   @ApiOperation({ summary: 'List accepted friends' })
+  @ApiQuery({ name: 'userId', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   async listFriends(
     @Req() request: AuthenticatedRequest,
-  ): Promise<FriendSummary[]> {
+    @Query() query: ListFriendsDto,
+  ): Promise<PaginatedFriendResults<FriendSummary>> {
     return await lastValueFrom(
       this.friendClient
-        .send<FriendSummary[]>('friend.list_friends', {
-          userId: request.user!.id,
+        .send<PaginatedFriendResults<FriendSummary>>('friend.list_friends', {
+          userId: query.userId ?? request.user!.id,
+          limit: query.limit,
+          cursor: query.cursor,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );

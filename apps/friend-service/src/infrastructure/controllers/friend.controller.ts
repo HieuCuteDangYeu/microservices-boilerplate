@@ -1,5 +1,4 @@
-import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { AcceptFriendRequestUseCase } from '@friend/application/use-cases/accept-friend-request.use-case';
 import { CancelFriendRequestUseCase } from '@friend/application/use-cases/cancel-friend-request.use-case';
 import { GetFriendshipStatusUseCase } from '@friend/application/use-cases/get-friendship-status.use-case';
@@ -17,7 +16,8 @@ import { FriendRequestNotFoundError } from '@friend/domain/errors/friend-request
 import { FriendUserNotFoundError } from '@friend/domain/errors/friend-user-not-found.error';
 import { FriendshipAlreadyExistsError } from '@friend/domain/errors/friendship-already-exists.error';
 import { FriendshipNotFoundError } from '@friend/domain/errors/friendship-not-found.error';
-import { SagaCompensationError } from '@common/domain/errors/saga.error';
+import { Controller } from '@nestjs/common';
+import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 
 @Controller()
 export class FriendController {
@@ -82,27 +82,57 @@ export class FriendController {
   }
 
   @MessagePattern('friend.list_incoming_requests')
-  async listIncomingRequests(@Payload() data: { userId: string }) {
+  async listIncomingRequests(
+    @Payload() data: { userId: string; limit?: number; cursor?: string },
+  ) {
     try {
-      return await this.listIncomingFriendRequestsUseCase.execute(data.userId);
+      const result = await this.listIncomingFriendRequestsUseCase.execute(
+        data.userId,
+        data.limit ?? 20,
+        this.parseCursor(data.cursor),
+      );
+      return {
+        items: result.items,
+        nextCursor: this.serializeCursor(result.nextCursor),
+      };
     } catch (error) {
       this.handleError(error);
     }
   }
 
   @MessagePattern('friend.list_outgoing_requests')
-  async listOutgoingRequests(@Payload() data: { userId: string }) {
+  async listOutgoingRequests(
+    @Payload() data: { userId: string; limit?: number; cursor?: string },
+  ) {
     try {
-      return await this.listOutgoingFriendRequestsUseCase.execute(data.userId);
+      const result = await this.listOutgoingFriendRequestsUseCase.execute(
+        data.userId,
+        data.limit ?? 20,
+        this.parseCursor(data.cursor),
+      );
+      return {
+        items: result.items,
+        nextCursor: this.serializeCursor(result.nextCursor),
+      };
     } catch (error) {
       this.handleError(error);
     }
   }
 
   @MessagePattern('friend.list_friends')
-  async listFriends(@Payload() data: { userId: string }) {
+  async listFriends(
+    @Payload() data: { userId: string; limit?: number; cursor?: string },
+  ) {
     try {
-      return await this.listFriendsUseCase.execute(data.userId);
+      const result = await this.listFriendsUseCase.execute(
+        data.userId,
+        data.limit ?? 20,
+        this.parseCursor(data.cursor),
+      );
+      return {
+        items: result.items,
+        nextCursor: this.serializeCursor(result.nextCursor),
+      };
     } catch (error) {
       this.handleError(error);
     }
@@ -135,6 +165,10 @@ export class FriendController {
   }
 
   private handleError(error: unknown): never {
+    if (error instanceof RpcException) {
+      throw error;
+    }
+
     if (error instanceof CannotFriendSelfError) {
       throw new RpcException({
         statusCode: 400,
@@ -182,5 +216,42 @@ export class FriendController {
       statusCode: 500,
       message: 'Internal Server Error',
     });
+  }
+
+  private parseCursor(
+    cursor?: string,
+  ): { timestamp: Date; id: string } | undefined {
+    if (!cursor) {
+      return undefined;
+    }
+
+    const [timestamp, id] = cursor.split('|');
+
+    if (!timestamp || !id) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid cursor format',
+      });
+    }
+
+    const parsedTimestamp = new Date(timestamp);
+
+    if (Number.isNaN(parsedTimestamp.getTime())) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid cursor format',
+      });
+    }
+
+    return {
+      timestamp: parsedTimestamp,
+      id,
+    };
+  }
+
+  private serializeCursor(
+    cursor: { timestamp: Date; id: string } | null,
+  ): string | null {
+    return cursor ? `${cursor.timestamp.toISOString()}|${cursor.id}` : null;
   }
 }

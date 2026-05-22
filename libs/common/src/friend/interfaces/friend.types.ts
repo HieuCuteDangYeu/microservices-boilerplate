@@ -13,6 +13,11 @@ export interface FriendshipActionResponse {
   conversationId?: string;
 }
 
+export interface PaginatedFriendResults<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
 export interface FriendshipStatusResponse {
   status: FriendshipState;
   id?: string;

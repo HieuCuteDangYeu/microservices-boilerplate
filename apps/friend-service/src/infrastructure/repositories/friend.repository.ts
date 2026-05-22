@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import {
-  Friendship as PrismaFriendship,
-  FriendshipStatus as PrismaFriendshipStatus,
-} from '@prisma/friend-client';
 import { Friendship } from '@friend/domain/entities/friendship.entity';
-import type { IFriendRepository } from '@friend/domain/interfaces/friend.repository.interface';
+import type {
+  FriendshipPaginationCursor,
+  IFriendRepository,
+  PaginatedFriendships,
+} from '@friend/domain/interfaces/friend.repository.interface';
+import { Injectable } from '@nestjs/common';
+import { Friendship as PrismaFriendship } from '@prisma/friend-client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -18,7 +19,7 @@ export class FriendRepository implements IFriendRepository {
         recipientId: friendship.recipientId,
         userOneId: friendship.userOneId,
         userTwoId: friendship.userTwoId,
-        status: friendship.status as PrismaFriendshipStatus,
+        status: friendship.status,
       },
     });
 
@@ -50,44 +51,58 @@ export class FriendRepository implements IFriendRepository {
     return friendship ? this.toDomain(friendship) : null;
   }
 
-  async listIncomingPending(userId: string): Promise<Friendship[]> {
-    const friendships = await this.prisma.friendship.findMany({
+  async listIncomingPending(
+    userId: string,
+    limit: number,
+    cursor?: FriendshipPaginationCursor,
+  ): Promise<PaginatedFriendships> {
+    const records = await this.prisma.friendship.findMany({
       where: {
         recipientId: userId,
         status: 'PENDING',
+        ...this.buildCursorFilter('createdAt', cursor),
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: limit + 1,
     });
 
-    return friendships.map((friendship) => this.toDomain(friendship));
+    return this.buildPage(records, limit, 'createdAt');
   }
 
-  async listOutgoingPending(userId: string): Promise<Friendship[]> {
-    const friendships = await this.prisma.friendship.findMany({
+  async listOutgoingPending(
+    userId: string,
+    limit: number,
+    cursor?: FriendshipPaginationCursor,
+  ): Promise<PaginatedFriendships> {
+    const records = await this.prisma.friendship.findMany({
       where: {
         requesterId: userId,
         status: 'PENDING',
+        ...this.buildCursorFilter('createdAt', cursor),
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: limit + 1,
     });
 
-    return friendships.map((friendship) => this.toDomain(friendship));
+    return this.buildPage(records, limit, 'createdAt');
   }
 
-  async listAccepted(userId: string): Promise<Friendship[]> {
-    const friendships = await this.prisma.friendship.findMany({
+  async listAccepted(
+    userId: string,
+    limit: number,
+    cursor?: FriendshipPaginationCursor,
+  ): Promise<PaginatedFriendships> {
+    const records = await this.prisma.friendship.findMany({
       where: {
         status: 'ACCEPTED',
         OR: [{ userOneId: userId }, { userTwoId: userId }],
+        ...this.buildCursorFilter('updatedAt', cursor),
       },
-      orderBy: [{ respondedAt: 'desc' }, { updatedAt: 'desc' }],
+      orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+      take: limit + 1,
     });
 
-    return friendships.map((friendship) => this.toDomain(friendship));
+    return this.buildPage(records, limit, 'updatedAt');
   }
 
   async updateStatus(
@@ -98,7 +113,7 @@ export class FriendRepository implements IFriendRepository {
     const friendship = await this.prisma.friendship.update({
       where: { id },
       data: {
-        status: status as PrismaFriendshipStatus,
+        status: status,
         respondedAt,
       },
     });
@@ -110,6 +125,52 @@ export class FriendRepository implements IFriendRepository {
     await this.prisma.friendship.delete({
       where: { id },
     });
+  }
+
+  private buildCursorFilter(
+    field: 'createdAt' | 'updatedAt',
+    cursor?: FriendshipPaginationCursor,
+  ): Record<string, unknown> {
+    if (!cursor) {
+      return {};
+    }
+
+    return {
+      AND: [
+        {
+          OR: [
+            { [field]: { lt: cursor.timestamp } },
+            {
+              [field]: cursor.timestamp,
+              id: { gt: cursor.id },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  private buildPage(
+    records: PrismaFriendship[],
+    limit: number,
+    cursorField: 'createdAt' | 'updatedAt',
+  ): PaginatedFriendships {
+    const hasMore = records.length > limit;
+    const items = records
+      .slice(0, limit)
+      .map((friendship) => this.toDomain(friendship));
+    const lastItem = items[items.length - 1];
+
+    return {
+      items,
+      nextCursor:
+        hasMore && lastItem
+          ? {
+              timestamp: lastItem[cursorField]!,
+              id: lastItem.id!,
+            }
+          : null,
+    };
   }
 
   private toDomain(friendship: PrismaFriendship): Friendship {
