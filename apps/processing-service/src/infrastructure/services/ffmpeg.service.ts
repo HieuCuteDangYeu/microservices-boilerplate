@@ -3,21 +3,69 @@ import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { Injectable } from '@nestjs/common';
 import ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
+import * as path from 'path';
 
-const ensureBinaryIsExecutable = (binaryPath: string) => {
-  const currentMode = fs.statSync(binaryPath).mode & 0o777;
-
-  if ((currentMode & 0o111) === 0o111) {
-    return;
+const canExecute = (binaryPath: string) => {
+  try {
+    fs.accessSync(binaryPath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
   }
-
-  fs.chmodSync(binaryPath, currentMode | 0o755);
 };
 
-ensureBinaryIsExecutable(ffmpegInstaller.path);
-ensureBinaryIsExecutable(ffprobeInstaller.path);
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
-ffmpeg.setFfprobePath(ffprobeInstaller.path);
+const findBinaryOnPath = (binaryName: string) => {
+  const executableName =
+    process.platform === 'win32' ? `${binaryName}.exe` : binaryName;
+  const pathValue = process.env.PATH;
+
+  if (!pathValue) {
+    return undefined;
+  }
+
+  for (const directory of pathValue.split(path.delimiter)) {
+    const candidatePath = path.join(directory, executableName);
+
+    if (canExecute(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  return undefined;
+};
+
+const resolveBinaryPath = (
+  binaryName: 'ffmpeg' | 'ffprobe',
+  packagedPath: string,
+) => {
+  const overrideEnvVar =
+    binaryName === 'ffmpeg' ? 'FFMPEG_PATH' : 'FFPROBE_PATH';
+  const configuredPath = process.env[overrideEnvVar];
+
+  if (configuredPath && canExecute(configuredPath)) {
+    return configuredPath;
+  }
+
+  if (canExecute(packagedPath)) {
+    return packagedPath;
+  }
+
+  const systemPath = findBinaryOnPath(binaryName);
+
+  if (systemPath) {
+    return systemPath;
+  }
+
+  throw new Error(
+    `${binaryName} binary is not executable. Set ${overrideEnvVar} or install ${binaryName} in the runtime image.`,
+  );
+};
+
+const ffmpegPath = resolveBinaryPath('ffmpeg', ffmpegInstaller.path);
+const ffprobePath = resolveBinaryPath('ffprobe', ffprobeInstaller.path);
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
 
 @Injectable()
 export class FfmpegService {
