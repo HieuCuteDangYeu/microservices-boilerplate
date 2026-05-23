@@ -601,7 +601,7 @@ export class PrismaChatRepository implements IChatRepository {
     });
 
     await this.clearConversationCache(updatedMessage.conversationId);
-    return ChatMapper.toDomain(updatedMessage);
+    return this.hydrateReadableMessageContent(ChatMapper.toDomain(updatedMessage));
   }
 
   async removeReaction(messageId: string, userId: string): Promise<Message> {
@@ -620,7 +620,7 @@ export class PrismaChatRepository implements IChatRepository {
 
     const reactions = this.normalizeReactions(existingMessage.reactions);
     if (!reactions || !reactions[userId]) {
-      return ChatMapper.toDomain(existingMessage);
+      return this.hydrateReadableMessageContent(ChatMapper.toDomain(existingMessage));
     }
 
     const remainingReactions = { ...reactions };
@@ -637,7 +637,7 @@ export class PrismaChatRepository implements IChatRepository {
     });
 
     await this.clearConversationCache(updatedMessage.conversationId);
-    return ChatMapper.toDomain(updatedMessage);
+    return this.hydrateReadableMessageContent(ChatMapper.toDomain(updatedMessage));
   }
 
   async recallMessage(
@@ -1095,6 +1095,15 @@ export class PrismaChatRepository implements IChatRepository {
 
   private mediaResultKey(fileKey: string): string {
     return `chat:media:result:${fileKey}`;
+  }
+
+  private hydrateReadableMessageContent(message: Message): Message {
+    if (message.signalType !== 0) {
+      return message;
+    }
+
+    message.content = this.encryptionRepository.decrypt(message.content);
+    return message;
   }
 
   private getReplyPreviewContent(message: {
