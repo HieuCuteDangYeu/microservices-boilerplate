@@ -17,14 +17,37 @@ export class StreamChatUseCase {
     userId: string,
     onToken: (token: string) => void,
   ): Promise<string> {
-    const queryVector: number[] =
-      await this.embeddingService.generateVector(userMessage);
+    const queryVector: number[] = await this.embeddingService.generateVector({
+      text: userMessage,
+      taskType: 'RETRIEVAL_QUERY',
+    });
 
-    const matches = await this.contentService.searchTranscripts(queryVector);
+    const matches = await this.contentService.searchReelContext(
+      queryVector,
+      userId,
+    );
 
     const context: string =
       matches.length > 0
-        ? matches.map((m) => m.transcript).join('\n\n---\n\n')
+        ? matches
+            .map((match, index) =>
+              [
+                `Video ${index + 1}`,
+                match.title ? `Title: ${match.title}` : undefined,
+                match.description
+                  ? `Description: ${match.description}`
+                  : undefined,
+                match.tags.length > 0
+                  ? `Tags: ${match.tags.join(', ')}`
+                  : undefined,
+                match.transcript
+                  ? `Transcript:\n${match.transcript}`
+                  : 'Transcript unavailable.',
+              ]
+                .filter((line): line is string => Boolean(line))
+                .join('\n'),
+            )
+            .join('\n\n---\n\n')
         : 'No relevant video content found.';
 
     const systemPrompt: string = `
@@ -38,14 +61,14 @@ Velora is a comprehensive application that helps users:
 Your role:
 - Answer questions about the Velora platform and its features
 - Help users navigate reels, conversations, and other functionality
-- Provide context from video transcripts when relevant to the user's query
+- Provide context from reel titles, descriptions, tags, and transcripts when relevant to the user's query
 
 When answering:
-1. If the user's question relates to video content, use the transcript context below
+1. If the user's question relates to video content, use the reel context below
 2. For general Velora platform questions, provide helpful information about available features
 3. If you don't have information about a specific topic, politely acknowledge the limitation
 
-CONTEXT FROM VIDEO TRANSCRIPTS:
+CONTEXT FROM REELS:
 ${context}
 
 If the context above contains relevant information, prioritize using it. Otherwise, provide general helpful responses about what Velora can do.

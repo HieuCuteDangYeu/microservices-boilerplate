@@ -1,4 +1,6 @@
+import { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+
 export interface IAiService {
-  generateEmbedding(text: string): Promise<number[]>;
+  generateEmbedding(input: GenerateEmbeddingRequest): Promise<number[]>;
   transcribeAudio(audioBuffer: Buffer): Promise<string>;
 }

@@ -48,6 +48,9 @@ export class ContentController {
       visibility: reel.visibility,
       viewCount: Number(reel.viewCount),
       thumbnailKey: reel.thumbnailKey,
+      processingStage: reel.processingStage,
+      processingMessage: reel.processingMessage,
+      processingProgress: reel.processingProgress,
       transcript: reel.transcript,
       createdAt: reel.createdAt,
       updatedAt: reel.updatedAt,
@@ -93,6 +96,9 @@ export class ContentController {
       transcript?: string;
       embedding?: number[];
       thumbnailKey?: string;
+      stage?: string;
+      message?: string;
+      progress?: number;
     },
   ) {
     try {
@@ -102,6 +108,9 @@ export class ContentController {
         data.transcript,
         data.embedding,
         data.thumbnailKey,
+        data.stage,
+        data.message,
+        data.progress,
       );
     } catch (err: unknown) {
       const error = err as Error;
@@ -121,10 +130,26 @@ export class ContentController {
 
   @EventPattern('reel.processing_failed')
   async handleProcessingFailed(
-    @Payload() data: { reelId: string; status: 'FAILED' },
+    @Payload()
+    data: {
+      reelId: string;
+      status: 'FAILED';
+      stage?: string;
+      message?: string;
+      progress?: number;
+    },
   ) {
     try {
-      await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+      await this.updateReelStatusUseCase.execute(
+        data.reelId,
+        data.status,
+        undefined,
+        undefined,
+        undefined,
+        data.stage,
+        data.message,
+        data.progress,
+      );
     } catch (err: unknown) {
       const error = err as Error;
       console.error(
@@ -135,14 +160,60 @@ export class ContentController {
 
   @EventPattern('reel.processing_started')
   async handleProcessingStarted(
-    @Payload() data: { reelId: string; status: 'PROCESSING' },
+    @Payload()
+    data: {
+      reelId: string;
+      status: 'PROCESSING';
+      stage?: string;
+      message?: string;
+      progress?: number;
+    },
   ) {
     try {
-      await this.updateReelStatusUseCase.execute(data.reelId, data.status);
+      await this.updateReelStatusUseCase.execute(
+        data.reelId,
+        data.status,
+        undefined,
+        undefined,
+        undefined,
+        data.stage,
+        data.message,
+        data.progress,
+      );
     } catch (err: unknown) {
       const error = err as Error;
       console.error(
         `❌ [processing_started] ${error.message} — reel ${data.reelId} NOT updated to PROCESSING`,
+      );
+    }
+  }
+
+  @EventPattern('reel.processing_progress')
+  async handleProcessingProgress(
+    @Payload()
+    data: {
+      reelId: string;
+      status: 'PROCESSING';
+      stage?: string;
+      message?: string;
+      progress?: number;
+    },
+  ) {
+    try {
+      await this.updateReelStatusUseCase.execute(
+        data.reelId,
+        data.status,
+        undefined,
+        undefined,
+        undefined,
+        data.stage,
+        data.message,
+        data.progress,
+      );
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(
+        `❌ [processing_progress] ${error.message} — reel ${data.reelId} progress NOT updated`,
       );
     }
   }
@@ -159,25 +230,32 @@ export class ContentController {
     }
   }
 
-  @MessagePattern('content.search_transcripts')
-  async handleSearchTranscripts(@Payload() payload: { queryVector: number[] }) {
-    if (!payload || !Array.isArray(payload.queryVector)) {
+  @MessagePattern('content.search_reel_context')
+  async handleSearchTranscripts(
+    @Payload() payload: { queryVector: number[]; userId: string },
+  ) {
+    if (
+      !payload ||
+      !Array.isArray(payload.queryVector) ||
+      typeof payload.userId !== 'string'
+    ) {
       throw new RpcException({
         statusCode: 400,
-        message: 'Invalid array format for queryVector payload',
+        message: 'Invalid payload for reel context search',
       });
     }
 
     try {
       const results = await this.searchTranscriptsUseCase.execute(
         payload.queryVector,
+        payload.userId,
       );
       return results;
     } catch (error: unknown) {
       const err = error as Error;
       throw new RpcException({
         statusCode: 500,
-        message: `Transcript Search Error: ${err.message}`,
+        message: `Reel Context Search Error: ${err.message}`,
       });
     }
   }

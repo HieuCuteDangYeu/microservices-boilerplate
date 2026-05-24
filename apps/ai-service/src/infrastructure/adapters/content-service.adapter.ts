@@ -14,12 +14,15 @@ export class ContentServiceAdapter implements IContentService {
     @Inject('CONTENT_RMQ') private readonly contentClient: ClientProxy,
   ) {}
 
-  async searchTranscripts(queryVector: number[]): Promise<TranscriptMatch[]> {
+  async searchReelContext(
+    queryVector: number[],
+    userId: string,
+  ): Promise<TranscriptMatch[]> {
     try {
       const results = await firstValueFrom(
         this.contentClient.send<TranscriptMatch[]>(
-          'content.search_transcripts',
-          { queryVector },
+          'content.search_reel_context',
+          { queryVector, userId },
         ),
       );
 
@@ -31,7 +34,7 @@ export class ContentServiceAdapter implements IContentService {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(
-        `ContentServiceAdapter.searchTranscripts failed: ${msg}. Returning empty context.`,
+        `ContentServiceAdapter.searchReelContext failed: ${msg}. Returning empty context.`,
       );
       return [];
     }

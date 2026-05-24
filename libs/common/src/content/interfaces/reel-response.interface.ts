@@ -18,6 +18,9 @@ export interface ReelListItem {
   viewCount: number;
   thumbnailKey?: string;
   thumbnailUrl?: string;
+  processingStage?: string;
+  processingMessage?: string;
+  processingProgress?: number;
   streamUrl: string;
   createdAt: string;
 }

@@ -1,10 +1,11 @@
 import { GenerateEmbeddingUseCase } from '@ai/application/use-cases/generate-embedding.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
+import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
+import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
-import { XenovaEmbeddingAdapter } from '@ai/infrastructure/adapters/xenova-embedding.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { R2AudioStorageService } from '@ai/infrastructure/services/r2-audio-storage.service';
 import { Module } from '@nestjs/common';
@@ -66,9 +67,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     StreamChatUseCase,
     GenerateEmbeddingUseCase,
     TranscribeAudioUseCase,
+    TranscribeAudioBufferUseCase,
     {
       provide: 'IEmbeddingService',
-      useClass: XenovaEmbeddingAdapter,
+      useClass: GeminiEmbeddingAdapter,
     },
     {
       provide: 'ITranscriptionService',

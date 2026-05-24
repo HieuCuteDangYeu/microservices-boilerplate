@@ -2,6 +2,7 @@ import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
 import { UpdateReelDto } from '@common/content/dtos/update-reel.dto';
+import { ReelProcessingStatus } from '@common/content/interfaces/reel-processing-status.interface';
 import {
   PaginatedReels,
   ReelDetail,
@@ -153,6 +154,47 @@ export class ContentController {
     return this._enrichReel(reel, { includeTranscript: true });
   }
 
+  @Get('reels/:id/status')
+  @ApiOperation({ summary: 'Get reel processing status' })
+  async getReelStatus(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+  ) {
+    const status = await lastValueFrom(
+      this.contentClient
+        .send<ReelProcessingStatus>('content.get_reel_status', { reelId })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    if (status.status === 'NOT_FOUND') {
+      throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (
+      status.visibility === 'private' &&
+      status.userId !== request.user!.id &&
+      !request.user!.roles?.includes('ADMIN')
+    ) {
+      throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
+    }
+
+    return {
+      reelId: status.reelId,
+      status: status.status,
+      stage: status.stage,
+      message: status.message,
+      progress: status.progress,
+      mediaKey: status.mediaKey,
+      thumbnailKey: status.thumbnailKey,
+      thumbnailUrl: status.thumbnailKey
+        ? `${this.cdnDomain}/${status.thumbnailKey}`
+        : undefined,
+      streamUrl: status.mediaKey
+        ? this.buildStreamUrl(status.mediaKey)
+        : undefined,
+    };
+  }
+
   @Patch('reels/:id')
   @ApiOperation({ summary: 'Update reel metadata (owner only)' })
   async updateReel(
@@ -210,17 +252,14 @@ export class ContentController {
     reel: Reel,
     opts: { includeTranscript?: boolean } = {},
   ): ReelListItem | ReelDetail {
-    const extIndex = reel.mediaKey.lastIndexOf('.');
-    const folderPath =
-      extIndex !== -1 ? reel.mediaKey.substring(0, extIndex) : reel.mediaKey;
-    const streamUrl = `${this.cdnDomain}/${folderPath}/stream.m3u8`;
+    const streamUrl = this.buildStreamUrl(reel.mediaKey);
     const thumbnailUrl = reel.thumbnailKey
       ? `${this.cdnDomain}/${reel.thumbnailKey}`
       : undefined;
     const createdAt =
       reel.createdAt instanceof Date
         ? reel.createdAt.toISOString()
-        : new Date(reel.createdAt as unknown as string).toISOString();
+        : new Date(reel.createdAt).toISOString();
 
     const result: ReelListItem = {
       id: reel.id,
@@ -237,6 +276,9 @@ export class ContentController {
           : reel.viewCount,
       thumbnailKey: reel.thumbnailKey,
       thumbnailUrl,
+      processingStage: reel.processingStage,
+      processingMessage: reel.processingMessage,
+      processingProgress: reel.processingProgress,
       streamUrl,
       createdAt,
     };
@@ -249,6 +291,13 @@ export class ContentController {
     }
 
     return result;
+  }
+
+  private buildStreamUrl(mediaKey: string): string {
+    const extIndex = mediaKey.lastIndexOf('.');
+    const folderPath =
+      extIndex !== -1 ? mediaKey.substring(0, extIndex) : mediaKey;
+    return `${this.cdnDomain}/${folderPath}/stream.m3u8`;
   }
 
   private handleMicroserviceError(error: any): never {

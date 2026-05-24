@@ -1,7 +1,9 @@
+import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
+import type { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
 import { Controller, Inject } from '@nestjs/common';
 import {
   ClientProxy,
@@ -16,22 +18,59 @@ export class AiController {
   constructor(
     private readonly generateEmbeddingUseCase: GenerateEmbeddingUseCase,
     private readonly transcribeAudioUseCase: TranscribeAudioUseCase,
+    private readonly transcribeAudioBufferUseCase: TranscribeAudioBufferUseCase,
     private readonly streamChatUseCase: StreamChatUseCase,
     @Inject('CONVERSATION_RMQ')
     private readonly conversationClient: ClientProxy,
   ) {}
 
   @MessagePattern('ai.generate_embedding')
-  async handleGenerateEmbedding(@Payload() data: { text: string }) {
+  async handleGenerateEmbedding(@Payload() data: GenerateEmbeddingRequest) {
+    if (!data || typeof data.text !== 'string' || data.text.trim() === '') {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid embedding request payload',
+      });
+    }
+
     try {
-      const embedding = await this.generateEmbeddingUseCase.execute(data.text);
+      const embedding = await this.generateEmbeddingUseCase.execute(data);
       return { embedding };
     } catch (err: unknown) {
+      if (err instanceof RpcException) {
+        throw err;
+      }
       const error = err as Error;
       console.error(`[GenerateEmbedding] ${error.message}`);
       const statusCode = error.message.includes('not initialized') ? 503 : 500;
       throw new RpcException({
         statusCode,
+        message: error.message,
+      });
+    }
+  }
+
+  @MessagePattern('ai.transcribe_audio_buffer')
+  async handleTranscribeAudioBuffer(
+    @Payload() payload: { audioBase64: string },
+  ) {
+    if (!payload || typeof payload.audioBase64 !== 'string') {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid audio buffer payload received from RabbitMQ',
+      });
+    }
+
+    try {
+      const transcript = await this.transcribeAudioBufferUseCase.execute(
+        payload.audioBase64,
+      );
+      return { transcript };
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(`[TranscribeAudioBuffer] ${error.message}`);
+      throw new RpcException({
+        statusCode: 500,
         message: error.message,
       });
     }

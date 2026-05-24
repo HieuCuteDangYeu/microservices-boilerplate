@@ -46,6 +46,9 @@ export class ProcessingServiceAdapter implements IProcessingService {
     reelId: string;
     mediaKey: string;
     userId: string;
+    title?: string;
+    description?: string;
+    tags: string[];
   }): Promise<void> {
     try {
       await firstValueFrom(this.messageBroker.emit('reel.created', data));

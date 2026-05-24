@@ -1,4 +1,4 @@
-import { TranscriptSearchResult } from '@common/content/interfaces/transcript-search-result.interface';
+import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/content-client';
 import { Reel } from '../../domain/entities/reel.entity';
@@ -34,6 +34,12 @@ export class ContentRepository
     reel.viewCount = record['viewCount'] as bigint;
     reel.transcript = (record['transcript'] as string | null) ?? undefined;
     reel.thumbnailKey = (record['thumbnailKey'] as string | null) ?? undefined;
+    reel.processingStage =
+      (record['processingStage'] as string | null) ?? undefined;
+    reel.processingMessage =
+      (record['processingMessage'] as string | null) ?? undefined;
+    reel.processingProgress =
+      (record['processingProgress'] as number | null) ?? undefined;
     reel.createdAt = record['createdAt'] as Date;
     reel.updatedAt = record['updatedAt'] as Date;
     return reel;
@@ -49,9 +55,12 @@ export class ContentRepository
         tags: reel.tags || [],
         status: reel.status || 'PENDING',
         visibility: reel.visibility || 'public',
+        processingStage: reel.processingStage,
+        processingMessage: reel.processingMessage,
+        processingProgress: reel.processingProgress,
       },
     });
-    return this.toDomain(savedRecord as Record<string, unknown>);
+    return this.toDomain(savedRecord);
   }
 
   async updateReelStatus(
@@ -60,11 +69,20 @@ export class ContentRepository
     transcript?: string,
     embedding?: number[],
     thumbnailKey?: string,
+    processingStage?: string,
+    processingMessage?: string,
+    processingProgress?: number,
   ): Promise<Reel> {
     const updatedRecord = await this.$transaction(async (tx) => {
       const data: Record<string, unknown> = { status };
       if (transcript !== undefined) data['transcript'] = transcript;
       if (thumbnailKey !== undefined) data['thumbnailKey'] = thumbnailKey;
+      if (processingStage !== undefined)
+        data['processingStage'] = processingStage;
+      if (processingMessage !== undefined)
+        data['processingMessage'] = processingMessage;
+      if (processingProgress !== undefined)
+        data['processingProgress'] = processingProgress;
 
       const record = await tx.reel.update({
         where: { id },
@@ -83,26 +101,32 @@ export class ContentRepository
       return record;
     });
 
-    return this.toDomain(updatedRecord as Record<string, unknown>);
+    return this.toDomain(updatedRecord);
   }
 
   async findById(id: string): Promise<Reel | null> {
     const record = await this.reel.findUnique({ where: { id } });
     if (!record) return null;
-    return this.toDomain(record as Record<string, unknown>);
+    return this.toDomain(record);
   }
 
-  async searchTranscripts(
+  async searchReelContext(
     queryVector: number[],
-  ): Promise<TranscriptSearchResult[]> {
+    userId: string,
+  ): Promise<ReelContextSearchResult[]> {
     const vectorLiteral = `[${queryVector.join(',')}]`;
-    return this.$queryRaw<TranscriptSearchResult[]>`
+    return this.$queryRaw<ReelContextSearchResult[]>`
         SELECT
+          id as "reelId",
+          title,
+          description,
+          tags,
           transcript,
           (embedding <=> ${vectorLiteral}::vector) as distance
         FROM "Reel"
-        WHERE transcript IS NOT NULL
+        WHERE status = 'COMPLETED'
           AND embedding IS NOT NULL
+          AND (visibility = 'public' OR "userId" = ${userId})
         ORDER BY distance ASC
         LIMIT 3;
       `;
@@ -149,7 +173,11 @@ export class ContentRepository
         visibility: true,
         viewCount: true,
         thumbnailKey: true,
+        processingStage: true,
+        processingMessage: true,
+        processingProgress: true,
         createdAt: true,
+        updatedAt: true,
         // transcript and embedding are excluded from list query
       },
     });
@@ -190,7 +218,7 @@ export class ContentRepository
       },
     });
 
-    return this.toDomain(updatedRecord as Record<string, unknown>);
+    return this.toDomain(updatedRecord);
   }
 
   async deleteReel(id: string, userId: string): Promise<boolean> {
@@ -208,6 +236,6 @@ export class ContentRepository
       data: { viewCount: { increment: 1 } },
     });
     if (!record) return null;
-    return this.toDomain(record as Record<string, unknown>);
+    return this.toDomain(record);
   }
 }
