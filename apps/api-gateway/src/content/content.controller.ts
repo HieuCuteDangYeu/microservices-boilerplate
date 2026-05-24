@@ -287,6 +287,8 @@ export class ContentController {
       return {
         ...result,
         transcript: reel.transcript,
+        transcriptVtt: reel.transcriptVtt,
+        transcriptSegments: reel.transcriptSegments,
       };
     }
 

@@ -1,6 +1,10 @@
+import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import type { IAudioStorageService } from '../../domain/interfaces/audio-storage.service.interface';
-import type { ITranscriptionService } from '../../domain/interfaces/transcription.service.interface';
+import type {
+  ITranscriptionService,
+  TranscriptionOptions,
+} from '../../domain/interfaces/transcription.service.interface';
 
 @Injectable()
 export class TranscribeAudioUseCase {
@@ -11,8 +15,14 @@ export class TranscribeAudioUseCase {
     private readonly transcriptionService: ITranscriptionService,
   ) {}
 
-  async execute(audioKey: string): Promise<string> {
+  async execute(
+    audioKey: string,
+    options?: TranscriptionOptions,
+  ): Promise<TranscriptionResult> {
     const audioBuffer = await this.audioStorageService.downloadAudio(audioKey);
-    return await this.transcriptionService.transcribeAudio(audioBuffer);
+    return await this.transcriptionService.transcribeAudio(
+      audioBuffer,
+      options,
+    );
   }
 }

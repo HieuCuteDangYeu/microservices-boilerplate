@@ -1,9 +1,13 @@
 import { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { catchError, lastValueFrom } from 'rxjs';
-import type { IAiService } from '../../domain/interfaces/ai-service.interface';
+import type {
+  IAiService,
+  TranscriptionOptions,
+} from '../../domain/interfaces/ai-service.interface';
 
 @Injectable()
 export class AiServiceAdapter implements IAiService {
@@ -30,16 +34,23 @@ export class AiServiceAdapter implements IAiService {
     }
   }
 
-  async transcribeAudio(audioBuffer: Buffer): Promise<string> {
+  async transcribeAudio(
+    audioBuffer: Buffer,
+    options?: TranscriptionOptions,
+  ): Promise<TranscriptionResult> {
     try {
       const response = await lastValueFrom(
         this.aiClient
-          .send<{ transcript: string }>('ai.transcribe_audio_buffer', {
+          .send<{
+            transcript: string;
+            transcription?: TranscriptionResult;
+          }>('ai.transcribe_audio_buffer', {
             audioBase64: audioBuffer.toString('base64'),
+            initialPrompt: options?.initialPrompt,
           })
           .pipe(catchError((error) => this.handleMicroserviceError(error))),
       );
-      return response.transcript;
+      return response.transcription ?? { text: response.transcript };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(

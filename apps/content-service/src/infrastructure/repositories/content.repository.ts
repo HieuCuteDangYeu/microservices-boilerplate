@@ -1,3 +1,4 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/content-client';
@@ -33,6 +34,10 @@ export class ContentRepository
     reel.visibility = (record['visibility'] as Reel['visibility']) ?? 'public';
     reel.viewCount = record['viewCount'] as bigint;
     reel.transcript = (record['transcript'] as string | null) ?? undefined;
+    reel.transcriptVtt =
+      (record['transcriptVtt'] as string | null) ?? undefined;
+    reel.transcriptSegments =
+      (record['transcriptSegments'] as TranscriptSegment[] | null) ?? undefined;
     reel.thumbnailKey = (record['thumbnailKey'] as string | null) ?? undefined;
     reel.processingStage =
       (record['processingStage'] as string | null) ?? undefined;
@@ -67,6 +72,8 @@ export class ContentRepository
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
     transcript?: string,
+    transcriptVtt?: string,
+    transcriptSegments?: TranscriptSegment[],
     embedding?: number[],
     thumbnailKey?: string,
     processingStage?: string,
@@ -76,6 +83,9 @@ export class ContentRepository
     const updatedRecord = await this.$transaction(async (tx) => {
       const data: Record<string, unknown> = { status };
       if (transcript !== undefined) data['transcript'] = transcript;
+      if (transcriptVtt !== undefined) data['transcriptVtt'] = transcriptVtt;
+      if (transcriptSegments !== undefined)
+        data['transcriptSegments'] = transcriptSegments;
       if (thumbnailKey !== undefined) data['thumbnailKey'] = thumbnailKey;
       if (processingStage !== undefined)
         data['processingStage'] = processingStage;
@@ -178,7 +188,7 @@ export class ContentRepository
         processingProgress: true,
         createdAt: true,
         updatedAt: true,
-        // transcript and embedding are excluded from list query
+        // transcript, timed transcript, and embedding are excluded from list query
       },
     });
 

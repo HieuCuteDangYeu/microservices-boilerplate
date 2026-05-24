@@ -27,6 +27,8 @@ model Reel {
   visibility         String                      @default("public")
   viewCount          BigInt                      @default(0)
   transcript         String?                     @db.Text
+  transcriptVtt      String?                     @db.Text
+  transcriptSegments Json?
   embedding          Unsupported("vector(384)")?
   thumbnailKey       String?
   processingStage    String?

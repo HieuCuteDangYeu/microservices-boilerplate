@@ -1,3 +1,5 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+
 export interface ReelAuthorSummary {
   id: string;
   username: string | null;
@@ -27,6 +29,8 @@ export interface ReelListItem {
 
 export interface ReelDetail extends ReelListItem {
   transcript?: string;
+  transcriptVtt?: string;
+  transcriptSegments?: TranscriptSegment[];
 }
 
 export interface ReelFeedListItem extends ReelListItem {

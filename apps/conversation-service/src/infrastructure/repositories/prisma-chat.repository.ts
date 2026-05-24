@@ -431,7 +431,7 @@ export class PrismaChatRepository implements IChatRepository {
 
       // Xử lý response (Array hoặc Object wrapping)
       if (Array.isArray(response)) {
-        usersList = response as unknown as ChatParticipant[];
+        usersList = response;
       } else if (
         response &&
         'users' in response &&
@@ -492,7 +492,7 @@ export class PrismaChatRepository implements IChatRepository {
       let usersList: ChatParticipant[] = [];
 
       if (Array.isArray(response)) {
-        usersList = response as unknown as ChatParticipant[];
+        usersList = response;
       } else if (
         response &&
         'users' in response &&
@@ -601,7 +601,9 @@ export class PrismaChatRepository implements IChatRepository {
     });
 
     await this.clearConversationCache(updatedMessage.conversationId);
-    return this.hydrateReactionUpdateMessage(ChatMapper.toDomain(updatedMessage));
+    return this.hydrateReactionUpdateMessage(
+      ChatMapper.toDomain(updatedMessage),
+    );
   }
 
   async removeReaction(messageId: string, userId: string): Promise<Message> {
@@ -620,7 +622,9 @@ export class PrismaChatRepository implements IChatRepository {
 
     const reactions = this.normalizeReactions(existingMessage.reactions);
     if (!reactions || !reactions[userId]) {
-      return this.hydrateReactionUpdateMessage(ChatMapper.toDomain(existingMessage));
+      return this.hydrateReactionUpdateMessage(
+        ChatMapper.toDomain(existingMessage),
+      );
     }
 
     const remainingReactions = { ...reactions };
@@ -637,7 +641,9 @@ export class PrismaChatRepository implements IChatRepository {
     });
 
     await this.clearConversationCache(updatedMessage.conversationId);
-    return this.hydrateReactionUpdateMessage(ChatMapper.toDomain(updatedMessage));
+    return this.hydrateReactionUpdateMessage(
+      ChatMapper.toDomain(updatedMessage),
+    );
   }
 
   async recallMessage(
@@ -1163,7 +1169,7 @@ export class PrismaChatRepository implements IChatRepository {
       let usersList: ChatParticipant[] = [];
 
       if (Array.isArray(response)) {
-        usersList = response as unknown as ChatParticipant[];
+        usersList = response;
       } else if (
         response &&
         'users' in response &&

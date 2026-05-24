@@ -1,3 +1,5 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+
 export class Reel {
   id: string;
   userId: string;
@@ -9,6 +11,8 @@ export class Reel {
   visibility: 'public' | 'private';
   viewCount: bigint;
   transcript?: string;
+  transcriptVtt?: string;
+  transcriptSegments?: TranscriptSegment[];
   embedding?: number[];
   thumbnailKey?: string;
   processingStage?: string;

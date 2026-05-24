@@ -1,3 +1,5 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+
 export interface IContentService {
   emitProcessingStarted(data: {
     reelId: string;
@@ -17,6 +19,8 @@ export interface IContentService {
     reelId: string;
     status: 'COMPLETED';
     transcript?: string;
+    transcriptVtt?: string;
+    transcriptSegments?: TranscriptSegment[];
     embedding?: number[];
     thumbnailKey?: string;
     stage?: string;

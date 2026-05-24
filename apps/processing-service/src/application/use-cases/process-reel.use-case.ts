@@ -1,3 +1,4 @@
+import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -79,6 +80,24 @@ export class ProcessReelUseCase {
     };
   }
 
+  private buildTranscriptionPrompt(data: {
+    title?: string;
+    tags?: string[];
+  }): string | undefined {
+    const title = data.title?.trim();
+    const tags = (data.tags ?? this.defaultTags)
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+
+    const hints = [
+      title ? `Video title: ${title}` : undefined,
+      tags.length > 0 ? `Important terms: ${tags.join(', ')}` : undefined,
+      'Transcribe only spoken words in the original language.',
+    ].filter((value): value is string => Boolean(value));
+
+    return hints.length > 1 ? hints.join('\n') : undefined;
+  }
+
   private async emitProgress(data: {
     reelId: string;
     stage: string;
@@ -111,8 +130,13 @@ export class ProcessReelUseCase {
     },
     inputPath: string,
     audioPath: string,
-  ): Promise<{ transcript?: string; embedding?: number[] }> {
-    let transcript: string | undefined;
+  ): Promise<{
+    transcript?: string;
+    transcriptVtt?: string;
+    transcriptSegments?: TranscriptionResult['segments'];
+    embedding?: number[];
+  }> {
+    let transcription: TranscriptionResult | undefined;
 
     try {
       await this.ffmpegService.extractAudio(inputPath, audioPath);
@@ -122,7 +146,9 @@ export class ProcessReelUseCase {
         fs.unlinkSync(audioPath);
       }
 
-      transcript = await this.aiService.transcribeAudio(audioBuffer);
+      transcription = await this.aiService.transcribeAudio(audioBuffer, {
+        initialPrompt: this.buildTranscriptionPrompt(data),
+      });
       this.logger.log(`[Reel ${data.reelId}] Audio transcription completed`);
     } catch (error: unknown) {
       const { message, stack } = this.describeError(error);
@@ -136,9 +162,18 @@ export class ProcessReelUseCase {
       }
     }
 
+    const transcript = transcription?.text?.trim() || undefined;
+    const transcriptVtt = transcription?.vtt?.trim() || undefined;
+    const transcriptSegments =
+      transcription?.segments && transcription.segments.length > 0
+        ? transcription.segments
+        : undefined;
+
     const embeddingDocument = this.buildEmbeddingDocument(data, transcript);
     if (!embeddingDocument) {
-      return transcript ? { transcript } : {};
+      return transcript
+        ? { transcript, transcriptVtt, transcriptSegments }
+        : {};
     }
 
     try {
@@ -147,14 +182,16 @@ export class ProcessReelUseCase {
         taskType: 'RETRIEVAL_DOCUMENT',
         title: embeddingDocument.title,
       });
-      return { transcript, embedding };
+      return { transcript, transcriptVtt, transcriptSegments, embedding };
     } catch (error: unknown) {
       const { message, stack } = this.describeError(error);
       this.logger.warn(
         `[Reel ${data.reelId}] Embedding generation failed, continuing without embedding: ${message}`,
         stack,
       );
-      return transcript ? { transcript } : {};
+      return transcript
+        ? { transcript, transcriptVtt, transcriptSegments }
+        : {};
     }
   }
 
@@ -237,16 +274,15 @@ export class ProcessReelUseCase {
         progress: currentProgress,
       });
 
-      const { transcript, embedding } = await this.buildAiMetadata(
-        data,
-        inputPath,
-        audioPath,
-      );
+      const { transcript, transcriptVtt, transcriptSegments, embedding } =
+        await this.buildAiMetadata(data, inputPath, audioPath);
 
       await this.contentService.emitProcessingCompleted({
         reelId,
         status: 'COMPLETED',
         transcript,
+        transcriptVtt,
+        transcriptSegments,
         embedding,
         thumbnailKey,
         stage: 'READY',

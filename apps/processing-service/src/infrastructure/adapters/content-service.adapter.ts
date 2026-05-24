@@ -1,3 +1,4 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
@@ -28,11 +29,11 @@ export class ContentServiceAdapter implements IContentService {
       try {
         return JSON.stringify(error);
       } catch {
-        return String(error);
+        return 'Unserializable error object';
       }
     }
 
-    return String(error);
+    return typeof error === 'string' ? error : 'Unknown error';
   }
 
   async emitProcessingStarted(data: {
@@ -75,6 +76,8 @@ export class ContentServiceAdapter implements IContentService {
     reelId: string;
     status: 'COMPLETED';
     transcript?: string;
+    transcriptVtt?: string;
+    transcriptSegments?: TranscriptSegment[];
     embedding?: number[];
     thumbnailKey?: string;
     stage?: string;

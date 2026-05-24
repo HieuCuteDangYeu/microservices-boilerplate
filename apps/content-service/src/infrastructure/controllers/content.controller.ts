@@ -1,3 +1,4 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
@@ -52,6 +53,8 @@ export class ContentController {
       processingMessage: reel.processingMessage,
       processingProgress: reel.processingProgress,
       transcript: reel.transcript,
+      transcriptVtt: reel.transcriptVtt,
+      transcriptSegments: reel.transcriptSegments,
       createdAt: reel.createdAt,
       updatedAt: reel.updatedAt,
     };
@@ -94,6 +97,8 @@ export class ContentController {
       reelId: string;
       status: 'COMPLETED';
       transcript?: string;
+      transcriptVtt?: string;
+      transcriptSegments?: TranscriptSegment[];
       embedding?: number[];
       thumbnailKey?: string;
       stage?: string;
@@ -106,6 +111,8 @@ export class ContentController {
         data.reelId,
         data.status,
         data.transcript,
+        data.transcriptVtt,
+        data.transcriptSegments,
         data.embedding,
         data.thumbnailKey,
         data.stage,
@@ -146,6 +153,8 @@ export class ContentController {
         undefined,
         undefined,
         undefined,
+        undefined,
+        undefined,
         data.stage,
         data.message,
         data.progress,
@@ -176,6 +185,8 @@ export class ContentController {
         undefined,
         undefined,
         undefined,
+        undefined,
+        undefined,
         data.stage,
         data.message,
         data.progress,
@@ -203,6 +214,8 @@ export class ContentController {
       await this.updateReelStatusUseCase.execute(
         data.reelId,
         data.status,
+        undefined,
+        undefined,
         undefined,
         undefined,
         undefined,

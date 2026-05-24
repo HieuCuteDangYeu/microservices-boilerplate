@@ -1,5 +1,5 @@
-import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
+import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
@@ -52,7 +52,7 @@ export class AiController {
 
   @MessagePattern('ai.transcribe_audio_buffer')
   async handleTranscribeAudioBuffer(
-    @Payload() payload: { audioBase64: string },
+    @Payload() payload: { audioBase64: string; initialPrompt?: string },
   ) {
     if (!payload || typeof payload.audioBase64 !== 'string') {
       throw new RpcException({
@@ -62,10 +62,14 @@ export class AiController {
     }
 
     try {
-      const transcript = await this.transcribeAudioBufferUseCase.execute(
+      const transcription = await this.transcribeAudioBufferUseCase.execute(
         payload.audioBase64,
+        { initialPrompt: payload.initialPrompt },
       );
-      return { transcript };
+      return {
+        transcript: transcription.text,
+        transcription,
+      };
     } catch (err: unknown) {
       const error = err as Error;
       console.error(`[TranscribeAudioBuffer] ${error.message}`);
@@ -77,16 +81,22 @@ export class AiController {
   }
 
   @MessagePattern('ai.transcribe_audio')
-  async handleTranscribeAudio(@Payload() payload: { audioKey: string }) {
+  async handleTranscribeAudio(
+    @Payload() payload: { audioKey: string; initialPrompt?: string },
+  ) {
     try {
       if (!payload || typeof payload.audioKey !== 'string') {
         throw new Error('Invalid audio key payload received from RabbitMQ');
       }
 
-      const transcript = await this.transcribeAudioUseCase.execute(
+      const transcription = await this.transcribeAudioUseCase.execute(
         payload.audioKey,
+        { initialPrompt: payload.initialPrompt },
       );
-      return { transcript };
+      return {
+        transcript: transcription.text,
+        transcription,
+      };
     } catch (err: unknown) {
       const error = err as Error;
       console.error(`[TranscribeAudio] ${error.message}`);

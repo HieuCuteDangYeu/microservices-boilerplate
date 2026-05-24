@@ -1,3 +1,4 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
 
@@ -14,6 +15,8 @@ export class UpdateReelStatusUseCase {
     reelId: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
     transcript?: string,
+    transcriptVtt?: string,
+    transcriptSegments?: TranscriptSegment[],
     embedding?: number[],
     thumbnailKey?: string,
     processingStage?: string,
@@ -21,6 +24,9 @@ export class UpdateReelStatusUseCase {
     processingProgress?: number,
   ) {
     let sanitizedTranscript = transcript;
+    let sanitizedTranscriptVtt = transcriptVtt?.trim() || undefined;
+    let sanitizedTranscriptSegments =
+      this.normalizeTranscriptSegments(transcriptSegments);
     let sanitizedEmbedding = embedding;
     let nextStage = processingStage;
     let nextMessage = processingMessage;
@@ -29,6 +35,8 @@ export class UpdateReelStatusUseCase {
     if (status === 'COMPLETED') {
       if (!transcript || transcript.trim() === '') {
         sanitizedTranscript = undefined;
+        sanitizedTranscriptVtt = undefined;
+        sanitizedTranscriptSegments = undefined;
         this.logger.warn(
           `Reel ${reelId}: completing without transcript because transcript is missing or empty`,
         );
@@ -36,6 +44,8 @@ export class UpdateReelStatusUseCase {
         const quality = this.validateTranscriptQuality(transcript);
         if (!quality.valid) {
           sanitizedTranscript = undefined;
+          sanitizedTranscriptVtt = undefined;
+          sanitizedTranscriptSegments = undefined;
           this.logger.warn(
             `Reel ${reelId}: completing without transcript because transcript quality check failed: "${quality.reason}"`,
           );
@@ -75,6 +85,8 @@ export class UpdateReelStatusUseCase {
       reelId,
       status,
       sanitizedTranscript,
+      sanitizedTranscriptVtt,
+      sanitizedTranscriptSegments,
       sanitizedEmbedding,
       thumbnailKey,
       nextStage,
@@ -127,5 +139,42 @@ export class UpdateReelStatusUseCase {
     }
 
     return { valid: true };
+  }
+
+  private normalizeTranscriptSegments(
+    segments?: TranscriptSegment[],
+  ): TranscriptSegment[] | undefined {
+    if (!Array.isArray(segments)) {
+      return undefined;
+    }
+
+    const sanitized = segments.flatMap((segment) => {
+      if (!segment || typeof segment !== 'object') {
+        return [];
+      }
+
+      const start = Number(segment.start);
+      const end = Number(segment.end);
+      const text = typeof segment.text === 'string' ? segment.text.trim() : '';
+
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        text.length === 0
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          ...segment,
+          start,
+          end,
+          text,
+        },
+      ];
+    });
+
+    return sanitized.length > 0 ? sanitized : undefined;
   }
 }

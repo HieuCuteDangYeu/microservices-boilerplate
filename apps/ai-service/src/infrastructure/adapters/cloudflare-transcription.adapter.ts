@@ -1,6 +1,13 @@
+import {
+  TranscriptSegment,
+  TranscriptionResult,
+} from '@common/ai/interfaces/transcription-result.interface';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { ITranscriptionService } from '../../domain/interfaces/transcription.service.interface';
+import type {
+  ITranscriptionService,
+  TranscriptionOptions,
+} from '../../domain/interfaces/transcription.service.interface';
 
 interface CloudflareAiError {
   message?: string;
@@ -15,6 +22,13 @@ interface CloudflareAiResponse<T> {
 
 interface CloudflareTranscriptionResult {
   text?: string;
+  vtt?: string;
+  segments?: unknown[];
+  word_count?: number;
+  transcription_info?: {
+    text?: string;
+    word_count?: number;
+  };
 }
 
 @Injectable()
@@ -40,7 +54,10 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
     this.endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${this.model}`;
   }
 
-  async transcribeAudio(audioBuffer: Buffer): Promise<string> {
+  async transcribeAudio(
+    audioBuffer: Buffer,
+    options?: TranscriptionOptions,
+  ): Promise<TranscriptionResult> {
     const response = await fetch(this.endpoint, {
       method: 'POST',
       headers: {
@@ -51,6 +68,14 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
         audio: audioBuffer.toString('base64'),
         task: 'transcribe',
         ...(this.language ? { language: this.language } : {}),
+        // Reels often include silence, music, and fast cuts. These settings
+        // reduce hallucinated carry-over and help focus on spoken audio.
+        vad_filter: true,
+        condition_on_previous_text: false,
+        hallucination_silence_threshold: 2,
+        ...(options?.initialPrompt
+          ? { initial_prompt: options.initialPrompt }
+          : {}),
       }),
     });
 
@@ -63,13 +88,33 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
       );
     }
 
-    if (!payload.success || !payload.result?.text) {
+    if (!payload.success || !payload.result) {
       throw new Error(
         `Cloudflare Workers AI transcription failed: ${this.extractErrorMessage(payload, rawBody)}`,
       );
     }
 
-    return payload.result.text;
+    const text =
+      payload.result.text?.trim() ||
+      payload.result.transcription_info?.text?.trim();
+
+    if (!text) {
+      throw new Error('Cloudflare Workers AI transcription returned no text');
+    }
+
+    const vtt = payload.result.vtt?.trim() || undefined;
+    const segments = this.normalizeSegments(payload.result.segments);
+    const wordCount =
+      payload.result.word_count ??
+      payload.result.transcription_info?.word_count ??
+      undefined;
+
+    return {
+      text,
+      vtt,
+      segments: segments.length > 0 ? segments : undefined,
+      wordCount,
+    };
   }
 
   private parseResponse(
@@ -103,5 +148,41 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
     }
 
     return 'Unknown Cloudflare Workers AI error';
+  }
+
+  private normalizeSegments(rawSegments?: unknown[]): TranscriptSegment[] {
+    if (!Array.isArray(rawSegments)) {
+      return [];
+    }
+
+    return rawSegments.flatMap((rawSegment) => {
+      if (!rawSegment || typeof rawSegment !== 'object') {
+        return [];
+      }
+
+      const segment = rawSegment as Record<string, unknown>;
+      const start = Number(segment['start']);
+      const end = Number(segment['end']);
+      const text =
+        typeof segment['text'] === 'string' ? segment['text'].trim() : '';
+
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        text.length === 0
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          ...segment,
+          id: typeof segment['id'] === 'number' ? segment['id'] : undefined,
+          start,
+          end,
+          text,
+        } satisfies TranscriptSegment,
+      ];
+    });
   }
 }

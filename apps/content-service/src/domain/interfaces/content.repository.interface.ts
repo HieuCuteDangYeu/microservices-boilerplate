@@ -1,3 +1,4 @@
+import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Reel } from '../entities/reel.entity';
 
@@ -23,6 +24,8 @@ export interface IContentRepository {
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
     transcript?: string,
+    transcriptVtt?: string,
+    transcriptSegments?: TranscriptSegment[],
     embedding?: number[],
     thumbnailKey?: string,
     processingStage?: string,
