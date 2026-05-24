@@ -1,8 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
 
 @Injectable()
 export class UpdateReelStatusUseCase {
+  private readonly logger = new Logger(UpdateReelStatusUseCase.name);
+
   constructor(
     @Inject('IContentRepository')
     private readonly contentRepository: IContentRepository,
@@ -14,34 +16,79 @@ export class UpdateReelStatusUseCase {
     transcript?: string,
     embedding?: number[],
     thumbnailKey?: string,
+    processingStage?: string,
+    processingMessage?: string,
+    processingProgress?: number,
   ) {
+    let sanitizedTranscript = transcript;
+    let sanitizedEmbedding = embedding;
+    let nextStage = processingStage;
+    let nextMessage = processingMessage;
+    let nextProgress = this.normalizeProgress(processingProgress);
+
     if (status === 'COMPLETED') {
       if (!transcript || transcript.trim() === '') {
-        throw new Error(
-          `Reel ${reelId}: cannot mark COMPLETED — transcript is missing or empty`,
+        sanitizedTranscript = undefined;
+        this.logger.warn(
+          `Reel ${reelId}: completing without transcript because transcript is missing or empty`,
         );
+      } else {
+        const quality = this.validateTranscriptQuality(transcript);
+        if (!quality.valid) {
+          sanitizedTranscript = undefined;
+          this.logger.warn(
+            `Reel ${reelId}: completing without transcript because transcript quality check failed: "${quality.reason}"`,
+          );
+        }
       }
+
       if (!embedding || embedding.length === 0) {
-        throw new Error(
-          `Reel ${reelId}: cannot mark COMPLETED — embedding is missing or empty`,
+        sanitizedEmbedding = undefined;
+        this.logger.warn(
+          `Reel ${reelId}: completing without embedding because embedding is missing or empty`,
         );
       }
 
-      const quality = this.validateTranscriptQuality(transcript);
-      if (!quality.valid) {
-        throw new Error(
-          `Reel ${reelId}: cannot mark COMPLETED — transcript quality check failed: "${quality.reason}"`,
-        );
-      }
+      nextStage ??= 'READY';
+      nextMessage ??= 'Video is ready to watch';
+      nextProgress ??= 100;
+    }
+
+    if (status === 'PENDING') {
+      nextStage ??= 'QUEUED';
+      nextMessage ??= 'Queued for processing';
+      nextProgress ??= 0;
+    }
+
+    if (status === 'PROCESSING') {
+      nextStage ??= 'PROCESSING';
+      nextMessage ??= 'Video is being processed';
+      nextProgress ??= 10;
+    }
+
+    if (status === 'FAILED') {
+      nextStage ??= 'FAILED';
+      nextMessage ??= 'Video processing failed';
     }
 
     return await this.contentRepository.updateReelStatus(
       reelId,
       status,
-      transcript,
-      embedding,
+      sanitizedTranscript,
+      sanitizedEmbedding,
       thumbnailKey,
+      nextStage,
+      nextMessage,
+      nextProgress,
     );
+  }
+
+  private normalizeProgress(progress?: number): number | undefined {
+    if (progress === undefined || !Number.isFinite(progress)) {
+      return undefined;
+    }
+
+    return Math.min(100, Math.max(0, Math.round(progress)));
   }
 
   private validateTranscriptQuality(transcript: string): {

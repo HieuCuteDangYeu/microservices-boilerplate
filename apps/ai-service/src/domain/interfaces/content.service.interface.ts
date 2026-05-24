@@ -1,8 +1,15 @@
 export interface TranscriptMatch {
-  transcript: string;
+  reelId: string;
+  title?: string;
+  description?: string;
+  tags: string[];
+  transcript?: string;
   distance: number;
 }
 
 export interface IContentService {
-  searchTranscripts(queryVector: number[]): Promise<TranscriptMatch[]>;
+  searchReelContext(
+    queryVector: number[],
+    userId: string,
+  ): Promise<TranscriptMatch[]>;
 }

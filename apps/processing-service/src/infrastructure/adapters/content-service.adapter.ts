@@ -38,6 +38,9 @@ export class ContentServiceAdapter implements IContentService {
   async emitProcessingStarted(data: {
     reelId: string;
     status: 'PROCESSING';
+    stage?: string;
+    message?: string;
+    progress?: number;
   }): Promise<void> {
     try {
       await firstValueFrom(
@@ -50,12 +53,33 @@ export class ContentServiceAdapter implements IContentService {
     }
   }
 
+  async emitProcessingProgress(data: {
+    reelId: string;
+    status: 'PROCESSING';
+    stage?: string;
+    message?: string;
+    progress?: number;
+  }): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.messageBroker.emit('reel.processing_progress', data),
+      );
+    } catch (error: unknown) {
+      throw new Error(
+        `Failed to emit reel.processing_progress: ${this.describeError(error)}`,
+      );
+    }
+  }
+
   async emitProcessingCompleted(data: {
     reelId: string;
     status: 'COMPLETED';
     transcript?: string;
     embedding?: number[];
     thumbnailKey?: string;
+    stage?: string;
+    message?: string;
+    progress?: number;
   }): Promise<void> {
     try {
       await firstValueFrom(
@@ -71,6 +95,9 @@ export class ContentServiceAdapter implements IContentService {
   async emitProcessingFailed(data: {
     reelId: string;
     status: 'FAILED';
+    stage?: string;
+    message?: string;
+    progress?: number;
   }): Promise<void> {
     try {
       await firstValueFrom(

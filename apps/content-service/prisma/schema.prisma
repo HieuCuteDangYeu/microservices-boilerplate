@@ -1,6 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../../node_modules/@prisma/content-client"
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/@prisma/content-client"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
@@ -17,20 +17,23 @@ enum ProcessingStatus {
 }
 
 model Reel {
-  id           String   @id @default(uuid())
-  userId       String
-  mediaKey     String
-  title        String?
-  description  String?
-  tags         String[]
-  status       ProcessingStatus @default(PENDING)
-  visibility   String   @default("public")
-  viewCount    BigInt   @default(0)
-  transcript   String?  @db.Text
-  embedding    Unsupported("vector(384)")?
-  thumbnailKey String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 String                      @id @default(uuid())
+  userId             String
+  mediaKey           String
+  title              String?
+  description        String?
+  tags               String[]
+  status             ProcessingStatus            @default(PENDING)
+  visibility         String                      @default("public")
+  viewCount          BigInt                      @default(0)
+  transcript         String?                     @db.Text
+  embedding          Unsupported("vector(384)")?
+  thumbnailKey       String?
+  processingStage    String?
+  processingMessage  String?                     @db.Text
+  processingProgress Int?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
 
   @@index([userId])
   @@index([visibility, createdAt(sort: Desc)])

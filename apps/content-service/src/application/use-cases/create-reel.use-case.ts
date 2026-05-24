@@ -31,6 +31,9 @@ export class CreateReelUseCase {
       ...payload,
       userId,
       status: 'PENDING',
+      processingStage: 'QUEUED',
+      processingMessage: 'Queued for processing',
+      processingProgress: 0,
     });
 
     try {
@@ -38,6 +41,9 @@ export class CreateReelUseCase {
         reelId: savedReel.id,
         mediaKey: savedReel.mediaKey,
         userId: userId,
+        title: savedReel.title,
+        description: savedReel.description,
+        tags: savedReel.tags,
       });
     } catch (error: unknown) {
       const failedReel = await this.contentRepository.updateReelStatus(

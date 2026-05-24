@@ -13,7 +13,15 @@ export class ProcessingController {
 
   @EventPattern('reel.created')
   async handleReelCreated(
-    @Payload() data: { reelId: string; mediaKey: string; userId: string },
+    @Payload()
+    data: {
+      reelId: string;
+      mediaKey: string;
+      userId: string;
+      title?: string;
+      description?: string;
+      tags?: string[];
+    },
   ) {
     await this.processReelUseCase.execute(data);
   }

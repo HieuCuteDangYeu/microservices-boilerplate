@@ -1,3 +1,4 @@
+import { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import type { IEmbeddingService } from '../../domain/interfaces/embedding.service.interface';
 
@@ -8,7 +9,7 @@ export class GenerateEmbeddingUseCase {
     private readonly embeddingService: IEmbeddingService,
   ) {}
 
-  async execute(text: string): Promise<number[]> {
-    return await this.embeddingService.generateVector(text);
+  async execute(input: GenerateEmbeddingRequest): Promise<number[]> {
+    return await this.embeddingService.generateVector(input);
   }
 }

@@ -1,4 +1,4 @@
-import { TranscriptSearchResult } from '@common/content/interfaces/transcript-search-result.interface';
+import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Reel } from '../entities/reel.entity';
 
 export interface ReelListQuery {
@@ -25,9 +25,15 @@ export interface IContentRepository {
     transcript?: string,
     embedding?: number[],
     thumbnailKey?: string,
+    processingStage?: string,
+    processingMessage?: string,
+    processingProgress?: number,
   ): Promise<Reel>;
   findById(id: string): Promise<Reel | null>;
-  searchTranscripts(queryVector: number[]): Promise<TranscriptSearchResult[]>;
+  searchReelContext(
+    queryVector: number[],
+    userId: string,
+  ): Promise<ReelContextSearchResult[]>;
   listReels(query: ReelListQuery): Promise<{
     items: Reel[];
     nextCursor: { createdAt: Date; id: string } | null;

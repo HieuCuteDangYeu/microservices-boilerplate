@@ -10,6 +10,7 @@ import { R2Service } from '../../infrastructure/services/r2.service';
 @Injectable()
 export class ProcessReelUseCase {
   private readonly logger = new Logger(ProcessReelUseCase.name);
+  private readonly defaultTags: string[] = [];
 
   private describeError(error: unknown): {
     message: string;
@@ -46,7 +47,125 @@ export class ProcessReelUseCase {
     @Inject('IContentService') private readonly contentService: IContentService,
   ) {}
 
-  async execute(data: { reelId: string; mediaKey: string; userId: string }) {
+  private buildEmbeddingDocument(
+    data: {
+      title?: string;
+      description?: string;
+      tags?: string[];
+    },
+    transcript?: string,
+  ): { text: string; title?: string } | null {
+    const title = data.title?.trim() || undefined;
+    const description = data.description?.trim() || undefined;
+    const tags = (data.tags ?? this.defaultTags).filter(
+      (tag) => tag.trim().length > 0,
+    );
+    const transcriptText = transcript?.trim() || undefined;
+
+    const sections = [
+      title ? `Title: ${title}` : undefined,
+      description ? `Description: ${description}` : undefined,
+      tags.length > 0 ? `Tags: ${tags.join(', ')}` : undefined,
+      transcriptText ? `Transcript:\n${transcriptText}` : undefined,
+    ].filter((value): value is string => Boolean(value));
+
+    if (sections.length === 0) {
+      return null;
+    }
+
+    return {
+      text: sections.join('\n\n'),
+      title,
+    };
+  }
+
+  private async emitProgress(data: {
+    reelId: string;
+    stage: string;
+    message: string;
+    progress: number;
+  }): Promise<void> {
+    try {
+      await this.contentService.emitProcessingProgress({
+        reelId: data.reelId,
+        status: 'PROCESSING',
+        stage: data.stage,
+        message: data.message,
+        progress: data.progress,
+      });
+    } catch (error: unknown) {
+      const { message, stack } = this.describeError(error);
+      this.logger.warn(
+        `[Reel ${data.reelId}] Failed to publish processing progress: ${message}`,
+        stack,
+      );
+    }
+  }
+
+  private async buildAiMetadata(
+    data: {
+      reelId: string;
+      title?: string;
+      description?: string;
+      tags?: string[];
+    },
+    inputPath: string,
+    audioPath: string,
+  ): Promise<{ transcript?: string; embedding?: number[] }> {
+    let transcript: string | undefined;
+
+    try {
+      await this.ffmpegService.extractAudio(inputPath, audioPath);
+      const audioBuffer = fs.readFileSync(audioPath);
+
+      if (fs.existsSync(audioPath)) {
+        fs.unlinkSync(audioPath);
+      }
+
+      transcript = await this.aiService.transcribeAudio(audioBuffer);
+      this.logger.log(`[Reel ${data.reelId}] Audio transcription completed`);
+    } catch (error: unknown) {
+      const { message, stack } = this.describeError(error);
+      this.logger.warn(
+        `[Reel ${data.reelId}] Audio transcription failed, continuing with metadata-only indexing if available: ${message}`,
+        stack,
+      );
+    } finally {
+      if (fs.existsSync(audioPath)) {
+        fs.unlinkSync(audioPath);
+      }
+    }
+
+    const embeddingDocument = this.buildEmbeddingDocument(data, transcript);
+    if (!embeddingDocument) {
+      return transcript ? { transcript } : {};
+    }
+
+    try {
+      const embedding = await this.aiService.generateEmbedding({
+        text: embeddingDocument.text,
+        taskType: 'RETRIEVAL_DOCUMENT',
+        title: embeddingDocument.title,
+      });
+      return { transcript, embedding };
+    } catch (error: unknown) {
+      const { message, stack } = this.describeError(error);
+      this.logger.warn(
+        `[Reel ${data.reelId}] Embedding generation failed, continuing without embedding: ${message}`,
+        stack,
+      );
+      return transcript ? { transcript } : {};
+    }
+  }
+
+  async execute(data: {
+    reelId: string;
+    mediaKey: string;
+    userId: string;
+    title?: string;
+    description?: string;
+    tags?: string[];
+  }) {
     const { reelId, mediaKey } = data;
     this.logger.log(`[Reel ${reelId}] Received processing job for ${mediaKey}`);
 
@@ -57,25 +176,50 @@ export class ProcessReelUseCase {
     const thumbnailPath = path.join(workDir, 'thumbnail.jpg');
 
     let thumbnailKey: string | undefined;
+    let currentProgress = 10;
 
     try {
       // Immediately signal PROCESSING so client can show progress
       await this.contentService.emitProcessingStarted({
         reelId,
         status: 'PROCESSING',
+        stage: 'DOWNLOADING',
+        message: 'Downloading source video',
+        progress: currentProgress,
       });
 
       await this.r2Service.downloadVideo(mediaKey, inputPath);
       this.logger.log(`[Reel ${reelId}] Downloaded source video`);
+      currentProgress = 30;
+      await this.emitProgress({
+        reelId,
+        stage: 'TRANSCODING',
+        message: 'Transcoding video for streaming',
+        progress: currentProgress,
+      });
 
       await this.ffmpegService.transcodeToHls(inputPath, hlsOutputDir);
       this.logger.log(`[Reel ${reelId}] Transcoded to HLS`);
 
       const s3Prefix = mediaKey.replace(/\.[^.]+$/, '');
+      currentProgress = 60;
+      await this.emitProgress({
+        reelId,
+        stage: 'UPLOADING_STREAM',
+        message: 'Uploading streaming files',
+        progress: currentProgress,
+      });
       await this.r2Service.uploadHlsDirectory(hlsOutputDir, s3Prefix);
       this.logger.log(`[Reel ${reelId}] Uploaded HLS files to ${s3Prefix}`);
 
       // Extract thumbnail at 2s mark
+      currentProgress = 75;
+      await this.emitProgress({
+        reelId,
+        stage: 'GENERATING_THUMBNAIL',
+        message: 'Generating reel thumbnail',
+        progress: currentProgress,
+      });
       await this.ffmpegService.extractThumbnail(inputPath, thumbnailPath);
       thumbnailKey = `${s3Prefix}/thumbnail.jpg`;
       await this.r2Service.uploadThumbnail(thumbnailPath, thumbnailKey);
@@ -85,21 +229,29 @@ export class ProcessReelUseCase {
       fs.rmSync(hlsOutputDir, { recursive: true, force: true });
       if (fs.existsSync(thumbnailPath)) fs.unlinkSync(thumbnailPath);
 
-      await this.ffmpegService.extractAudio(inputPath, audioPath);
-      const audioBuffer = fs.readFileSync(audioPath);
-      if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+      currentProgress = 90;
+      await this.emitProgress({
+        reelId,
+        stage: 'AI_ENRICHMENT',
+        message: 'Indexing reel for AI search',
+        progress: currentProgress,
+      });
 
-      const transcriptText = await this.aiService.transcribeAudio(audioBuffer);
-      this.logger.log(`[Reel ${reelId}] Audio transcription completed`);
-
-      const embedding = await this.aiService.generateEmbedding(transcriptText);
+      const { transcript, embedding } = await this.buildAiMetadata(
+        data,
+        inputPath,
+        audioPath,
+      );
 
       await this.contentService.emitProcessingCompleted({
         reelId,
         status: 'COMPLETED',
-        transcript: transcriptText,
-        embedding: embedding,
+        transcript,
+        embedding,
         thumbnailKey,
+        stage: 'READY',
+        message: 'Video is ready to watch',
+        progress: 100,
       });
       this.logger.log(`[Reel ${reelId}] Processing completed successfully`);
     } catch (error: unknown) {
@@ -113,6 +265,9 @@ export class ProcessReelUseCase {
         await this.contentService.emitProcessingFailed({
           reelId,
           status: 'FAILED',
+          stage: 'FAILED',
+          message: 'Video processing failed',
+          progress: currentProgress,
         });
       } catch (emitError: unknown) {
         const { message: emitMessage, stack: emitStack } =

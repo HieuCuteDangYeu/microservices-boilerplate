@@ -1,3 +1,5 @@
+import { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+
 export interface IEmbeddingService {
-  generateVector(text: string): Promise<number[]>;
+  generateVector(input: GenerateEmbeddingRequest): Promise<number[]>;
 }
