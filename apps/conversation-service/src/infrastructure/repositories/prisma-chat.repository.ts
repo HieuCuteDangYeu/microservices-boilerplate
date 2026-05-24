@@ -601,7 +601,7 @@ export class PrismaChatRepository implements IChatRepository {
     });
 
     await this.clearConversationCache(updatedMessage.conversationId);
-    return this.hydrateReadableMessageContent(ChatMapper.toDomain(updatedMessage));
+    return this.hydrateReactionUpdateMessage(ChatMapper.toDomain(updatedMessage));
   }
 
   async removeReaction(messageId: string, userId: string): Promise<Message> {
@@ -620,7 +620,7 @@ export class PrismaChatRepository implements IChatRepository {
 
     const reactions = this.normalizeReactions(existingMessage.reactions);
     if (!reactions || !reactions[userId]) {
-      return this.hydrateReadableMessageContent(ChatMapper.toDomain(existingMessage));
+      return this.hydrateReactionUpdateMessage(ChatMapper.toDomain(existingMessage));
     }
 
     const remainingReactions = { ...reactions };
@@ -637,7 +637,7 @@ export class PrismaChatRepository implements IChatRepository {
     });
 
     await this.clearConversationCache(updatedMessage.conversationId);
-    return this.hydrateReadableMessageContent(ChatMapper.toDomain(updatedMessage));
+    return this.hydrateReactionUpdateMessage(ChatMapper.toDomain(updatedMessage));
   }
 
   async recallMessage(
@@ -1104,6 +1104,12 @@ export class PrismaChatRepository implements IChatRepository {
 
     message.content = this.encryptionRepository.decrypt(message.content);
     return message;
+  }
+
+  private hydrateReactionUpdateMessage(message: Message): Message {
+    const hydratedMessage = this.hydrateReadableMessageContent(message);
+    hydratedMessage.reactions = hydratedMessage.reactions ?? {};
+    return hydratedMessage;
   }
 
   private getReplyPreviewContent(message: {
