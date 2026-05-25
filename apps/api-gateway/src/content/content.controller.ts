@@ -1,7 +1,9 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
+import { GetReelContextQueryDto } from '@common/content/dtos/get-reel-context.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
 import { UpdateReelDto } from '@common/content/dtos/update-reel.dto';
+import { ReelProfileContextResponse } from '@common/content/interfaces/reel-context-response.interface';
 import { ReelProcessingStatus } from '@common/content/interfaces/reel-processing-status.interface';
 import {
   PaginatedReels,
@@ -33,7 +35,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { catchError, lastValueFrom } from 'rxjs';
+import { catchError, lastValueFrom, of } from 'rxjs';
 import { ReelAuthorService } from './reel-author.service';
 
 @ApiTags('Content')
@@ -106,15 +108,8 @@ export class ContentController {
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
 
-    const authorsById = await this.reelAuthorService.loadAuthorMap(
-      result.items.map((reel) => reel.userId),
-    );
-
     return {
-      items: result.items.map((reel) => ({
-        ...this._enrichReel(reel),
-        author: this.reelAuthorService.resolveAuthor(authorsById, reel.userId),
-      })),
+      items: await this.enrichFeedItems(result.items),
       nextCursor: result.nextCursor,
     };
   }
@@ -145,13 +140,55 @@ export class ContentController {
     }
 
     // Increment view count only after visibility check passes
-    await lastValueFrom(
-      this.contentClient
-        .send<{ success: boolean }>('content.increment_reel_view', { reelId })
-        .pipe(catchError(() => [])),
-    );
+    await this.incrementReelViewQuietly(reelId);
 
     return this._enrichReel(reel, { includeTranscript: true });
+  }
+
+  @Get('reels/:id/context')
+  @ApiOperation({ summary: 'Get contextual profile reel feed around a reel' })
+  async getReelContext(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+    @Query() query: GetReelContextQueryDto,
+  ): Promise<ReelProfileContextResponse> {
+    const context = await lastValueFrom(
+      this.contentClient
+        .send<{
+          source: 'profile';
+          scope: { userId: string; visibility: 'public' | 'private' };
+          selectedId: string;
+          selectedIndex: number;
+          items: Reel[];
+          previousCursor: string | null;
+          nextCursor: string | null;
+        }>('content.get_profile_reel_context', {
+          reelId,
+          before: query.before,
+          after: query.after,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    if (
+      context.scope.visibility === 'private' &&
+      context.scope.userId !== request.user!.id &&
+      !request.user!.roles?.includes('ADMIN')
+    ) {
+      throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
+    }
+
+    await this.incrementReelViewQuietly(reelId);
+
+    return {
+      source: 'profile',
+      scope: context.scope,
+      selectedId: context.selectedId,
+      selectedIndex: context.selectedIndex,
+      items: await this.enrichFeedItems(context.items),
+      previousCursor: context.previousCursor,
+      nextCursor: context.nextCursor,
+    };
   }
 
   @Get('reels/:id/status')
@@ -293,6 +330,25 @@ export class ContentController {
     }
 
     return result;
+  }
+
+  private async enrichFeedItems(reels: Reel[]): Promise<ReelFeedListItem[]> {
+    const authorsById = await this.reelAuthorService.loadAuthorMap(
+      reels.map((reel) => reel.userId),
+    );
+
+    return reels.map((reel) => ({
+      ...this._enrichReel(reel),
+      author: this.reelAuthorService.resolveAuthor(authorsById, reel.userId),
+    }));
+  }
+
+  private async incrementReelViewQuietly(reelId: string): Promise<void> {
+    await lastValueFrom(
+      this.contentClient
+        .send<{ success: boolean }>('content.increment_reel_view', { reelId })
+        .pipe(catchError(() => of({ success: false }))),
+    );
   }
 
   private buildStreamUrl(mediaKey: string): string {

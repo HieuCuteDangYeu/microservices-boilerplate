@@ -1,6 +1,7 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
+import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
@@ -29,6 +30,7 @@ export class ContentController {
     private readonly createReelUseCase: CreateReelUseCase,
     private readonly listReelsUseCase: ListReelsUseCase,
     private readonly getReelUseCase: GetReelUseCase,
+    private readonly getProfileReelContextUseCase: GetProfileReelContextUseCase,
     private readonly incrementReelViewUseCase: IncrementReelViewUseCase,
     private readonly updateReelUseCase: UpdateReelUseCase,
     private readonly deleteReelUseCase: DeleteReelUseCase,
@@ -58,6 +60,15 @@ export class ContentController {
       createdAt: reel.createdAt,
       updatedAt: reel.updatedAt,
     };
+  }
+
+  private serializeCursor(
+    cursor: {
+      createdAt: Date;
+      id: string;
+    } | null,
+  ): string | null {
+    return cursor ? `${cursor.createdAt.toISOString()}|${cursor.id}` : null;
   }
 
   @MessagePattern('content.create_reel')
@@ -273,6 +284,68 @@ export class ContentController {
     }
   }
 
+  @MessagePattern('content.get_profile_reel_context')
+  async getProfileReelContext(
+    @Payload()
+    data: {
+      reelId: string;
+      before?: number;
+      after?: number;
+    },
+  ) {
+    if (
+      !data ||
+      typeof data.reelId !== 'string' ||
+      (data.before !== undefined &&
+        (!Number.isInteger(data.before) || data.before < 0)) ||
+      (data.after !== undefined &&
+        (!Number.isInteger(data.after) || data.after < 0))
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for profile reel context',
+      });
+    }
+
+    try {
+      const context = await this.getProfileReelContextUseCase.execute(
+        data.reelId,
+        data.before ?? 1,
+        data.after ?? 5,
+      );
+
+      if (!context) {
+        throw new RpcException({
+          statusCode: 404,
+          message: 'Reel not found',
+        });
+      }
+
+      return {
+        source: 'profile' as const,
+        scope: {
+          userId: context.anchorUserId,
+          visibility: context.anchorVisibility,
+        },
+        selectedId: context.selectedId,
+        selectedIndex: context.selectedIndex,
+        items: context.items.map((item) => this.toSerializable(item)),
+        previousCursor: this.serializeCursor(context.previousCursor),
+        nextCursor: this.serializeCursor(context.nextCursor),
+      };
+    } catch (error: unknown) {
+      if (error instanceof RpcException) {
+        throw error;
+      }
+
+      const err = error as Error;
+      throw new RpcException({
+        statusCode: 500,
+        message: `Get Profile Reel Context Error: ${err.message}`,
+      });
+    }
+  }
+
   @MessagePattern('content.list_reels')
   async listReels(
     @Payload()
@@ -301,9 +374,7 @@ export class ContentController {
       const result = await this.listReelsUseCase.execute(query);
       return {
         items: result.items.map((r) => this.toSerializable(r)),
-        nextCursor: result.nextCursor
-          ? `${result.nextCursor.createdAt.toISOString()}|${result.nextCursor.id}`
-          : null,
+        nextCursor: this.serializeCursor(result.nextCursor),
       };
     } catch (error: unknown) {
       const err = error as Error;

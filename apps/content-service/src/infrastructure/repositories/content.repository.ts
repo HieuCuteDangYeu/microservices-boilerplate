@@ -5,7 +5,10 @@ import { PrismaClient } from '@prisma/content-client';
 import { Reel } from '../../domain/entities/reel.entity';
 import {
   IContentRepository,
+  ReelCursor,
   ReelListQuery,
+  ReelProfileContextQuery,
+  ReelProfileContextResult,
   ReelUpdateData,
 } from '../../domain/interfaces/content.repository.interface';
 
@@ -14,6 +17,24 @@ export class ContentRepository
   extends PrismaClient
   implements OnModuleInit, IContentRepository
 {
+  private readonly reelListSelect = {
+    id: true,
+    userId: true,
+    mediaKey: true,
+    title: true,
+    description: true,
+    tags: true,
+    status: true,
+    visibility: true,
+    viewCount: true,
+    thumbnailKey: true,
+    processingStage: true,
+    processingMessage: true,
+    processingProgress: true,
+    createdAt: true,
+    updatedAt: true,
+  } as const;
+
   async onModuleInit() {
     await this.$connect();
   }
@@ -144,7 +165,7 @@ export class ContentRepository
 
   async listReels(query: ReelListQuery): Promise<{
     items: Reel[];
-    nextCursor: { createdAt: Date; id: string } | null;
+    nextCursor: ReelCursor | null;
   }> {
     const limit = query.limit ?? 20;
     const where: Record<string, unknown> = {};
@@ -172,24 +193,8 @@ export class ContentRepository
       where,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       take: limit + 1,
-      select: {
-        id: true,
-        userId: true,
-        mediaKey: true,
-        title: true,
-        description: true,
-        tags: true,
-        status: true,
-        visibility: true,
-        viewCount: true,
-        thumbnailKey: true,
-        processingStage: true,
-        processingMessage: true,
-        processingProgress: true,
-        createdAt: true,
-        updatedAt: true,
-        // transcript, timed transcript, and embedding are excluded from list query
-      },
+      // transcript, timed transcript, and embedding are excluded from list query
+      select: this.reelListSelect,
     });
 
     const hasMore = records.length > limit;
@@ -206,6 +211,83 @@ export class ContentRepository
         : null;
 
     return { items, nextCursor };
+  }
+
+  async getProfileReelContext(
+    query: ReelProfileContextQuery,
+  ): Promise<ReelProfileContextResult> {
+    const scopeWhere: Record<string, unknown> = {
+      userId: query.anchor.userId,
+      visibility: query.anchor.visibility,
+    };
+
+    if (query.anchor.visibility === 'public') {
+      scopeWhere['status'] = 'COMPLETED';
+    }
+
+    const [beforeRecords, afterRecords] = await Promise.all([
+      this.reel.findMany({
+        where: {
+          ...scopeWhere,
+          OR: [
+            { createdAt: { gt: query.anchor.createdAt } },
+            {
+              createdAt: query.anchor.createdAt,
+              id: { lt: query.anchor.id },
+            },
+          ],
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'desc' }],
+        take: query.before + 1,
+        select: this.reelListSelect,
+      }),
+      this.reel.findMany({
+        where: {
+          ...scopeWhere,
+          OR: [
+            { createdAt: { lt: query.anchor.createdAt } },
+            {
+              createdAt: query.anchor.createdAt,
+              id: { gt: query.anchor.id },
+            },
+          ],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        take: query.after + 1,
+        select: this.reelListSelect,
+      }),
+    ]);
+
+    const hasMoreBefore = beforeRecords.length > query.before;
+    const hasMoreAfter = afterRecords.length > query.after;
+
+    const beforeItems = beforeRecords
+      .slice(0, query.before)
+      .map((record) =>
+        this.toDomain(record as unknown as Record<string, unknown>),
+      )
+      .reverse();
+    const afterItems = afterRecords
+      .slice(0, query.after)
+      .map((record) =>
+        this.toDomain(record as unknown as Record<string, unknown>),
+      );
+
+    const items = [...beforeItems, query.anchor, ...afterItems];
+
+    return {
+      items,
+      selectedIndex: beforeItems.length,
+      previousCursor: hasMoreBefore ? this.toCursor(items[0]) : null,
+      nextCursor: hasMoreAfter ? this.toCursor(items[items.length - 1]) : null,
+    };
+  }
+
+  private toCursor(reel: Pick<Reel, 'createdAt' | 'id'>): ReelCursor {
+    return {
+      createdAt: reel.createdAt,
+      id: reel.id,
+    };
   }
 
   async updateReel(

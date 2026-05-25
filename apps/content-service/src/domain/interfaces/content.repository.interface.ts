@@ -18,6 +18,24 @@ export interface ReelUpdateData {
   visibility?: 'public' | 'private';
 }
 
+export interface ReelCursor {
+  createdAt: Date;
+  id: string;
+}
+
+export interface ReelProfileContextQuery {
+  anchor: Reel;
+  before: number;
+  after: number;
+}
+
+export interface ReelProfileContextResult {
+  items: Reel[];
+  selectedIndex: number;
+  previousCursor: ReelCursor | null;
+  nextCursor: ReelCursor | null;
+}
+
 export interface IContentRepository {
   createReel(reel: Partial<Reel>): Promise<Reel>;
   updateReelStatus(
@@ -39,8 +57,11 @@ export interface IContentRepository {
   ): Promise<ReelContextSearchResult[]>;
   listReels(query: ReelListQuery): Promise<{
     items: Reel[];
-    nextCursor: { createdAt: Date; id: string } | null;
+    nextCursor: ReelCursor | null;
   }>;
+  getProfileReelContext(
+    query: ReelProfileContextQuery,
+  ): Promise<ReelProfileContextResult>;
   updateReel(
     id: string,
     data: ReelUpdateData,
