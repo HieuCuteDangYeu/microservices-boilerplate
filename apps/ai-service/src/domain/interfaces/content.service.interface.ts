@@ -1,11 +1,6 @@
-export interface TranscriptMatch {
-  reelId: string;
-  title?: string;
-  description?: string;
-  tags: string[];
-  transcript?: string;
-  distance: number;
-}
+import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+
+export type TranscriptMatch = ReelContextSearchResult;
 
 export interface IContentService {
   searchReelContext(

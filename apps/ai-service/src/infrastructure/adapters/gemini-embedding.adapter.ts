@@ -1,4 +1,9 @@
-import { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+// apps/ai-service/src/infrastructure/adapters/gemini-embedding.adapter.ts
+
+import {
+  GenerateEmbeddingRequest,
+  GenerateEmbeddingResult,
+} from '@common/ai/interfaces/generate-embedding.interface';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IEmbeddingService } from '../../domain/interfaces/embedding.service.interface';
@@ -16,28 +21,35 @@ interface GeminiEmbedResponse {
 export class GeminiEmbeddingAdapter implements IEmbeddingService {
   private readonly apiKey: string;
   private readonly endpoint: string;
+  private readonly model: string;
   private readonly outputDimensionality: number;
 
   constructor(private readonly configService: ConfigService) {
     this.apiKey = this.configService.getOrThrow<string>('GEMINI_API_KEY');
+
     const configuredModel =
       this.configService.get<string>('GEMINI_EMBEDDING_MODEL') ||
       'models/gemini-embedding-001';
-    const model = configuredModel.startsWith('models/')
+
+    this.model = configuredModel.startsWith('models/')
       ? configuredModel
       : `models/${configuredModel}`;
-    this.endpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:embedContent`;
+
+    this.endpoint = `https://generativelanguage.googleapis.com/v1beta/${this.model}:embedContent`;
 
     const configuredDimensions = Number(
       this.configService.get<string>('GEMINI_EMBEDDING_DIMENSIONS') ?? '384',
     );
+
     this.outputDimensionality =
       Number.isFinite(configuredDimensions) && configuredDimensions > 0
         ? Math.round(configuredDimensions)
         : 384;
   }
 
-  async generateVector(input: GenerateEmbeddingRequest): Promise<number[]> {
+  async generateVector(
+    input: GenerateEmbeddingRequest,
+  ): Promise<GenerateEmbeddingResult> {
     const text = input.text.trim();
 
     if (text.length === 0) {
@@ -71,13 +83,21 @@ export class GeminiEmbeddingAdapter implements IEmbeddingService {
     }
 
     const vector = payload.embedding?.values;
+
     if (!Array.isArray(vector) || vector.length === 0) {
       throw new Error('Gemini embedding request returned an empty vector');
     }
 
-    return this.outputDimensionality === 3072
-      ? vector
-      : this.normalizeVector(vector);
+    const values =
+      this.outputDimensionality === 3072
+        ? vector
+        : this.normalizeVector(vector);
+
+    return {
+      values,
+      model: this.model.replace(/^models\//, ''),
+      dimensions: values.length,
+    };
   }
 
   private normalizeVector(vector: number[]): number[] {

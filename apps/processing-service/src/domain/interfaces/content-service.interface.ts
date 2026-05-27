@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 
 export interface IContentService {
   emitProcessingStarted(data: {
@@ -8,6 +9,7 @@ export interface IContentService {
     message?: string;
     progress?: number;
   }): Promise<void>;
+
   emitProcessingProgress(data: {
     reelId: string;
     status: 'PROCESSING';
@@ -15,6 +17,7 @@ export interface IContentService {
     message?: string;
     progress?: number;
   }): Promise<void>;
+
   emitProcessingCompleted(data: {
     reelId: string;
     status: 'COMPLETED';
@@ -22,6 +25,7 @@ export interface IContentService {
     transcriptVtt?: string;
     transcriptSegments?: TranscriptSegment[];
     embedding?: number[];
+    chunks?: ReelChunkIndexInput[];
     thumbnailKey?: string;
     stage?: string;
     message?: string;

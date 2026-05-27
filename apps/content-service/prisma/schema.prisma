@@ -17,28 +17,50 @@ enum ProcessingStatus {
 }
 
 model Reel {
-  id                 String                      @id @default(uuid())
+  id                 String           @id @default(uuid())
   userId             String
   mediaKey           String
   title              String?
   description        String?
   tags               String[]
-  status             ProcessingStatus            @default(PENDING)
-  visibility         String                      @default("public")
-  viewCount          BigInt                      @default(0)
-  transcript         String?                     @db.Text
-  transcriptVtt      String?                     @db.Text
+  status             ProcessingStatus @default(PENDING)
+  visibility         String           @default("public")
+  viewCount          BigInt           @default(0)
+  transcript         String?          @db.Text
+  transcriptVtt      String?          @db.Text
   transcriptSegments Json?
   embedding          Unsupported("vector(384)")?
   thumbnailKey       String?
   processingStage    String?
-  processingMessage  String?                     @db.Text
+  processingMessage  String?          @db.Text
   processingProgress Int?
-  createdAt          DateTime                    @default(now())
-  updatedAt          DateTime                    @updatedAt
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  chunks ReelChunk[]
 
   @@index([userId])
   @@index([visibility, createdAt(sort: Desc)])
   @@index([userId, visibility, createdAt(sort: Desc)])
   @@index([status])
+}
+
+model ReelChunk {
+  id             String   @id @default(uuid())
+  reelId         String
+  userId         String
+  chunkIndex     Int
+  text           String   @db.Text
+  startTime      Float?
+  endTime        Float?
+  embedding      Unsupported("vector(384)")?
+  embeddingModel String
+  createdAt      DateTime @default(now())
+
+  reel Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  @@unique([reelId, chunkIndex])
+  @@index([reelId])
+  @@index([userId])
+  @@index([createdAt])
 }

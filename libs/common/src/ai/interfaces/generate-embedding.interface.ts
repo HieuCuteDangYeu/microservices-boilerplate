@@ -5,3 +5,9 @@ export interface GenerateEmbeddingRequest {
   taskType?: EmbeddingTaskType;
   title?: string;
 }
+
+export interface GenerateEmbeddingResult {
+  values: number[];
+  model: string;
+  dimensions: number;
+}

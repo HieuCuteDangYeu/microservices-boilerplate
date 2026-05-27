@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
@@ -79,6 +80,7 @@ export class ContentServiceAdapter implements IContentService {
     transcriptVtt?: string;
     transcriptSegments?: TranscriptSegment[];
     embedding?: number[];
+    chunks?: ReelChunkIndexInput[];
     thumbnailKey?: string;
     stage?: string;
     message?: string;

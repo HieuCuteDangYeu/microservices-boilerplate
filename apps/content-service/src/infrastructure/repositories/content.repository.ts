@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/content-client';
@@ -86,6 +87,7 @@ export class ContentRepository
         processingProgress: reel.processingProgress,
       },
     });
+
     return this.toDomain(savedRecord);
   }
 
@@ -100,20 +102,26 @@ export class ContentRepository
     processingStage?: string,
     processingMessage?: string,
     processingProgress?: number,
+    chunks?: ReelChunkIndexInput[],
   ): Promise<Reel> {
     const updatedRecord = await this.$transaction(async (tx) => {
       const data: Record<string, unknown> = { status };
+
       if (transcript !== undefined) data['transcript'] = transcript;
       if (transcriptVtt !== undefined) data['transcriptVtt'] = transcriptVtt;
-      if (transcriptSegments !== undefined)
+      if (transcriptSegments !== undefined) {
         data['transcriptSegments'] = transcriptSegments;
+      }
       if (thumbnailKey !== undefined) data['thumbnailKey'] = thumbnailKey;
-      if (processingStage !== undefined)
+      if (processingStage !== undefined) {
         data['processingStage'] = processingStage;
-      if (processingMessage !== undefined)
+      }
+      if (processingMessage !== undefined) {
         data['processingMessage'] = processingMessage;
-      if (processingProgress !== undefined)
+      }
+      if (processingProgress !== undefined) {
         data['processingProgress'] = processingProgress;
+      }
 
       const record = await tx.reel.update({
         where: { id },
@@ -122,11 +130,40 @@ export class ContentRepository
 
       if (embedding && embedding.length > 0) {
         const vectorString = `[${embedding.join(',')}]`;
+
         await tx.$executeRaw`
           UPDATE "Reel"
           SET embedding = ${vectorString}::vector
           WHERE id = ${id}
         `;
+      }
+
+      if (chunks) {
+        await tx.reelChunk.deleteMany({
+          where: { reelId: id },
+        });
+
+        for (const chunk of chunks) {
+          const created = await tx.reelChunk.create({
+            data: {
+              reelId: id,
+              userId: record.userId,
+              chunkIndex: chunk.chunkIndex,
+              text: chunk.text,
+              startTime: chunk.startTime,
+              endTime: chunk.endTime,
+              embeddingModel: chunk.embeddingModel,
+            },
+          });
+
+          const chunkVectorString = `[${chunk.embedding.join(',')}]`;
+
+          await tx.$executeRaw`
+            UPDATE "ReelChunk"
+            SET embedding = ${chunkVectorString}::vector
+            WHERE id = ${created.id}
+          `;
+        }
       }
 
       return record;
@@ -146,21 +183,33 @@ export class ContentRepository
     userId: string,
   ): Promise<ReelContextSearchResult[]> {
     const vectorLiteral = `[${queryVector.join(',')}]`;
+    const maxDistance = 0.55;
+    const limit = 8;
+
     return this.$queryRaw<ReelContextSearchResult[]>`
+      WITH ranked_chunks AS (
         SELECT
-          id as "reelId",
-          title,
-          description,
-          tags,
-          transcript,
-          (embedding <=> ${vectorLiteral}::vector) as distance
-        FROM "Reel"
-        WHERE status = 'COMPLETED'
-          AND embedding IS NOT NULL
-          AND (visibility = 'public' OR "userId" = ${userId})
-        ORDER BY distance ASC
-        LIMIT 3;
-      `;
+          rc.id AS "chunkId",
+          rc."reelId" AS "reelId",
+          r.title AS title,
+          r.description AS description,
+          r.tags AS tags,
+          rc.text AS "chunkText",
+          rc."startTime" AS "startTime",
+          rc."endTime" AS "endTime",
+          (rc.embedding <=> ${vectorLiteral}::vector)::float AS distance
+        FROM "ReelChunk" rc
+        INNER JOIN "Reel" r ON r.id = rc."reelId"
+        WHERE r.status = 'COMPLETED'
+          AND rc.embedding IS NOT NULL
+          AND (r.visibility = 'public' OR r."userId" = ${userId})
+      )
+      SELECT *
+      FROM ranked_chunks
+      WHERE distance <= ${maxDistance}
+      ORDER BY distance ASC
+      LIMIT ${limit};
+    `;
   }
 
   async listReels(query: ReelListQuery): Promise<{
@@ -173,12 +222,15 @@ export class ContentRepository
     if (query.visibility) {
       where['visibility'] = query.visibility;
     }
+
     if (query.userId) {
       where['userId'] = query.userId;
     }
+
     if (query.onlyPublished) {
       where['status'] = 'COMPLETED';
     }
+
     if (query.cursor) {
       where['OR'] = [
         { createdAt: { lt: query.cursor.createdAt } },
@@ -193,11 +245,11 @@ export class ContentRepository
       where,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       take: limit + 1,
-      // transcript, timed transcript, and embedding are excluded from list query
       select: this.reelListSelect,
     });
 
     const hasMore = records.length > limit;
+
     const items = records
       .slice(0, limit)
       .map((r) => this.toDomain(r as unknown as Record<string, unknown>));
@@ -267,6 +319,7 @@ export class ContentRepository
         this.toDomain(record as unknown as Record<string, unknown>),
       )
       .reverse();
+
     const afterItems = afterRecords
       .slice(0, query.after)
       .map((record) =>
@@ -327,7 +380,9 @@ export class ContentRepository
       where: { id },
       data: { viewCount: { increment: 1 } },
     });
+
     if (!record) return null;
+
     return this.toDomain(record);
   }
 }

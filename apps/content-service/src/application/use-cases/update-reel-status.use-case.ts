@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
 
@@ -22,12 +23,14 @@ export class UpdateReelStatusUseCase {
     processingStage?: string,
     processingMessage?: string,
     processingProgress?: number,
+    chunks?: ReelChunkIndexInput[],
   ) {
     let sanitizedTranscript = transcript;
     let sanitizedTranscriptVtt = transcriptVtt?.trim() || undefined;
     let sanitizedTranscriptSegments =
       this.normalizeTranscriptSegments(transcriptSegments);
     let sanitizedEmbedding = embedding;
+    const sanitizedChunks = this.normalizeChunks(chunks);
     let nextStage = processingStage;
     let nextMessage = processingMessage;
     let nextProgress = this.normalizeProgress(processingProgress);
@@ -37,15 +40,18 @@ export class UpdateReelStatusUseCase {
         sanitizedTranscript = undefined;
         sanitizedTranscriptVtt = undefined;
         sanitizedTranscriptSegments = undefined;
+
         this.logger.warn(
           `Reel ${reelId}: completing without transcript because transcript is missing or empty`,
         );
       } else {
         const quality = this.validateTranscriptQuality(transcript);
+
         if (!quality.valid) {
           sanitizedTranscript = undefined;
           sanitizedTranscriptVtt = undefined;
           sanitizedTranscriptSegments = undefined;
+
           this.logger.warn(
             `Reel ${reelId}: completing without transcript because transcript quality check failed: "${quality.reason}"`,
           );
@@ -54,8 +60,11 @@ export class UpdateReelStatusUseCase {
 
       if (!embedding || embedding.length === 0) {
         sanitizedEmbedding = undefined;
+      }
+
+      if (!sanitizedChunks || sanitizedChunks.length === 0) {
         this.logger.warn(
-          `Reel ${reelId}: completing without embedding because embedding is missing or empty`,
+          `Reel ${reelId}: completing without searchable chunks. RAG will not find this reel until chunks are generated.`,
         );
       }
 
@@ -92,6 +101,7 @@ export class UpdateReelStatusUseCase {
       nextStage,
       nextMessage,
       nextProgress,
+      sanitizedChunks,
     );
   }
 
@@ -115,10 +125,10 @@ export class UpdateReelStatusUseCase {
     }
 
     const placeholderPatterns = [
-      /^\[.+\]$/, // "[anything in brackets]"
+      /^\[.+\]$/,
       /^(music|sound|noise)+$/i,
       /^(speaking|language|foreign)/i,
-      /^(uh+|um+|ah+|er+)+$/i, // filler sounds
+      /^(uh+|um+|ah+|er+)+$/i,
     ];
 
     for (const pattern of placeholderPatterns) {
@@ -131,6 +141,7 @@ export class UpdateReelStatusUseCase {
     }
 
     const actualWords = trimmed.split(/\s+/).filter((w) => w.length > 1).length;
+
     if (actualWords < 3) {
       return {
         valid: false,
@@ -171,6 +182,48 @@ export class UpdateReelStatusUseCase {
           start,
           end,
           text,
+        },
+      ];
+    });
+
+    return sanitized.length > 0 ? sanitized : undefined;
+  }
+
+  private normalizeChunks(
+    chunks?: ReelChunkIndexInput[],
+  ): ReelChunkIndexInput[] | undefined {
+    if (!Array.isArray(chunks)) {
+      return undefined;
+    }
+
+    const sanitized = chunks.flatMap((chunk, index) => {
+      if (!chunk || typeof chunk !== 'object') {
+        return [];
+      }
+
+      const text = typeof chunk.text === 'string' ? chunk.text.trim() : '';
+      const embedding = Array.isArray(chunk.embedding) ? chunk.embedding : [];
+
+      if (text.length === 0 || embedding.length === 0) {
+        return [];
+      }
+
+      return [
+        {
+          chunkIndex: Number.isInteger(chunk.chunkIndex)
+            ? chunk.chunkIndex
+            : index,
+          text,
+          startTime:
+            chunk.startTime !== undefined && Number.isFinite(chunk.startTime)
+              ? chunk.startTime
+              : undefined,
+          endTime:
+            chunk.endTime !== undefined && Number.isFinite(chunk.endTime)
+              ? chunk.endTime
+              : undefined,
+          embedding,
+          embeddingModel: chunk.embeddingModel || 'gemini-embedding-001:384',
         },
       ];
     });

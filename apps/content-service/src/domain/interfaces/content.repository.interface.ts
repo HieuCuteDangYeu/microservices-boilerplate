@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Reel } from '../entities/reel.entity';
 
@@ -7,7 +8,6 @@ export interface ReelListQuery {
   visibility?: 'public' | 'private';
   limit?: number;
   cursor?: { createdAt: Date; id: string };
-  /** When true, only returns COMPLETED reels (use for public feed). */
   onlyPublished?: boolean;
 }
 
@@ -49,6 +49,7 @@ export interface IContentRepository {
     processingStage?: string,
     processingMessage?: string,
     processingProgress?: number,
+    chunks?: ReelChunkIndexInput[],
   ): Promise<Reel>;
   findById(id: string): Promise<Reel | null>;
   searchReelContext(

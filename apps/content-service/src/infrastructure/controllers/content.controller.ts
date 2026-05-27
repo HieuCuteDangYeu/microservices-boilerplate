@@ -1,5 +1,6 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
+import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
@@ -111,6 +112,7 @@ export class ContentController {
       transcriptVtt?: string;
       transcriptSegments?: TranscriptSegment[];
       embedding?: number[];
+      chunks?: ReelChunkIndexInput[];
       thumbnailKey?: string;
       stage?: string;
       message?: string;
@@ -129,12 +131,14 @@ export class ContentController {
         data.stage,
         data.message,
         data.progress,
+        data.chunks,
       );
     } catch (err: unknown) {
       const error = err as Error;
       console.error(
         `❌ [processing_completed] ${error.message} — rolling reel ${data.reelId} back to FAILED`,
       );
+
       try {
         await this.updateReelStatusUseCase.execute(data.reelId, 'FAILED');
       } catch (fallbackErr) {

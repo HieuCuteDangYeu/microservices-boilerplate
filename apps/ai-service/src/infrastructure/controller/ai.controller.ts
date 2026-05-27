@@ -35,14 +35,18 @@ export class AiController {
 
     try {
       const embedding = await this.generateEmbeddingUseCase.execute(data);
+
       return { embedding };
     } catch (err: unknown) {
       if (err instanceof RpcException) {
         throw err;
       }
+
       const error = err as Error;
       console.error(`[GenerateEmbedding] ${error.message}`);
+
       const statusCode = error.message.includes('not initialized') ? 503 : 500;
+
       throw new RpcException({
         statusCode,
         message: error.message,

@@ -1,4 +1,7 @@
-import { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+import {
+  GenerateEmbeddingRequest,
+  GenerateEmbeddingResult,
+} from '@common/ai/interfaces/generate-embedding.interface';
 import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -17,19 +20,26 @@ export class AiServiceAdapter implements IAiService {
     @Inject('AI_SERVICE_RMQ') private readonly aiClient: ClientProxy,
   ) {}
 
-  async generateEmbedding(input: GenerateEmbeddingRequest): Promise<number[]> {
+  async generateEmbedding(
+    input: GenerateEmbeddingRequest,
+  ): Promise<GenerateEmbeddingResult> {
     try {
       const response = await lastValueFrom(
         this.aiClient
-          .send<{ embedding: number[] }>('ai.generate_embedding', input)
+          .send<{
+            embedding: GenerateEmbeddingResult;
+          }>('ai.generate_embedding', input)
           .pipe(catchError((error) => this.handleMicroserviceError(error))),
       );
+
       return response.embedding;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+
       this.logger.error(
         `Failed to generate embedding via AI service: ${message}`,
       );
+
       throw error;
     }
   }
