@@ -36,8 +36,30 @@ export interface ReelProfileContextResult {
   nextCursor: ReelCursor | null;
 }
 
+export interface ReelChunkBackfillCandidate {
+  id: string;
+  userId: string;
+  title?: string;
+  description?: string;
+  tags: string[];
+  transcript?: string;
+  transcriptSegments?: TranscriptSegment[];
+  createdAt: Date;
+}
+
+export interface ReelChunkBackfillCursor {
+  createdAt: Date;
+  id: string;
+}
+
+export interface ReelChunkBackfillPage {
+  items: ReelChunkBackfillCandidate[];
+  nextCursor: ReelChunkBackfillCursor | null;
+}
+
 export interface IContentRepository {
   createReel(reel: Partial<Reel>): Promise<Reel>;
+
   updateReelStatus(
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
@@ -51,23 +73,42 @@ export interface IContentRepository {
     processingProgress?: number,
     chunks?: ReelChunkIndexInput[],
   ): Promise<Reel>;
+
   findById(id: string): Promise<Reel | null>;
+
   searchReelContext(
     queryVector: number[],
     userId: string,
   ): Promise<ReelContextSearchResult[]>;
+
+  findReelsForChunkBackfill(
+    limit: number,
+    cursor?: ReelChunkBackfillCursor,
+    reelId?: string,
+  ): Promise<ReelChunkBackfillPage>;
+
+  replaceReelChunks(
+    reelId: string,
+    userId: string,
+    chunks: ReelChunkIndexInput[],
+  ): Promise<void>;
+
   listReels(query: ReelListQuery): Promise<{
     items: Reel[];
     nextCursor: ReelCursor | null;
   }>;
+
   getProfileReelContext(
     query: ReelProfileContextQuery,
   ): Promise<ReelProfileContextResult>;
+
   updateReel(
     id: string,
     data: ReelUpdateData,
     userId: string,
   ): Promise<Reel | null>;
+
   deleteReel(id: string, userId: string): Promise<boolean>;
+
   incrementViewCount(id: string): Promise<Reel | null>;
 }

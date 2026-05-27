@@ -6,6 +6,8 @@ import { PrismaClient } from '@prisma/content-client';
 import { Reel } from '../../domain/entities/reel.entity';
 import {
   IContentRepository,
+  ReelChunkBackfillCursor,
+  ReelChunkBackfillPage,
   ReelCursor,
   ReelListQuery,
   ReelProfileContextQuery,
@@ -384,5 +386,119 @@ export class ContentRepository
     if (!record) return null;
 
     return this.toDomain(record);
+  }
+
+  async findReelsForChunkBackfill(
+    limit: number,
+    cursor?: ReelChunkBackfillCursor,
+    reelId?: string,
+  ): Promise<ReelChunkBackfillPage> {
+    const safeLimit = Math.min(Math.max(limit, 1), 50);
+
+    const where: Record<string, unknown> = {
+      status: 'COMPLETED',
+      transcript: { not: null },
+      chunks: {
+        none: {},
+      },
+    };
+
+    if (reelId) {
+      where['id'] = reelId;
+    }
+
+    if (cursor && !reelId) {
+      where['OR'] = [
+        {
+          createdAt: {
+            gt: cursor.createdAt,
+          },
+        },
+        {
+          createdAt: cursor.createdAt,
+          id: {
+            gt: cursor.id,
+          },
+        },
+      ];
+    }
+
+    const records = await this.reel.findMany({
+      where,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: safeLimit + 1,
+      select: {
+        id: true,
+        userId: true,
+        title: true,
+        description: true,
+        tags: true,
+        transcript: true,
+        transcriptSegments: true,
+        createdAt: true,
+      },
+    });
+
+    const hasMore = records.length > safeLimit;
+    const items = records.slice(0, safeLimit).map((record) => ({
+      id: record.id,
+      userId: record.userId,
+      title: record.title ?? undefined,
+      description: record.description ?? undefined,
+      tags: record.tags ?? [],
+      transcript: record.transcript ?? undefined,
+      transcriptSegments:
+        (record.transcriptSegments as TranscriptSegment[] | null) ?? undefined,
+      createdAt: record.createdAt,
+    }));
+
+    const lastItem = items[items.length - 1];
+
+    return {
+      items,
+      nextCursor:
+        hasMore && lastItem
+          ? {
+              createdAt: lastItem.createdAt,
+              id: lastItem.id,
+            }
+          : null,
+    };
+  }
+
+  async replaceReelChunks(
+    reelId: string,
+    userId: string,
+    chunks: ReelChunkIndexInput[],
+  ): Promise<void> {
+    await this.$transaction(async (tx) => {
+      await tx.reelChunk.deleteMany({
+        where: {
+          reelId,
+        },
+      });
+
+      for (const chunk of chunks) {
+        const created = await tx.reelChunk.create({
+          data: {
+            reelId,
+            userId,
+            chunkIndex: chunk.chunkIndex,
+            text: chunk.text,
+            startTime: chunk.startTime,
+            endTime: chunk.endTime,
+            embeddingModel: chunk.embeddingModel,
+          },
+        });
+
+        const vectorString = `[${chunk.embedding.join(',')}]`;
+
+        await tx.$executeRaw`
+        UPDATE "ReelChunk"
+        SET embedding = ${vectorString}::vector
+        WHERE id = ${created.id}
+      `;
+      }
+    });
   }
 }
