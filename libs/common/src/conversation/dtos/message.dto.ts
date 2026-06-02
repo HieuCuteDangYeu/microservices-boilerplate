@@ -19,6 +19,9 @@ export const MessageSchema = z.object({
     .object({
       senderName: z.string(),
       content: z.string(),
+      thumbnailUri: z.string().optional(),
+      mediaWidth: z.number().optional(),
+      mediaHeight: z.number().optional(),
       type: z.enum(['text', 'image', 'video', 'file', 'call']),
     })
     .optional(),

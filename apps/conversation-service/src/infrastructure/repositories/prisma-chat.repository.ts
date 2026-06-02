@@ -29,9 +29,9 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 
 // Mappers
-import { ReadStatus } from 'apps/conversation-service/src/domain/entities/read-status.entity';
-import type { IEncryptionRepository } from 'apps/conversation-service/src/domain/interfaces/encryption.repository.interface';
-import type { IUserService } from 'apps/conversation-service/src/domain/interfaces/user-service.interface';
+import { ReadStatus } from '../../domain/entities/read-status.entity';
+import type { IEncryptionRepository } from '../../domain/interfaces/encryption.repository.interface';
+import type { IUserService } from '../../domain/interfaces/user-service.interface';
 import { ChatMapper } from './chat.mapper';
 import { ConversationMapper } from './conversation.mapper';
 
@@ -873,6 +873,9 @@ export class PrismaChatRepository implements IChatRepository {
 
     const senderName = (value as Record<string, unknown>).senderName;
     const content = (value as Record<string, unknown>).content;
+    const thumbnailUri = (value as Record<string, unknown>).thumbnailUri;
+    const mediaWidth = (value as Record<string, unknown>).mediaWidth;
+    const mediaHeight = (value as Record<string, unknown>).mediaHeight;
     const type = (value as Record<string, unknown>).type;
 
     if (
@@ -886,6 +889,9 @@ export class PrismaChatRepository implements IChatRepository {
     return {
       senderName,
       content,
+      ...(typeof thumbnailUri === 'string' ? { thumbnailUri } : {}),
+      ...(typeof mediaWidth === 'number' ? { mediaWidth } : {}),
+      ...(typeof mediaHeight === 'number' ? { mediaHeight } : {}),
       type: type as MessageReplyPreview['type'],
     };
   }
@@ -963,9 +969,23 @@ export class PrismaChatRepository implements IChatRepository {
       throw new BadRequestException('Reply target is invalid');
     }
 
+    const replyTargetMedia = this.normalizeMedia(replyTarget.media);
+
+    const thumbnailUri =
+      replyTarget.type === 'video'
+        ? replyTargetMedia?.thumbnailUrl
+        : (replyTargetMedia?.thumbnailUrl ?? replyTargetMedia?.fileUrl);
+
     return {
       senderName: await this.getUserPreviewName(replyTarget.senderId),
       content: this.getReplyPreviewContent(replyTarget),
+      ...(thumbnailUri ? { thumbnailUri } : {}),
+      ...(replyTargetMedia?.width
+        ? { mediaWidth: replyTargetMedia.width }
+        : {}),
+      ...(replyTargetMedia?.height
+        ? { mediaHeight: replyTargetMedia.height }
+        : {}),
       type: this.getReplyPreviewType(replyTarget.type),
     };
   }

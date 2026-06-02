@@ -10,6 +10,9 @@ export type MessageReactionMap = Record<string, MessageReaction>;
 export interface MessageReplyPreview {
   senderName: string;
   content: string;
+  thumbnailUri?: string;
+  mediaWidth?: number;
+  mediaHeight?: number;
   type: 'text' | 'image' | 'video' | 'file' | 'call';
 }
 

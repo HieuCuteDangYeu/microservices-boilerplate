@@ -128,6 +128,9 @@ export class ChatMapper {
 
     const senderName = (value as Record<string, unknown>).senderName;
     const content = (value as Record<string, unknown>).content;
+    const thumbnailUri = (value as Record<string, unknown>).thumbnailUri;
+    const mediaWidth = (value as Record<string, unknown>).mediaWidth;
+    const mediaHeight = (value as Record<string, unknown>).mediaHeight;
     const type = (value as Record<string, unknown>).type;
 
     if (
@@ -141,6 +144,9 @@ export class ChatMapper {
     return {
       senderName,
       content,
+      ...(typeof thumbnailUri === 'string' ? { thumbnailUri } : {}),
+      ...(typeof mediaWidth === 'number' ? { mediaWidth } : {}),
+      ...(typeof mediaHeight === 'number' ? { mediaHeight } : {}),
       type: type as MessageReplyPreview['type'],
     };
   }
