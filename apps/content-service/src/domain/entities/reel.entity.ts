@@ -13,7 +13,6 @@ export class Reel {
   transcript?: string;
   transcriptVtt?: string;
   transcriptSegments?: TranscriptSegment[];
-  embedding?: number[];
   thumbnailKey?: string;
   processingStage?: string;
   processingMessage?: string;

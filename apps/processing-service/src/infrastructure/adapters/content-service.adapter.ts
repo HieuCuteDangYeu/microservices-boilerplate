@@ -79,7 +79,6 @@ export class ContentServiceAdapter implements IContentService {
     transcript?: string;
     transcriptVtt?: string;
     transcriptSegments?: TranscriptSegment[];
-    embedding?: number[];
     chunks?: ReelChunkIndexInput[];
     thumbnailKey?: string;
     stage?: string;

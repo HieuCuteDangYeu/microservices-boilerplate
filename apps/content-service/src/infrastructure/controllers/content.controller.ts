@@ -112,7 +112,6 @@ export class ContentController {
       transcript?: string;
       transcriptVtt?: string;
       transcriptSegments?: TranscriptSegment[];
-      embedding?: number[];
       chunks?: ReelChunkIndexInput[];
       thumbnailKey?: string;
       stage?: string;
@@ -127,7 +126,6 @@ export class ContentController {
         data.transcript,
         data.transcriptVtt,
         data.transcriptSegments,
-        data.embedding,
         data.thumbnailKey,
         data.stage,
         data.message,
@@ -170,7 +168,6 @@ export class ContentController {
         undefined,
         undefined,
         undefined,
-        undefined,
         data.stage,
         data.message,
         data.progress,
@@ -202,7 +199,6 @@ export class ContentController {
         undefined,
         undefined,
         undefined,
-        undefined,
         data.stage,
         data.message,
         data.progress,
@@ -230,7 +226,6 @@ export class ContentController {
       await this.updateReelStatusUseCase.execute(
         data.reelId,
         data.status,
-        undefined,
         undefined,
         undefined,
         undefined,

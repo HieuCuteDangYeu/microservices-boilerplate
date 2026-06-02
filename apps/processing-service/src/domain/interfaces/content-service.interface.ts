@@ -24,7 +24,6 @@ export interface IContentService {
     transcript?: string;
     transcriptVtt?: string;
     transcriptSegments?: TranscriptSegment[];
-    embedding?: number[];
     chunks?: ReelChunkIndexInput[];
     thumbnailKey?: string;
     stage?: string;

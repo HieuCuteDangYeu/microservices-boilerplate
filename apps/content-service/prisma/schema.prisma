@@ -29,7 +29,6 @@ model Reel {
   transcript         String?          @db.Text
   transcriptVtt      String?          @db.Text
   transcriptSegments Json?
-  embedding          Unsupported("vector(384)")?
   thumbnailKey       String?
   processingStage    String?
   processingMessage  String?          @db.Text

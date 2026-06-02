@@ -100,7 +100,6 @@ export class ContentRepository
     transcript?: string,
     transcriptVtt?: string,
     transcriptSegments?: TranscriptSegment[],
-    embedding?: number[],
     thumbnailKey?: string,
     processingStage?: string,
     processingMessage?: string,
@@ -130,16 +129,6 @@ export class ContentRepository
         where: { id },
         data,
       });
-
-      if (embedding && embedding.length > 0) {
-        const vectorString = `[${embedding.join(',')}]`;
-
-        await tx.$executeRaw`
-          UPDATE "Reel"
-          SET embedding = ${vectorString}::vector
-          WHERE id = ${id}
-        `;
-      }
 
       if (chunks) {
         await tx.reelChunk.deleteMany({

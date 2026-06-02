@@ -18,7 +18,6 @@ export class UpdateReelStatusUseCase {
     transcript?: string,
     transcriptVtt?: string,
     transcriptSegments?: TranscriptSegment[],
-    embedding?: number[],
     thumbnailKey?: string,
     processingStage?: string,
     processingMessage?: string,
@@ -29,7 +28,6 @@ export class UpdateReelStatusUseCase {
     let sanitizedTranscriptVtt = transcriptVtt?.trim() || undefined;
     let sanitizedTranscriptSegments =
       this.normalizeTranscriptSegments(transcriptSegments);
-    let sanitizedEmbedding = embedding;
     const sanitizedChunks = this.normalizeChunks(chunks);
     let nextStage = processingStage;
     let nextMessage = processingMessage;
@@ -56,10 +54,6 @@ export class UpdateReelStatusUseCase {
             `Reel ${reelId}: completing without transcript because transcript quality check failed: "${quality.reason}"`,
           );
         }
-      }
-
-      if (!embedding || embedding.length === 0) {
-        sanitizedEmbedding = undefined;
       }
 
       if (!sanitizedChunks || sanitizedChunks.length === 0) {
@@ -96,7 +90,6 @@ export class UpdateReelStatusUseCase {
       sanitizedTranscript,
       sanitizedTranscriptVtt,
       sanitizedTranscriptSegments,
-      sanitizedEmbedding,
       thumbnailKey,
       nextStage,
       nextMessage,
