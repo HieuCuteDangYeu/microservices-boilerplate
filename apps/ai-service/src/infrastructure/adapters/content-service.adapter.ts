@@ -2,6 +2,7 @@ import {
   IContentService,
   TranscriptMatch,
 } from '@ai/domain/interfaces/content.service.interface';
+import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
@@ -15,22 +16,17 @@ export class ContentServiceAdapter implements IContentService {
   ) {}
 
   async searchReelContext(
-    queryVector: number[],
-    userId: string,
+    input: ReelContextSearchRequest,
   ): Promise<TranscriptMatch[]> {
     try {
       const results = await firstValueFrom(
         this.contentClient.send<TranscriptMatch[]>(
           'content.search_reel_context',
-          { queryVector, userId },
+          input,
         ),
       );
 
-      if (!results || !Array.isArray(results)) {
-        return [];
-      }
-
-      return results;
+      return Array.isArray(results) ? results : [];
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(

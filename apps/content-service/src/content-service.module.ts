@@ -5,7 +5,7 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
-import { SearchTranscriptsUseCase } from '@content/application/use-cases/search-transcripts.use-case';
+import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-embedding-service.adapter';
@@ -88,7 +88,7 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
     DeleteReelUseCase,
     UpdateReelStatusUseCase,
     GetReelStatusUseCase,
-    SearchTranscriptsUseCase,
+    SearchReelContextUseCase,
     BackfillReelChunksUseCase,
     {
       provide: 'IContentRepository',

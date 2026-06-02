@@ -1,5 +1,6 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/content-client';
@@ -181,37 +182,155 @@ export class ContentRepository
   }
 
   async searchReelContext(
-    queryVector: number[],
-    userId: string,
+    input: ReelContextSearchRequest,
   ): Promise<ReelContextSearchResult[]> {
-    const vectorLiteral = `[${queryVector.join(',')}]`;
-    const maxDistance = 0.55;
-    const limit = 8;
+    const vectorLiteral = `[${input.queryVector.join(',')}]`;
+    const queryText = input.queryText.trim();
+
+    const maxDistance = 0.65;
+    const candidateLimit = 50;
+    const finalLimit = Math.min(Math.max(input.limit ?? 8, 1), 20);
 
     return this.$queryRaw<ReelContextSearchResult[]>`
-      WITH ranked_chunks AS (
-        SELECT
-          rc.id AS "chunkId",
-          rc."reelId" AS "reelId",
-          r.title AS title,
-          r.description AS description,
-          r.tags AS tags,
-          rc.text AS "chunkText",
-          rc."startTime" AS "startTime",
-          rc."endTime" AS "endTime",
-          (rc.embedding <=> ${vectorLiteral}::vector)::float AS distance
-        FROM "ReelChunk" rc
-        INNER JOIN "Reel" r ON r.id = rc."reelId"
-        WHERE r.status = 'COMPLETED'
-          AND rc.embedding IS NOT NULL
-          AND (r.visibility = 'public' OR r."userId" = ${userId})
-      )
-      SELECT *
-      FROM ranked_chunks
-      WHERE distance <= ${maxDistance}
+    WITH vector_candidates AS (
+      SELECT
+        rc.id AS "chunkId",
+        rc."reelId" AS "reelId",
+        r.title AS title,
+        r.description AS description,
+        r.tags AS tags,
+        rc.text AS "chunkText",
+        rc."startTime" AS "startTime",
+        rc."endTime" AS "endTime",
+        (rc.embedding <=> ${vectorLiteral}::vector)::float AS distance,
+        (1.0 - LEAST((rc.embedding <=> ${vectorLiteral}::vector)::float, 1.0))::float AS "vectorScore",
+        0.0::float AS "keywordScore"
+      FROM "ReelChunk" rc
+      INNER JOIN "Reel" r ON r.id = rc."reelId"
+      WHERE r.status = 'COMPLETED'
+        AND rc.embedding IS NOT NULL
+        AND (r.visibility = 'public' OR r."userId" = ${input.userId})
+        AND (rc.embedding <=> ${vectorLiteral}::vector)::float <= ${maxDistance}
       ORDER BY distance ASC
-      LIMIT ${limit};
-    `;
+      LIMIT ${candidateLimit}
+    ),
+
+    keyword_candidates AS (
+      SELECT
+        rc.id AS "chunkId",
+        rc."reelId" AS "reelId",
+        r.title AS title,
+        r.description AS description,
+        r.tags AS tags,
+        rc.text AS "chunkText",
+        rc."startTime" AS "startTime",
+        rc."endTime" AS "endTime",
+        NULL::float AS distance,
+        0.0::float AS "vectorScore",
+        (
+          ts_rank_cd(
+            to_tsvector('simple', coalesce(rc.text, '')),
+            plainto_tsquery('simple', ${queryText})
+          )
+          +
+          ts_rank_cd(
+            to_tsvector(
+              'simple',
+              coalesce(r.title, '') || ' ' || coalesce(r.description, '')
+            ),
+            plainto_tsquery('simple', ${queryText})
+          )
+          +
+          CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM unnest(r.tags) AS tag(value)
+              WHERE tag.value ILIKE '%' || ${queryText} || '%'
+            )
+            THEN 0.25
+            ELSE 0
+          END
+        )::float AS "keywordScore"
+      FROM "ReelChunk" rc
+      INNER JOIN "Reel" r ON r.id = rc."reelId"
+      WHERE r.status = 'COMPLETED'
+        AND (r.visibility = 'public' OR r."userId" = ${input.userId})
+        AND (
+          to_tsvector('simple', coalesce(rc.text, ''))
+            @@ plainto_tsquery('simple', ${queryText})
+          OR
+          to_tsvector(
+            'simple',
+            coalesce(r.title, '') || ' ' || coalesce(r.description, '')
+          )
+            @@ plainto_tsquery('simple', ${queryText})
+          OR
+          EXISTS (
+            SELECT 1
+            FROM unnest(r.tags) AS tag(value)
+            WHERE tag.value ILIKE '%' || ${queryText} || '%'
+          )
+        )
+      ORDER BY "keywordScore" DESC
+      LIMIT ${candidateLimit}
+    ),
+
+    merged AS (
+      SELECT * FROM vector_candidates
+      UNION ALL
+      SELECT * FROM keyword_candidates
+    ),
+
+    grouped AS (
+      SELECT
+        "chunkId",
+        "reelId",
+        title,
+        description,
+        tags,
+        "chunkText",
+        "startTime",
+        "endTime",
+        MIN(distance) AS distance,
+        MAX("vectorScore") AS "vectorScore",
+        MAX("keywordScore") AS "keywordScore"
+      FROM merged
+      GROUP BY
+        "chunkId",
+        "reelId",
+        title,
+        description,
+        tags,
+        "chunkText",
+        "startTime",
+        "endTime"
+    )
+
+    SELECT
+      "chunkId",
+      "reelId",
+      title,
+      description,
+      tags,
+      "chunkText",
+      "startTime",
+      "endTime",
+      distance,
+      "vectorScore",
+      "keywordScore",
+      (
+        ("vectorScore" * 0.70) +
+        (LEAST("keywordScore", 1.0) * 0.30)
+      )::float AS score,
+      CASE
+        WHEN "vectorScore" > 0 AND "keywordScore" > 0 THEN 'HYBRID'
+        WHEN "keywordScore" > 0 THEN 'KEYWORD'
+        ELSE 'VECTOR'
+      END AS "matchedBy"
+    FROM grouped
+    ORDER BY score DESC, distance ASC NULLS LAST
+    LIMIT ${finalLimit};
+  `;
   }
 
   async listReels(query: ReelListQuery): Promise<{

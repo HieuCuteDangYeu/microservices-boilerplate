@@ -1,5 +1,3 @@
-// apps/ai-service/src/application/use-cases/stream-chat.use-case.ts
-
 import type { IContentService } from '@ai/domain/interfaces/content.service.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import type { IEmbeddingService } from '../../domain/interfaces/embedding.service.interface';
@@ -26,10 +24,12 @@ export class StreamChatUseCase {
       taskType: 'RETRIEVAL_QUERY',
     });
 
-    const matches = await this.contentService.searchReelContext(
-      queryEmbedding.values,
+    const matches = await this.contentService.searchReelContext({
+      queryVector: queryEmbedding.values,
+      queryText: userMessage,
       userId,
-    );
+      limit: 8,
+    });
 
     const context =
       matches.length > 0

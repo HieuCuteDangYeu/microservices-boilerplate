@@ -1,5 +1,3 @@
-// apps/content-service/src/application/use-cases/backfill-reel-chunks.use-case.ts
-
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { IAiEmbeddingService } from '@content/application/use-cases/ai-embedding.service.interface';
@@ -175,6 +173,7 @@ export class BackfillReelChunksUseCase {
 
     const chunks: BuiltTranscriptChunk[] = [];
     let currentTexts: string[] = [];
+    let currentStarts: Array<number | undefined> = [];
     let currentStart: number | undefined;
     let currentEnd: number | undefined;
     let currentLength = 0;
@@ -198,10 +197,12 @@ export class BackfillReelChunksUseCase {
         });
 
         const overlap = currentTexts.slice(-1);
+        const overlapStart = currentStarts.slice(-1)[0];
 
         currentTexts = [...overlap];
+        currentStarts = [overlapStart];
         currentLength = overlap.join(' ').length;
-        currentStart = currentEnd;
+        currentStart = overlapStart ?? currentEnd;
       }
 
       if (currentTexts.length === 0 && Number.isFinite(start)) {
@@ -209,6 +210,7 @@ export class BackfillReelChunksUseCase {
       }
 
       currentTexts.push(text);
+      currentStarts.push(Number.isFinite(start) ? start : undefined);
       currentLength += text.length + 1;
 
       if (Number.isFinite(end)) {

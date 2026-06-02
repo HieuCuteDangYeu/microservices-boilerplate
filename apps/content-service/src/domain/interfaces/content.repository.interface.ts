@@ -1,5 +1,6 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Reel } from '../entities/reel.entity';
 
@@ -77,8 +78,7 @@ export interface IContentRepository {
   findById(id: string): Promise<Reel | null>;
 
   searchReelContext(
-    queryVector: number[],
-    userId: string,
+    input: ReelContextSearchRequest,
   ): Promise<ReelContextSearchResult[]>;
 
   findReelsForChunkBackfill(

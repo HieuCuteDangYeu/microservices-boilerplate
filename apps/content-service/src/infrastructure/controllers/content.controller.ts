@@ -1,13 +1,13 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
-import { SearchTranscriptsUseCase } from '@content/application/use-cases/search-transcripts.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { Reel } from '@content/domain/entities/reel.entity';
@@ -24,6 +24,7 @@ import {
   RpcException,
 } from '@nestjs/microservices';
 import { CreateReelUseCase } from '../../application/use-cases/create-reel.use-case';
+import { SearchReelContextUseCase } from './../../application/use-cases/search-reel-context.use-case';
 
 @Controller()
 export class ContentController {
@@ -37,7 +38,7 @@ export class ContentController {
     private readonly deleteReelUseCase: DeleteReelUseCase,
     private readonly updateReelStatusUseCase: UpdateReelStatusUseCase,
     private readonly getReelStatusUseCase: GetReelStatusUseCase,
-    private readonly searchTranscriptsUseCase: SearchTranscriptsUseCase,
+    private readonly searchReelContextUseCase: SearchReelContextUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -259,13 +260,26 @@ export class ContentController {
   }
 
   @MessagePattern('content.search_reel_context')
-  async handleSearchTranscripts(
-    @Payload() payload: { queryVector: number[]; userId: string },
-  ) {
+  async handleSearchReelContext(@Payload() payload: ReelContextSearchRequest) {
+    const expectedVectorLength = 384;
+    const hasValidVector =
+      Array.isArray(payload?.queryVector) &&
+      payload.queryVector.length === expectedVectorLength &&
+      payload.queryVector.every(
+        (value) => typeof value === 'number' && Number.isFinite(value),
+      );
+
     if (
       !payload ||
-      !Array.isArray(payload.queryVector) ||
-      typeof payload.userId !== 'string'
+      !hasValidVector ||
+      typeof payload.queryText !== 'string' ||
+      payload.queryText.trim().length === 0 ||
+      typeof payload.userId !== 'string' ||
+      payload.userId.trim().length === 0 ||
+      (payload.limit !== undefined &&
+        (!Number.isInteger(payload.limit) ||
+          payload.limit < 1 ||
+          payload.limit > 20))
     ) {
       throw new RpcException({
         statusCode: 400,
@@ -274,10 +288,7 @@ export class ContentController {
     }
 
     try {
-      const results = await this.searchTranscriptsUseCase.execute(
-        payload.queryVector,
-        payload.userId,
-      );
+      const results = await this.searchReelContextUseCase.execute(payload);
       return results;
     } catch (error: unknown) {
       const err = error as Error;

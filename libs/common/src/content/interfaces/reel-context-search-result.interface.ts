@@ -7,5 +7,9 @@ export interface ReelContextSearchResult {
   chunkText: string;
   startTime?: number;
   endTime?: number;
-  distance: number;
+  distance: number | null;
+  score?: number;
+  vectorScore?: number;
+  keywordScore?: number;
+  matchedBy?: 'VECTOR' | 'KEYWORD' | 'HYBRID';
 }
