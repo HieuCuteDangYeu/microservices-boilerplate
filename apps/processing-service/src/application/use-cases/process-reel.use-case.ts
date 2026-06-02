@@ -74,9 +74,15 @@ export class ProcessReelUseCase {
       .filter((tag) => tag.length > 0);
 
     const hints = [
-      title ? `Video title: ${title}` : undefined,
-      tags.length > 0 ? `Important terms: ${tags.join(', ')}` : undefined,
-      'Transcribe only spoken words in the original language.',
+      'The audio may contain any language or mixed-language speech.',
+      'Transcribe the spoken words exactly in the original language.',
+      'Do not translate the speech.',
+      'Do not rewrite non-English words into similar-sounding English words.',
+      'Preserve names, slang, usernames, hashtags, product names, and technical terms as spoken.',
+      title ? `Video title/context: ${title}` : undefined,
+      tags.length > 0
+        ? `Important terms that may appear: ${tags.join(', ')}`
+        : undefined,
     ].filter((value): value is string => Boolean(value));
 
     return hints.length > 1 ? hints.join('\n') : undefined;
