@@ -6,6 +6,7 @@ import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/clou
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
+import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { R2AudioStorageService } from '@ai/infrastructure/services/r2-audio-storage.service';
 import { Module } from '@nestjs/common';
@@ -87,6 +88,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IContentService',
       useClass: ContentServiceAdapter,
+    },
+    {
+      provide: 'IRerankerService',
+      useClass: SimpleRerankerAdapter,
     },
   ],
 })

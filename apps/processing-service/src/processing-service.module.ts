@@ -4,6 +4,9 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AiServiceAdapter } from '@processing/infrastructure/adapters/ai-service.adapter';
 import { ConversationMediaAdapter } from '@processing/infrastructure/adapters/conversation-media.adapter';
 import { ContentServiceAdapter } from '@processing/infrastructure/adapters/content-service.adapter';
+import { ReelAiMetadataService } from './application/services/reel-ai-metadata.service';
+import { ReelChunkBuilderService } from './application/services/reel-chunk-builder.service';
+import { ReelMediaPipelineService } from './application/services/reel-media-pipeline.service';
 import { ProcessChatVideoUseCase } from './application/use-cases/process-chat-video.use-case';
 import { ProcessReelUseCase } from './application/use-cases/process-reel.use-case';
 import { ProcessingController } from './infrastructure/controllers/processing.controller';
@@ -96,6 +99,9 @@ import { R2Service } from './infrastructure/services/r2.service';
   providers: [
     ProcessChatVideoUseCase,
     ProcessReelUseCase,
+    ReelAiMetadataService,
+    ReelChunkBuilderService,
+    ReelMediaPipelineService,
     FfmpegService,
     JobConcurrencyLimiterService,
     R2Service,
@@ -106,6 +112,14 @@ import { R2Service } from './infrastructure/services/r2.service';
     {
       provide: 'IContentService',
       useClass: ContentServiceAdapter,
+    },
+    {
+      provide: 'IMediaStorageService',
+      useExisting: R2Service,
+    },
+    {
+      provide: 'IVideoProcessingService',
+      useExisting: FfmpegService,
     },
     {
       provide: 'IConversationMediaService',

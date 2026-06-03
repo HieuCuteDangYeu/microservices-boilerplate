@@ -4,6 +4,10 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
+import type {
+  IMediaStorageService,
+  UploadedThumbnail,
+} from '@processing/domain/interfaces/media-storage.service.interface';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import * as fs from 'fs';
 import * as https from 'https';
@@ -11,7 +15,7 @@ import * as path from 'path';
 import { pipeline } from 'stream/promises';
 
 @Injectable()
-export class R2Service {
+export class R2Service implements IMediaStorageService {
   private readonly s3Client: S3Client;
   private readonly bucketName = process.env.R2_BUCKET_NAME!;
   private readonly publicDomain = process.env.R2_PUBLIC_DOMAIN!.replace(
@@ -78,7 +82,7 @@ export class R2Service {
   async uploadThumbnail(
     localPath: string,
     s3Key: string,
-  ): Promise<{ key: string; url: string }> {
+  ): Promise<UploadedThumbnail> {
     const fileBuffer = fs.readFileSync(localPath);
     const command = new PutObjectCommand({
       Bucket: this.bucketName,

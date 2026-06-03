@@ -16,7 +16,27 @@ export class SearchReelContextUseCase {
     input: ReelContextSearchRequest,
   ): Promise<ReelContextSearchResult[]> {
     try {
-      return await this.contentRepository.searchReelContext(input);
+      const results = await this.contentRepository.searchReelContext(input);
+
+      const matchedByCounts = results.reduce<Record<string, number>>(
+        (acc, item) => {
+          const key = item.matchedBy ?? 'UNKNOWN';
+          acc[key] = (acc[key] ?? 0) + 1;
+          return acc;
+        },
+        {},
+      );
+
+      this.logger.log(
+        `[RAG] reel context search queryLength=${input.queryText.length} results=${results.length} matchedBy=${JSON.stringify(
+          matchedByCounts,
+        )} topScore=${results[0]?.score ?? 'n/a'} topChunks=${results
+          .slice(0, 5)
+          .map((item) => item.chunkId)
+          .join(',')}`,
+      );
+
+      return results;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 

@@ -1,6 +1,7 @@
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { Injectable } from '@nestjs/common';
+import type { IVideoProcessingService } from '@processing/domain/interfaces/video-processing.service.interface';
 import ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -68,7 +69,7 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
 
 @Injectable()
-export class FfmpegService {
+export class FfmpegService implements IVideoProcessingService {
   async transcodeToHls(inputPath: string, outputDir: string): Promise<void> {
     fs.mkdirSync(outputDir, { recursive: true });
 
@@ -103,6 +104,27 @@ export class FfmpegService {
         .output(outputPath)
         .on('end', () => resolve())
         .on('error', (err) => reject(err))
+        .run();
+    });
+  }
+
+  async extractAudioForTranscription(
+    inputPath: string,
+    outputPath: string,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .noVideo()
+        .audioChannels(1)
+        .audioFrequency(16000)
+        .audioCodec('pcm_s16le')
+        .audioFilters(['highpass=f=80', 'lowpass=f=8000', 'loudnorm'])
+        .format('wav')
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) =>
+          reject(err instanceof Error ? err : new Error(String(err))),
+        )
         .run();
     });
   }

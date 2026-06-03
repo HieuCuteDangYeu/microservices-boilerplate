@@ -1,10 +1,13 @@
 import type { IContentService } from '@ai/domain/interfaces/content.service.interface';
-import { Inject, Injectable } from '@nestjs/common';
+import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { IEmbeddingService } from '../../domain/interfaces/embedding.service.interface';
 import type { ILlmService } from '../../domain/interfaces/llm.service.interface';
 
 @Injectable()
 export class StreamChatUseCase {
+  private readonly logger = new Logger(StreamChatUseCase.name);
+
   constructor(
     @Inject('IEmbeddingService')
     private readonly embeddingService: IEmbeddingService,
@@ -12,6 +15,8 @@ export class StreamChatUseCase {
     private readonly llmService: ILlmService,
     @Inject('IContentService')
     private readonly contentService: IContentService,
+    @Inject('IRerankerService')
+    private readonly rerankerService: IRerankerService,
   ) {}
 
   async execute(
@@ -31,9 +36,21 @@ export class StreamChatUseCase {
       limit: 8,
     });
 
+    const rerankedMatches = await this.rerankerService.rerank({
+      queryText: userMessage,
+      candidates: matches,
+      limit: 5,
+    });
+
+    this.logger.log(
+      `[RAG] retrieved=${matches.length} reranked=${rerankedMatches.length} top=${rerankedMatches
+        .map((item) => `${item.matchedBy}:${item.score}:${item.chunkId}`)
+        .join(',')}`,
+    );
+
     const context =
-      matches.length > 0
-        ? matches
+      rerankedMatches.length > 0
+        ? rerankedMatches
             .map((match, index) =>
               [
                 `Source ${index + 1}`,
@@ -48,6 +65,16 @@ export class StreamChatUseCase {
                   : undefined,
                 match.startTime !== undefined && match.endTime !== undefined
                   ? `Timestamp: ${match.startTime.toFixed(1)}s - ${match.endTime.toFixed(1)}s`
+                  : undefined,
+                match.matchedBy ? `Matched by: ${match.matchedBy}` : undefined,
+                match.score !== undefined
+                  ? `Retrieval score: ${match.score}`
+                  : undefined,
+                match.vectorScore !== undefined
+                  ? `Vector score: ${match.vectorScore}`
+                  : undefined,
+                match.keywordScore !== undefined
+                  ? `Keyword score: ${match.keywordScore}`
                   : undefined,
                 `Similarity distance: ${match.distance}`,
                 `Content:\n${match.chunkText}`,
