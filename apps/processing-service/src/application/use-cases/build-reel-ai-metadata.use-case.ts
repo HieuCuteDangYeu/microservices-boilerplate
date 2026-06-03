@@ -4,9 +4,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { IAiService } from '../../domain/interfaces/ai-service.interface';
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import type { IVideoProcessingService } from '../../domain/interfaces/video-processing.service.interface';
+import { formatProcessingError } from '../utils/format-processing-error';
 import { BuildReelSearchIndexUseCase } from './build-reel-search-index.use-case';
 import { BuildReelTranscriptionPromptUseCase } from './build-reel-transcription-prompt.use-case';
-import { formatProcessingError } from './format-processing-error';
 
 @Injectable()
 export class BuildReelAiMetadataUseCase {

@@ -2,9 +2,9 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { IAiService } from '../../domain/interfaces/ai-service.interface';
+import { formatProcessingError } from '../utils/format-processing-error';
 import { BuildReelEmbeddingTextUseCase } from './build-reel-embedding-text.use-case';
 import { BuildTranscriptChunksUseCase } from './build-transcript-chunks.use-case';
-import { formatProcessingError } from './format-processing-error';
 
 @Injectable()
 export class BuildReelSearchIndexUseCase {

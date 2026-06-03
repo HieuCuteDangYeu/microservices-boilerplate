@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { IContentService } from '../../domain/interfaces/content-service.interface';
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
+import { formatProcessingError } from '../utils/format-processing-error';
 import { BuildReelAiMetadataUseCase } from './build-reel-ai-metadata.use-case';
-import { formatProcessingError } from './format-processing-error';
 import {
   PrepareReelMediaError,
   PrepareReelMediaUseCase,

@@ -3,7 +3,7 @@ import type { IContentService } from '../../domain/interfaces/content-service.in
 import type { IMediaStorageService } from '../../domain/interfaces/media-storage.service.interface';
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import type { IVideoProcessingService } from '../../domain/interfaces/video-processing.service.interface';
-import { formatProcessingError } from './format-processing-error';
+import { formatProcessingError } from '../utils/format-processing-error';
 
 export class PrepareReelMediaError extends Error {
   constructor(
