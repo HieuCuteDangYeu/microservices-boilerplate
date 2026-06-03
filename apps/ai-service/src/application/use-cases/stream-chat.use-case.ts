@@ -44,7 +44,10 @@ export class StreamChatUseCase {
 
     this.logger.log(
       `[RAG] retrieved=${matches.length} reranked=${rerankedMatches.length} top=${rerankedMatches
-        .map((item) => `${item.matchedBy}:${item.score}:${item.chunkId}`)
+        .map(
+          (item) =>
+            `${item.matchedBy}:retrieval=${item.score ?? 'n/a'}:rerank=${item.rerankScore ?? 'n/a'}:${item.chunkId}`,
+        )
         .join(',')}`,
     );
 
@@ -69,6 +72,9 @@ export class StreamChatUseCase {
                 match.matchedBy ? `Matched by: ${match.matchedBy}` : undefined,
                 match.score !== undefined
                   ? `Retrieval score: ${match.score}`
+                  : undefined,
+                match.rerankScore !== undefined
+                  ? `Rerank score: ${match.rerankScore}`
                   : undefined,
                 match.vectorScore !== undefined
                   ? `Vector score: ${match.vectorScore}`

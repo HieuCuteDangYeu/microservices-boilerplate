@@ -1,34 +1,19 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
-import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { IAiService } from '../../domain/interfaces/ai-service.interface';
-import { formatProcessingError } from './processing-error-formatter.service';
-
-interface BuiltTranscriptChunk {
-  text: string;
-  startTime?: number;
-  endTime?: number;
-}
+import { Injectable } from '@nestjs/common';
+import { BuiltTranscriptChunk } from './built-transcript-chunk.type';
 
 @Injectable()
-export class ReelChunkBuilderService {
-  private readonly logger = new Logger(ReelChunkBuilderService.name);
+export class BuildTranscriptChunksUseCase {
   private readonly defaultTags: string[] = [];
   private readonly maxChunkChars = 1200;
 
-  constructor(
-    @Inject('IAiService')
-    private readonly aiService: IAiService,
-  ) {}
-
-  async buildSearchableChunks(data: {
-    reelId: string;
+  execute(data: {
     title?: string;
     description?: string;
     tags?: string[];
     transcript?: string;
     transcriptSegments?: TranscriptSegment[];
-  }): Promise<ReelChunkIndexInput[]> {
+  }): BuiltTranscriptChunk[] {
     let builtChunks = this.buildChunksFromSegments(data.transcriptSegments);
 
     if (builtChunks.length === 0) {
@@ -43,38 +28,7 @@ export class ReelChunkBuilderService {
       }
     }
 
-    const chunks: ReelChunkIndexInput[] = [];
-
-    for (let index = 0; index < builtChunks.length; index++) {
-      const chunk = builtChunks[index];
-      const embeddingDocument = this.buildEmbeddingText(data, chunk.text);
-
-      try {
-        const embedding = await this.aiService.generateEmbedding({
-          text: embeddingDocument.text,
-          taskType: 'RETRIEVAL_DOCUMENT',
-          title: embeddingDocument.title,
-        });
-
-        chunks.push({
-          chunkIndex: index,
-          text: chunk.text,
-          startTime: chunk.startTime,
-          endTime: chunk.endTime,
-          embedding: embedding.values,
-          embeddingModel: `${embedding.model}:${embedding.dimensions}`,
-        });
-      } catch (error: unknown) {
-        const { message, stack } = formatProcessingError(error);
-
-        this.logger.warn(
-          `[Reel ${data.reelId}] Failed to embed chunk ${index}: ${message}`,
-          stack,
-        );
-      }
-    }
-
-    return chunks;
+    return builtChunks;
   }
 
   private buildChunksFromSegments(
@@ -210,34 +164,6 @@ export class ReelChunkBuilderService {
 
     return {
       text: sections.join('\n'),
-    };
-  }
-
-  private buildEmbeddingText(
-    data: {
-      title?: string;
-      description?: string;
-      tags?: string[];
-    },
-    chunkText: string,
-  ): { text: string; title?: string } {
-    const title = data.title?.trim() || undefined;
-    const description = data.description?.trim() || undefined;
-
-    const tags = (data.tags ?? this.defaultTags)
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0);
-
-    const sections = [
-      title ? `Title: ${title}` : undefined,
-      description ? `Description: ${description}` : undefined,
-      tags.length > 0 ? `Tags: ${tags.join(', ')}` : undefined,
-      `Transcript chunk:\n${chunkText.trim()}`,
-    ].filter((value): value is string => Boolean(value));
-
-    return {
-      text: sections.join('\n\n'),
-      title,
     };
   }
 }

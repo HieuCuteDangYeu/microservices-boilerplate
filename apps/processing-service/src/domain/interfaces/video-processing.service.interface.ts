@@ -1,4 +1,10 @@
 export interface IVideoProcessingService {
+  getVideoMetadata(inputPath: string): Promise<{
+    durationMs?: number;
+    width?: number;
+    height?: number;
+  }>;
+
   transcodeToHls(inputPath: string, outputDir: string): Promise<void>;
 
   extractAudioForTranscription(

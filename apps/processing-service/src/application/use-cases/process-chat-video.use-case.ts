@@ -2,12 +2,11 @@ import type { ProcessVideoThumbnailPayload } from '@common/media/dtos/process-vi
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IConversationMediaService } from '@processing/domain/interfaces/conversation-media.service.interface';
+import type { IJobConcurrencyLimiterService } from '@processing/domain/interfaces/job-concurrency-limiter.service.interface';
+import type { IMediaStorageService } from '@processing/domain/interfaces/media-storage.service.interface';
+import type { ITempFileService } from '@processing/domain/interfaces/temp-file.service.interface';
+import type { IVideoProcessingService } from '@processing/domain/interfaces/video-processing.service.interface';
 import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
-import { FfmpegService } from '../../infrastructure/services/ffmpeg.service';
-import { JobConcurrencyLimiterService } from '../../infrastructure/services/job-concurrency-limiter.service';
-import { R2Service } from '../../infrastructure/services/r2.service';
 
 @Injectable()
 export class ProcessChatVideoUseCase {
@@ -15,9 +14,14 @@ export class ProcessChatVideoUseCase {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly r2Service: R2Service,
-    private readonly ffmpegService: FfmpegService,
-    private readonly jobConcurrencyLimiter: JobConcurrencyLimiterService,
+    @Inject('IMediaStorageService')
+    private readonly mediaStorageService: IMediaStorageService,
+    @Inject('IVideoProcessingService')
+    private readonly videoProcessingService: IVideoProcessingService,
+    @Inject('ITempFileService')
+    private readonly tempFileService: ITempFileService,
+    @Inject('IJobConcurrencyLimiterService')
+    private readonly jobConcurrencyLimiter: IJobConcurrencyLimiterService,
     @Inject('IConversationMediaService')
     private readonly conversationMediaService: IConversationMediaService,
   ) {}
@@ -56,7 +60,7 @@ export class ProcessChatVideoUseCase {
         fileKey: data.fileKey,
         media: {
           fileKey: data.fileKey,
-          fileUrl: this.r2Service.getPublicUrl(data.fileKey),
+          fileUrl: this.mediaStorageService.getPublicUrl(data.fileKey),
           mimeType: data.fileType,
           status: 'failed',
           failureReason:
@@ -74,28 +78,29 @@ export class ProcessChatVideoUseCase {
   }
 
   private async processOnce(data: ProcessVideoThumbnailPayload): Promise<void> {
-    const workDir = path.join('/tmp', `chat-media-${crypto.randomUUID()}`);
-    const inputPath = path.join(workDir, 'input-video');
-    const thumbnailPath = path.join(workDir, 'thumbnail.jpg');
+    const workspace = this.tempFileService.createChatVideoProcessingWorkspace();
 
     try {
-      fs.mkdirSync(workDir, { recursive: true });
-
-      await this.r2Service.downloadVideo(data.fileKey, inputPath);
-      const metadata = await this.ffmpegService.getVideoMetadata(inputPath);
+      await this.mediaStorageService.downloadVideo(
+        data.fileKey,
+        workspace.inputPath,
+      );
+      const metadata = await this.videoProcessingService.getVideoMetadata(
+        workspace.inputPath,
+      );
       const thumbnailKey =
         data.thumbnailKey ?? this.buildThumbnailKey(data.fileKey);
       const thumbnailTimestamp = this.resolveThumbnailTimestamp(
         metadata.durationMs,
       );
-      await this.ffmpegService.extractThumbnail(
-        inputPath,
-        thumbnailPath,
+      await this.videoProcessingService.extractThumbnail(
+        workspace.inputPath,
+        workspace.thumbnailPath,
         thumbnailTimestamp,
       );
 
-      const uploadedThumbnail = await this.r2Service.uploadThumbnail(
-        thumbnailPath,
+      const uploadedThumbnail = await this.mediaStorageService.uploadThumbnail(
+        workspace.thumbnailPath,
         thumbnailKey,
       );
 
@@ -104,7 +109,7 @@ export class ProcessChatVideoUseCase {
         fileKey: data.fileKey,
         media: {
           fileKey: data.fileKey,
-          fileUrl: this.r2Service.getPublicUrl(data.fileKey),
+          fileUrl: this.mediaStorageService.getPublicUrl(data.fileKey),
           mimeType: data.fileType,
           status: 'ready',
           thumbnailKey: uploadedThumbnail.key,
@@ -117,9 +122,7 @@ export class ProcessChatVideoUseCase {
         `[ChatMedia ${data.fileKey}] processing completed successfully`,
       );
     } finally {
-      if (fs.existsSync(workDir)) {
-        fs.rmSync(workDir, { recursive: true, force: true });
-      }
+      this.tempFileService.removeDirIfExists(workspace.workDir);
     }
   }
 

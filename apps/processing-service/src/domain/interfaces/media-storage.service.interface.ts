@@ -9,4 +9,6 @@ export interface IMediaStorageService {
   uploadHlsDirectory(localDir: string, s3Prefix: string): Promise<void>;
 
   uploadThumbnail(localPath: string, s3Key: string): Promise<UploadedThumbnail>;
+
+  getPublicUrl(key: string): string;
 }

@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import type { IJobConcurrencyLimiterService } from '@processing/domain/interfaces/job-concurrency-limiter.service.interface';
 
 @Injectable()
-export class JobConcurrencyLimiterService {
+export class JobConcurrencyLimiterService implements IJobConcurrencyLimiterService {
   private activeCount = 0;
   private readonly waitQueue: Array<() => void> = [];
 

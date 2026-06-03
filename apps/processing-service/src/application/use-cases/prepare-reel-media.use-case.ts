@@ -1,11 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import * as fs from 'fs';
 import type { IContentService } from '../../domain/interfaces/content-service.interface';
 import type { IMediaStorageService } from '../../domain/interfaces/media-storage.service.interface';
+import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import type { IVideoProcessingService } from '../../domain/interfaces/video-processing.service.interface';
-import { formatProcessingError } from './processing-error-formatter.service';
+import { formatProcessingError } from './format-processing-error';
 
-export class ReelMediaPipelineError extends Error {
+export class PrepareReelMediaError extends Error {
   constructor(
     error: unknown,
     readonly progress: number,
@@ -18,8 +18,8 @@ export class ReelMediaPipelineError extends Error {
 }
 
 @Injectable()
-export class ReelMediaPipelineService {
-  private readonly logger = new Logger(ReelMediaPipelineService.name);
+export class PrepareReelMediaUseCase {
+  private readonly logger = new Logger(PrepareReelMediaUseCase.name);
 
   constructor(
     @Inject('IMediaStorageService')
@@ -28,9 +28,11 @@ export class ReelMediaPipelineService {
     private readonly videoProcessingService: IVideoProcessingService,
     @Inject('IContentService')
     private readonly contentService: IContentService,
+    @Inject('ITempFileService')
+    private readonly tempFileService: ITempFileService,
   ) {}
 
-  async prepare(data: {
+  async execute(data: {
     reelId: string;
     mediaKey: string;
     inputPath: string;
@@ -118,17 +120,14 @@ export class ReelMediaPipelineService {
         `[Reel ${data.reelId}] Uploaded thumbnail ${thumbnailKey}`,
       );
 
-      fs.rmSync(data.hlsOutputDir, { recursive: true, force: true });
-
-      if (fs.existsSync(data.thumbnailPath)) {
-        fs.unlinkSync(data.thumbnailPath);
-      }
+      this.tempFileService.removeDirIfExists(data.hlsOutputDir);
+      this.tempFileService.removeFileIfExists(data.thumbnailPath);
 
       return {
         thumbnailKey,
       };
     } catch (error: unknown) {
-      throw new ReelMediaPipelineError(error, currentProgress);
+      throw new PrepareReelMediaError(error, currentProgress);
     }
   }
 

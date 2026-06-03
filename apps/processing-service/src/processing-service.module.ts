@@ -4,15 +4,19 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AiServiceAdapter } from '@processing/infrastructure/adapters/ai-service.adapter';
 import { ConversationMediaAdapter } from '@processing/infrastructure/adapters/conversation-media.adapter';
 import { ContentServiceAdapter } from '@processing/infrastructure/adapters/content-service.adapter';
-import { ReelAiMetadataService } from './application/services/reel-ai-metadata.service';
-import { ReelChunkBuilderService } from './application/services/reel-chunk-builder.service';
-import { ReelMediaPipelineService } from './application/services/reel-media-pipeline.service';
+import { BuildReelAiMetadataUseCase } from './application/use-cases/build-reel-ai-metadata.use-case';
+import { BuildReelEmbeddingTextUseCase } from './application/use-cases/build-reel-embedding-text.use-case';
+import { BuildReelSearchIndexUseCase } from './application/use-cases/build-reel-search-index.use-case';
+import { BuildReelTranscriptionPromptUseCase } from './application/use-cases/build-reel-transcription-prompt.use-case';
+import { BuildTranscriptChunksUseCase } from './application/use-cases/build-transcript-chunks.use-case';
+import { PrepareReelMediaUseCase } from './application/use-cases/prepare-reel-media.use-case';
 import { ProcessChatVideoUseCase } from './application/use-cases/process-chat-video.use-case';
 import { ProcessReelUseCase } from './application/use-cases/process-reel.use-case';
 import { ProcessingController } from './infrastructure/controllers/processing.controller';
 import { FfmpegService } from './infrastructure/services/ffmpeg.service';
 import { JobConcurrencyLimiterService } from './infrastructure/services/job-concurrency-limiter.service';
 import { R2Service } from './infrastructure/services/r2.service';
+import { TempFileService } from './infrastructure/services/temp-file.service';
 
 @Module({
   imports: [
@@ -99,12 +103,16 @@ import { R2Service } from './infrastructure/services/r2.service';
   providers: [
     ProcessChatVideoUseCase,
     ProcessReelUseCase,
-    ReelAiMetadataService,
-    ReelChunkBuilderService,
-    ReelMediaPipelineService,
+    BuildReelAiMetadataUseCase,
+    BuildReelEmbeddingTextUseCase,
+    BuildReelSearchIndexUseCase,
+    BuildReelTranscriptionPromptUseCase,
+    BuildTranscriptChunksUseCase,
+    PrepareReelMediaUseCase,
     FfmpegService,
     JobConcurrencyLimiterService,
     R2Service,
+    TempFileService,
     {
       provide: 'IAiService',
       useClass: AiServiceAdapter,
@@ -120,6 +128,14 @@ import { R2Service } from './infrastructure/services/r2.service';
     {
       provide: 'IVideoProcessingService',
       useExisting: FfmpegService,
+    },
+    {
+      provide: 'ITempFileService',
+      useClass: TempFileService,
+    },
+    {
+      provide: 'IJobConcurrencyLimiterService',
+      useExisting: JobConcurrencyLimiterService,
     },
     {
       provide: 'IConversationMediaService',

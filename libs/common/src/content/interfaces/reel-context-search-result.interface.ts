@@ -8,7 +8,8 @@ export interface ReelContextSearchResult {
   startTime?: number;
   endTime?: number;
   distance: number | null;
-  score?: number;
+  score?: number; // hybrid retrieval score from content-service
+  rerankScore?: number; // reranker score from ai-service
   vectorScore?: number;
   keywordScore?: number;
   matchedBy?: 'VECTOR' | 'KEYWORD' | 'HYBRID';

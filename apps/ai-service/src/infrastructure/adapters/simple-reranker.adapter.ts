@@ -48,7 +48,7 @@ export class SimpleRerankerAdapter implements IRerankerService {
       .slice(0, Math.min(Math.max(input.limit, 1), 8))
       .map((item) => ({
         ...item.candidate,
-        score: item.rerankScore,
+        rerankScore: item.rerankScore,
       }));
 
     return Promise.resolve(rerankedCandidates);

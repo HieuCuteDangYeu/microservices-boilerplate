@@ -1,26 +1,29 @@
 import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import * as fs from 'fs';
 import type { IAiService } from '../../domain/interfaces/ai-service.interface';
+import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import type { IVideoProcessingService } from '../../domain/interfaces/video-processing.service.interface';
-import { formatProcessingError } from './processing-error-formatter.service';
-import { ReelChunkBuilderService } from './reel-chunk-builder.service';
-import { buildReelTranscriptionPrompt } from './reel-transcription-prompt.builder';
+import { BuildReelSearchIndexUseCase } from './build-reel-search-index.use-case';
+import { BuildReelTranscriptionPromptUseCase } from './build-reel-transcription-prompt.use-case';
+import { formatProcessingError } from './format-processing-error';
 
 @Injectable()
-export class ReelAiMetadataService {
-  private readonly logger = new Logger(ReelAiMetadataService.name);
+export class BuildReelAiMetadataUseCase {
+  private readonly logger = new Logger(BuildReelAiMetadataUseCase.name);
 
   constructor(
     @Inject('IAiService')
     private readonly aiService: IAiService,
     @Inject('IVideoProcessingService')
     private readonly videoProcessingService: IVideoProcessingService,
-    private readonly reelChunkBuilder: ReelChunkBuilderService,
+    @Inject('ITempFileService')
+    private readonly tempFileService: ITempFileService,
+    private readonly buildReelSearchIndexUseCase: BuildReelSearchIndexUseCase,
+    private readonly buildReelTranscriptionPromptUseCase: BuildReelTranscriptionPromptUseCase,
   ) {}
 
-  async build(data: {
+  async execute(data: {
     reelId: string;
     title?: string;
     description?: string;
@@ -41,14 +44,12 @@ export class ReelAiMetadataService {
         data.audioPath,
       );
 
-      const audioBuffer = fs.readFileSync(data.audioPath);
+      const audioBuffer = this.tempFileService.readFile(data.audioPath);
 
-      if (fs.existsSync(data.audioPath)) {
-        fs.unlinkSync(data.audioPath);
-      }
+      this.tempFileService.removeFileIfExists(data.audioPath);
 
       transcription = await this.aiService.transcribeAudio(audioBuffer, {
-        initialPrompt: buildReelTranscriptionPrompt(data),
+        initialPrompt: this.buildReelTranscriptionPromptUseCase.execute(data),
       });
 
       this.logger.log(
@@ -62,9 +63,7 @@ export class ReelAiMetadataService {
         stack,
       );
     } finally {
-      if (fs.existsSync(data.audioPath)) {
-        fs.unlinkSync(data.audioPath);
-      }
+      this.tempFileService.removeFileIfExists(data.audioPath);
     }
 
     const transcript = transcription?.text?.trim() || undefined;
@@ -75,7 +74,7 @@ export class ReelAiMetadataService {
         ? transcription.segments
         : undefined;
 
-    const chunks = await this.reelChunkBuilder.buildSearchableChunks({
+    const chunks = await this.buildReelSearchIndexUseCase.execute({
       reelId: data.reelId,
       title: data.title,
       description: data.description,

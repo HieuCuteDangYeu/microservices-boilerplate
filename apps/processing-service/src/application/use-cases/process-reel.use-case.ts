@@ -1,24 +1,24 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
 import type { IContentService } from '../../domain/interfaces/content-service.interface';
-import { formatProcessingError } from '../services/processing-error-formatter.service';
-import { ReelAiMetadataService } from '../services/reel-ai-metadata.service';
+import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
+import { BuildReelAiMetadataUseCase } from './build-reel-ai-metadata.use-case';
+import { formatProcessingError } from './format-processing-error';
 import {
-  ReelMediaPipelineError,
-  ReelMediaPipelineService,
-} from '../services/reel-media-pipeline.service';
+  PrepareReelMediaError,
+  PrepareReelMediaUseCase,
+} from './prepare-reel-media.use-case';
 
 @Injectable()
 export class ProcessReelUseCase {
   private readonly logger = new Logger(ProcessReelUseCase.name);
 
   constructor(
-    private readonly reelMediaPipelineService: ReelMediaPipelineService,
-    private readonly reelAiMetadataService: ReelAiMetadataService,
+    private readonly prepareReelMediaUseCase: PrepareReelMediaUseCase,
+    private readonly buildReelAiMetadataUseCase: BuildReelAiMetadataUseCase,
     @Inject('IContentService')
     private readonly contentService: IContentService,
+    @Inject('ITempFileService')
+    private readonly tempFileService: ITempFileService,
   ) {}
 
   async execute(data: {
@@ -33,21 +33,17 @@ export class ProcessReelUseCase {
 
     this.logger.log(`[Reel ${reelId}] Received processing job for ${mediaKey}`);
 
-    const workDir = path.join('/tmp', crypto.randomUUID());
-    const inputPath = path.join(workDir, 'input.mp4');
-    const hlsOutputDir = path.join(workDir, 'hls');
-    const audioPath = path.join(workDir, 'audio.wav');
-    const thumbnailPath = path.join(workDir, 'thumbnail.jpg');
+    const workspace = this.tempFileService.createReelProcessingWorkspace();
 
     let currentProgress = 10;
 
     try {
-      const mediaResult = await this.reelMediaPipelineService.prepare({
+      const mediaResult = await this.prepareReelMediaUseCase.execute({
         reelId,
         mediaKey,
-        inputPath,
-        hlsOutputDir,
-        thumbnailPath,
+        inputPath: workspace.inputPath,
+        hlsOutputDir: workspace.hlsOutputDir,
+        thumbnailPath: workspace.thumbnailPath,
       });
 
       currentProgress = 90;
@@ -60,13 +56,13 @@ export class ProcessReelUseCase {
       });
 
       const { transcript, transcriptVtt, transcriptSegments, chunks } =
-        await this.reelAiMetadataService.build({
+        await this.buildReelAiMetadataUseCase.execute({
           reelId,
           title: data.title,
           description: data.description,
           tags: data.tags,
-          inputPath,
-          audioPath,
+          inputPath: workspace.inputPath,
+          audioPath: workspace.audioPath,
         });
 
       await this.contentService.emitProcessingCompleted({
@@ -91,7 +87,7 @@ export class ProcessReelUseCase {
         stack,
       );
 
-      if (error instanceof ReelMediaPipelineError) {
+      if (error instanceof PrepareReelMediaError) {
         currentProgress = error.progress;
       }
 
@@ -100,9 +96,7 @@ export class ProcessReelUseCase {
         progress: currentProgress,
       });
     } finally {
-      if (fs.existsSync(workDir)) {
-        fs.rmSync(workDir, { recursive: true, force: true });
-      }
+      this.tempFileService.removeDirIfExists(workspace.workDir);
     }
   }
 
