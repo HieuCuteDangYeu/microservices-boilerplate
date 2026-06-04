@@ -113,7 +113,7 @@ export class AiController {
 
   @MessagePattern('ai.stream_question')
   async handleStreamQuestion(
-    @Payload() data: AskQuestionPayload & { conversationId: string },
+    @Payload() data: AskQuestionPayload,
   ): Promise<AskQuestionResponse> {
     if (
       !data ||
@@ -128,21 +128,12 @@ export class AiController {
     }
 
     try {
-      const answer: string = await this.streamChatUseCase.execute(
-        data.message,
-        data.userId,
-        (token: string) => {
-          try {
-            this.conversationClient.emit('ai.stream_token', {
-              conversationId: data.conversationId,
-              userId: data.userId,
-              token,
-            });
-          } catch {
-            // Swallow: don't let emit failure kill the stream
-          }
-        },
-      );
+      const answer: string = await this.streamChatUseCase.execute({
+        message: data.message,
+        userId: data.userId,
+        conversationId: data.conversationId,
+        memory: data.memory,
+      });
 
       if (!answer || answer.trim() === '') {
         return {
@@ -157,6 +148,7 @@ export class AiController {
     } catch (err: unknown) {
       const error = err as Error;
       console.error(`[StreamQuestion] ${error.message}`);
+
       throw new RpcException({
         statusCode: 500,
         message: error.message,

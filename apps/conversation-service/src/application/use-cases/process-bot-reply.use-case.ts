@@ -1,11 +1,12 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BOT_USER_ID } from '@common/constants/seed.constants';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Message } from '../../domain/entities/message.entity';
 import type {
   BotError,
   IAiService,
 } from '../../domain/interfaces/ai-service.interface';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
+import { BuildBotMemoryContextUseCase } from './build-bot-memory-context.use-case';
 
 export interface ProcessBotReplyResult {
   botReply?: Message;
@@ -17,8 +18,11 @@ export class ProcessBotReplyUseCase {
   private readonly logger = new Logger(ProcessBotReplyUseCase.name);
 
   constructor(
-    @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
-    @Inject('IAiService') private readonly aiService: IAiService,
+    @Inject('IChatRepository')
+    private readonly chatRepository: IChatRepository,
+    @Inject('IAiService')
+    private readonly aiService: IAiService,
+    private readonly buildBotMemoryContextUseCase: BuildBotMemoryContextUseCase,
   ) {}
 
   async execute(userMessage: Message): Promise<ProcessBotReplyResult> {
@@ -26,11 +30,17 @@ export class ProcessBotReplyUseCase {
     let botError: BotError | undefined;
 
     try {
-      const result = await this.aiService.askQuestionStream(
-        userMessage.content,
-        userMessage.senderId,
-        userMessage.conversationId,
-      );
+      const memory = await this.buildBotMemoryContextUseCase.execute({
+        conversationId: userMessage.conversationId,
+        currentMessageId: userMessage.id,
+      });
+
+      const result = await this.aiService.askQuestionStream({
+        message: userMessage.content,
+        userId: userMessage.senderId,
+        conversationId: userMessage.conversationId,
+        memory,
+      });
 
       if (result.answer) {
         const botMessage = new Message({

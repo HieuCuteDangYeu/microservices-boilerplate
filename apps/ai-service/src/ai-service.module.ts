@@ -1,9 +1,11 @@
+import { BuildChatPromptUseCase } from '@ai/application/use-cases/build-chat-prompt.use-case';
 import { GenerateEmbeddingUseCase } from '@ai/application/use-cases/generate-embedding.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
+import { ConversationTokenPublisherAdapter } from '@ai/infrastructure/adapters/conversation-token-publisher.adapter';
 import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
@@ -69,6 +71,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     GenerateEmbeddingUseCase,
     TranscribeAudioUseCase,
     TranscribeAudioBufferUseCase,
+    BuildChatPromptUseCase,
     {
       provide: 'IEmbeddingService',
       useClass: GeminiEmbeddingAdapter,
@@ -92,6 +95,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IRerankerService',
       useClass: SimpleRerankerAdapter,
+    },
+    {
+      provide: 'IChatTokenPublisher',
+      useClass: ConversationTokenPublisherAdapter,
     },
   ],
 })

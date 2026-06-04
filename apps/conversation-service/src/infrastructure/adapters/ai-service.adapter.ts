@@ -5,6 +5,7 @@ import { ClientProxy } from '@nestjs/microservices';
 import { catchError, lastValueFrom } from 'rxjs';
 import {
   AskQuestionResult,
+  AskQuestionStreamInput,
   IAiService,
 } from '../../domain/interfaces/ai-service.interface';
 
@@ -13,20 +14,17 @@ export class AiServiceAdapter implements IAiService {
   private readonly logger = new Logger(AiServiceAdapter.name);
 
   constructor(
-    @Inject('AI_SERVICE_RMQ') private readonly aiClient: ClientProxy,
+    @Inject('AI_SERVICE_RMQ')
+    private readonly aiClient: ClientProxy,
   ) {}
 
   async askQuestionStream(
-    message: string,
-    userId: string,
-    conversationId: string,
+    input: AskQuestionStreamInput,
   ): Promise<AskQuestionResult> {
-    const payload = { message, userId, conversationId };
-
     try {
       const response = await lastValueFrom(
         this.aiClient
-          .send<AskQuestionResponse>('ai.stream_question', payload)
+          .send<AskQuestionResponse>('ai.stream_question', input)
           .pipe(
             catchError((error) => {
               this.handleMicroserviceError(error);
@@ -54,6 +52,7 @@ export class AiServiceAdapter implements IAiService {
 
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to reach AI service for streaming: ${msg}`);
+
       return {
         answer: null,
         error: {

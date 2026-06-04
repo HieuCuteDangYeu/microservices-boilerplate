@@ -1,3 +1,5 @@
+import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
+
 export interface BotError {
   code: 'AI_UNAVAILABLE' | 'NO_CONTENT' | 'UNKNOWN';
   message: string;
@@ -8,10 +10,13 @@ export interface AskQuestionResult {
   error?: BotError;
 }
 
+export interface AskQuestionStreamInput {
+  message: string;
+  userId: string;
+  conversationId: string;
+  memory?: AiChatMemoryContext;
+}
+
 export interface IAiService {
-  askQuestionStream(
-    message: string,
-    userId: string,
-    conversationId: string,
-  ): Promise<AskQuestionResult>;
+  askQuestionStream(input: AskQuestionStreamInput): Promise<AskQuestionResult>;
 }
