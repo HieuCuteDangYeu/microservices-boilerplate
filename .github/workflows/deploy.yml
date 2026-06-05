@@ -20,8 +20,10 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
-      services_json: ${{ steps.detect.outputs.services_json }}
-      services_list: ${{ steps.detect.outputs.services_list }}
+      build_services_json: ${{ steps.detect.outputs.build_services_json }}
+      build_services_list: ${{ steps.detect.outputs.build_services_list }}
+      deploy_services_json: ${{ steps.detect.outputs.deploy_services_json }}
+      deploy_services_list: ${{ steps.detect.outputs.deploy_services_list }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -72,44 +74,70 @@ jobs:
           printf '%s\n' "$changed_files"
 
           build_all=false
+          deploy_all=false
           if printf '%s\n' "$changed_files" | grep -qx '__BUILD_ALL__'; then
             build_all=true
+            deploy_all=true
           fi
 
-          if printf '%s\n' "$changed_files" | grep -Eq '^(libs/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|tsconfig\.build\.json|nest-cli\.json|docker-compose\.yml|\.github/workflows/deploy\.yml)'; then
+          if printf '%s\n' "$changed_files" | grep -Eq '^(libs/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|tsconfig\.build\.json|nest-cli\.json)'; then
             build_all=true
+            deploy_all=true
           fi
 
-          affected=()
+          if printf '%s\n' "$changed_files" | grep -Eq '^docker-compose\.yml'; then
+            deploy_all=true
+          fi
+
+          build_services=()
+          deploy_services=()
           if [ "$build_all" = true ]; then
-            affected=("${all_services[@]}")
+            build_services=("${all_services[@]}")
+            deploy_services=("${all_services[@]}")
           else
             for service in "${all_services[@]}"; do
               if printf '%s\n' "$changed_files" | grep -Eq "^apps/${service}/"; then
-                affected+=("$service")
+                build_services+=("$service")
               fi
             done
+
+            if [ "$deploy_all" = true ]; then
+              deploy_services=("${all_services[@]}")
+            else
+              deploy_services=("${build_services[@]}")
+            fi
           fi
 
-          if [ "${#affected[@]}" -eq 0 ]; then
-            services_json='[]'
-            services_list=''
+          if [ "${#build_services[@]}" -eq 0 ]; then
+            build_services_json='[]'
+            build_services_list=''
           else
-            services_json="$(printf '%s\n' "${affected[@]}" | jq -R . | jq -cs .)"
-            services_list="${affected[*]}"
+            build_services_json="$(printf '%s\n' "${build_services[@]}" | jq -R . | jq -cs .)"
+            build_services_list="${build_services[*]}"
           fi
 
-          echo "Affected services: ${services_list:-none}"
-          echo "services_json=$services_json" >> "$GITHUB_OUTPUT"
-          echo "services_list=$services_list" >> "$GITHUB_OUTPUT"
+          if [ "${#deploy_services[@]}" -eq 0 ]; then
+            deploy_services_json='[]'
+            deploy_services_list=''
+          else
+            deploy_services_json="$(printf '%s\n' "${deploy_services[@]}" | jq -R . | jq -cs .)"
+            deploy_services_list="${deploy_services[*]}"
+          fi
+
+          echo "Build services: ${build_services_list:-none}"
+          echo "Deploy services: ${deploy_services_list:-none}"
+          echo "build_services_json=$build_services_json" >> "$GITHUB_OUTPUT"
+          echo "build_services_list=$build_services_list" >> "$GITHUB_OUTPUT"
+          echo "deploy_services_json=$deploy_services_json" >> "$GITHUB_OUTPUT"
+          echo "deploy_services_list=$deploy_services_list" >> "$GITHUB_OUTPUT"
 
   build-and-push:
     needs: detect-changes
-    if: (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && needs.detect-changes.outputs.services_json != '[]'
+    if: (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && needs.detect-changes.outputs.build_services_json != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: ${{ fromJson(needs.detect-changes.outputs.services_json) }}
+        service: ${{ fromJson(needs.detect-changes.outputs.build_services_json) }}
 
     steps:
       - name: Checkout repository
@@ -132,12 +160,12 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
 
   deploy:
-    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && (needs.detect-changes.outputs.services_json == '[]' || needs.build-and-push.result == 'success')
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && (needs.detect-changes.outputs.deploy_services_json == '[]' || needs.detect-changes.outputs.build_services_json == '[]' || needs.build-and-push.result == 'success')
     needs: [detect-changes, build-and-push]
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
-        if: needs.detect-changes.outputs.services_json != '[]'
+        if: needs.detect-changes.outputs.deploy_services_json != '[]'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DROPLET_IP }}
@@ -166,17 +194,23 @@ jobs:
 
             export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
             echo "DOCKERHUB_USERNAME is set"
-            CHANGED_SERVICES="${{ needs.detect-changes.outputs.services_list }}"
-            echo "Changed services: ${CHANGED_SERVICES}"
+            BUILD_SERVICES="${{ needs.detect-changes.outputs.build_services_list }}"
+            DEPLOY_SERVICES="${{ needs.detect-changes.outputs.deploy_services_list }}"
+            echo "Build services: ${BUILD_SERVICES:-none}"
+            echo "Deploy services: ${DEPLOY_SERVICES}"
 
             echo "Compose config check:"
             docker compose config
 
-            echo "Pulling changed images..."
-            docker compose pull ${CHANGED_SERVICES}
+            if [ -n "${BUILD_SERVICES}" ]; then
+              echo "Pulling changed images..."
+              docker compose pull ${BUILD_SERVICES}
+            else
+              echo "No images were rebuilt; skipping image pull."
+            fi
 
-            echo "Starting changed services..."
-            docker compose up -d --remove-orphans ${CHANGED_SERVICES}
+            echo "Starting deploy services..."
+            docker compose up -d --remove-orphans ${DEPLOY_SERVICES}
 
             echo "Cleaning old images..."
             docker image prune -f
@@ -184,5 +218,5 @@ jobs:
             echo "Deploy complete"
 
       - name: Skip deploy
-        if: needs.detect-changes.outputs.services_json == '[]'
+        if: needs.detect-changes.outputs.deploy_services_json == '[]'
         run: echo "No service changes detected. Skipping deploy."
