@@ -110,7 +110,7 @@ ${input.currentMessage}
           match.title ? `Title: ${match.title}` : undefined,
           match.description ? `Description: ${match.description}` : undefined,
           match.tags.length > 0 ? `Tags: ${match.tags.join(', ')}` : undefined,
-          match.startTime !== undefined && match.endTime !== undefined
+          this.hasTimestamp(match)
             ? `Timestamp: ${match.startTime.toFixed(1)}s - ${match.endTime.toFixed(1)}s`
             : undefined,
           match.matchedBy ? `Matched by: ${match.matchedBy}` : undefined,
@@ -120,5 +120,19 @@ ${input.currentMessage}
           .join('\n'),
       )
       .join('\n\n---\n\n');
+  }
+
+  private hasTimestamp(
+    match: ReelContextSearchResult,
+  ): match is ReelContextSearchResult & {
+    startTime: number;
+    endTime: number;
+  } {
+    return (
+      typeof match.startTime === 'number' &&
+      Number.isFinite(match.startTime) &&
+      typeof match.endTime === 'number' &&
+      Number.isFinite(match.endTime)
+    );
   }
 }

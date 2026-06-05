@@ -5,8 +5,8 @@ export interface ReelContextSearchResult {
   description?: string;
   tags: string[];
   chunkText: string;
-  startTime?: number;
-  endTime?: number;
+  startTime?: number | null;
+  endTime?: number | null;
   distance: number | null;
   score?: number; // hybrid retrieval score from content-service
   rerankScore?: number; // reranker score from ai-service
