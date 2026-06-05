@@ -16,25 +16,100 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-push:
+  detect-changes:
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      services_json: ${{ steps.detect.outputs.services_json }}
+      services_list: ${{ steps.detect.outputs.services_list }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Detect affected services
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          all_services=(
+            api-gateway
+            user-service
+            friend-service
+            auth-service
+            media-service
+            payment-service
+            mail-service
+            conversation-service
+            content-service
+            processing-service
+            ai-service
+          )
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            changed_files="__BUILD_ALL__"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.merge_commit_sha }}"
+            git fetch --no-tags --depth=1 origin "$base_sha"
+            changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
+          else
+            before_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+
+            if [ "$before_sha" = "0000000000000000000000000000000000000000" ]; then
+              changed_files="__BUILD_ALL__"
+            else
+              git fetch --no-tags --depth=1 origin "$before_sha"
+              changed_files="$(git diff --name-only "$before_sha" "$head_sha")"
+            fi
+          fi
+
+          echo "Changed files:"
+          printf '%s\n' "$changed_files"
+
+          build_all=false
+          if printf '%s\n' "$changed_files" | grep -qx '__BUILD_ALL__'; then
+            build_all=true
+          fi
+
+          if printf '%s\n' "$changed_files" | grep -Eq '^(libs/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|tsconfig\.build\.json|nest-cli\.json|docker-compose\.yml|\.github/workflows/deploy\.yml)'; then
+            build_all=true
+          fi
+
+          affected=()
+          if [ "$build_all" = true ]; then
+            affected=("${all_services[@]}")
+          else
+            for service in "${all_services[@]}"; do
+              if printf '%s\n' "$changed_files" | grep -Eq "^apps/${service}/"; then
+                affected+=("$service")
+              fi
+            done
+          fi
+
+          if [ "${#affected[@]}" -eq 0 ]; then
+            services_json='[]'
+            services_list=''
+          else
+            services_json="$(printf '%s\n' "${affected[@]}" | jq -R . | jq -cs .)"
+            services_list="${affected[*]}"
+          fi
+
+          echo "Affected services: ${services_list:-none}"
+          echo "services_json=$services_json" >> "$GITHUB_OUTPUT"
+          echo "services_list=$services_list" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    needs: detect-changes
+    if: (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && needs.detect-changes.outputs.services_json != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service:
-          [
-            api-gateway,
-            user-service,
-            friend-service,
-            auth-service,
-            media-service,
-            payment-service,
-            mail-service,
-            conversation-service,
-            content-service,
-            processing-service,
-            ai-service,
-          ]
+        service: ${{ fromJson(needs.detect-changes.outputs.services_json) }}
 
     steps:
       - name: Checkout repository
@@ -57,11 +132,12 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
 
   deploy:
-    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
-    needs: build-and-push
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && (needs.detect-changes.outputs.services_json == '[]' || needs.build-and-push.result == 'success')
+    needs: [detect-changes, build-and-push]
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
+        if: needs.detect-changes.outputs.services_json != '[]'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DROPLET_IP }}
@@ -90,17 +166,23 @@ jobs:
 
             export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
             echo "DOCKERHUB_USERNAME is set"
+            CHANGED_SERVICES="${{ needs.detect-changes.outputs.services_list }}"
+            echo "Changed services: ${CHANGED_SERVICES}"
 
             echo "Compose config check:"
             docker compose config
 
-            echo "Pulling images..."
-            docker compose pull
+            echo "Pulling changed images..."
+            docker compose pull ${CHANGED_SERVICES}
 
-            echo "Starting services..."
-            docker compose up -d --remove-orphans
+            echo "Starting changed services..."
+            docker compose up -d --remove-orphans ${CHANGED_SERVICES}
 
             echo "Cleaning old images..."
             docker image prune -f
 
             echo "Deploy complete"
+
+      - name: Skip deploy
+        if: needs.detect-changes.outputs.services_json == '[]'
+        run: echo "No service changes detected. Skipping deploy."
