@@ -80,7 +80,13 @@ jobs:
             deploy_all=true
           fi
 
-          if printf '%s\n' "$changed_files" | grep -Eq '^(libs/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|tsconfig\.build\.json|nest-cli\.json)'; then
+          if printf '%s\n' "$changed_files" | grep -Eq '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|tsconfig\.build\.json|nest-cli\.json)'; then
+            build_all=true
+            deploy_all=true
+          fi
+
+          shared_library_changes="$(printf '%s\n' "$changed_files" | grep -E '^libs/' | grep -Ev '^libs/common/src/ai/interfaces/conversation-memory\.interface\.ts$' || true)"
+          if [ -n "$shared_library_changes" ]; then
             build_all=true
             deploy_all=true
           fi
@@ -91,13 +97,29 @@ jobs:
 
           build_services=()
           deploy_services=()
+          add_build_service() {
+            local candidate="$1"
+
+            for service in "${build_services[@]}"; do
+              if [ "$service" = "$candidate" ]; then
+                return
+              fi
+            done
+
+            build_services+=("$candidate")
+          }
+
           if [ "$build_all" = true ]; then
             build_services=("${all_services[@]}")
             deploy_services=("${all_services[@]}")
           else
+            if printf '%s\n' "$changed_files" | grep -Eq '^libs/common/src/ai/interfaces/conversation-memory\.interface\.ts$'; then
+              add_build_service "ai-service"
+            fi
+
             for service in "${all_services[@]}"; do
               if printf '%s\n' "$changed_files" | grep -Eq "^apps/${service}/"; then
-                build_services+=("$service")
+                add_build_service "$service"
               fi
             done
 
