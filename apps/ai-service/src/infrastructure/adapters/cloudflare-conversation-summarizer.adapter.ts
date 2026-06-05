@@ -44,20 +44,22 @@ Do NOT keep:
 Rules:
 1. Preserve useful technical context.
 2. Keep it concise but complete.
-3. If the existing summary is empty, create a new one.
-4. If the latest turn changes the plan, update the summary.
-5. Maximum length: 1200 characters.
-6. Return only the updated summary text.
+3. If the existing summary is empty, create a new useful summary from the latest turn.
+4. Do not output markdown headings such as "**Summary**".
+5. Do not output placeholder text such as "No existing summary."
+6. If there is no useful information to summarize, return an empty string.
+7. Maximum length: 1200 characters.
+8. Return only the updated summary text.
 
 Existing summary:
-${input.existingSummary?.trim() || 'No existing summary.'}
+${input.existingSummary?.trim() || '(empty)'}
 
 Latest user message:
 ${input.userMessage}
 
 Latest assistant answer:
 ${input.assistantMessage}
-    `.trim();
+`.trim();
 
     try {
       const summary = await this.cloudflareTextClient.generateText({

@@ -65,9 +65,13 @@ export class UpdateConversationMemoryUseCase {
         },
       );
 
-      const summary = summarized.summary.trim();
+      const summary = this.sanitizeSummary(summarized.summary);
 
-      if (summary) {
+      if (this.isInvalidSummary(summary)) {
+        this.logger.warn(
+          `[ConversationMemory] skipped invalid summary conversationId=${payload.conversationId}`,
+        );
+      } else {
         nextSummary = summary;
         summaryUpdated = true;
       }
@@ -89,6 +93,29 @@ export class UpdateConversationMemoryUseCase {
       messageCount: saved.messageCount,
       summaryUpdated,
     };
+  }
+
+  private sanitizeSummary(value: string): string {
+    return value
+      .trim()
+      .replace(/^#+\s*summary\s*:?\s*/i, '')
+      .replace(/^\*\*summary\*\*\s*:?\s*/i, '')
+      .replace(/^summary\s*:?\s*/i, '')
+      .trim();
+  }
+
+  private isInvalidSummary(value: string): boolean {
+    const normalized = value.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    return (
+      normalized.length === 0 ||
+      normalized === 'no existing summary.' ||
+      normalized === 'no existing summary' ||
+      normalized === '(empty)' ||
+      normalized === 'empty' ||
+      normalized === '**summary** no existing summary.' ||
+      normalized === '**summary** no existing summary'
+    );
   }
 
   private getPositiveNumber(key: string, fallback: number): number {
