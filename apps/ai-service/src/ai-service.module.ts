@@ -9,13 +9,14 @@ import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcri
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/update-conversation-memory.use-case';
 import { UpsertUserMemoriesUseCase } from '@ai/application/use-cases/upsert-user-memories.use-case';
+import { CloudflareConversationSummarizerAdapter } from '@ai/infrastructure/adapters/cloudflare-conversation-summarizer.adapter';
+import { CloudflareMemoryExtractorAdapter } from '@ai/infrastructure/adapters/cloudflare-memory-extractor.adapter';
 import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
+import { CloudflareWorkersAiTextClient } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { ConversationTokenPublisherAdapter } from '@ai/infrastructure/adapters/conversation-token-publisher.adapter';
-import { GeminiConversationSummarizerAdapter } from '@ai/infrastructure/adapters/gemini-conversation-summarizer.adapter';
 import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
-import { GeminiMemoryExtractorAdapter } from '@ai/infrastructure/adapters/gemini-memory-extractor.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
@@ -124,7 +125,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IMemoryExtractorService',
-      useClass: GeminiMemoryExtractorAdapter,
+      useClass: CloudflareMemoryExtractorAdapter,
     },
     {
       provide: 'IConversationMemoryRepository',
@@ -132,8 +133,9 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IConversationSummarizerService',
-      useClass: GeminiConversationSummarizerAdapter,
+      useClass: CloudflareConversationSummarizerAdapter,
     },
+    CloudflareWorkersAiTextClient,
   ],
 })
 export class AiServiceModule {}

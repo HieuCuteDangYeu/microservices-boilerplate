@@ -1,33 +1,20 @@
-import {
+import { Injectable, Logger } from '@nestjs/common';
+import type {
   IConversationSummarizerService,
   SummarizeConversationTurnInput,
   SummarizeConversationTurnResult,
-} from '@ai/domain/interfaces/conversation-summarizer.service.interface';
-import { GenerativeModel, GoogleGenerativeAI } from '@google/generative-ai';
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+} from '../../domain/interfaces/conversation-summarizer.service.interface';
+import { CloudflareWorkersAiTextClient } from './cloudflare-workers-ai-text.client';
 
 @Injectable()
-export class GeminiConversationSummarizerAdapter implements IConversationSummarizerService {
+export class CloudflareConversationSummarizerAdapter implements IConversationSummarizerService {
   private readonly logger = new Logger(
-    GeminiConversationSummarizerAdapter.name,
+    CloudflareConversationSummarizerAdapter.name,
   );
-  private readonly model: GenerativeModel;
 
-  constructor(private readonly configService: ConfigService) {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
-
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is required for conversation summarizer');
-    }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    this.model = genAI.getGenerativeModel({
-      model:
-        this.configService.get<string>('GEMINI_MEMORY_MODEL') ||
-        'gemini-2.0-flash',
-    });
-  }
+  constructor(
+    private readonly cloudflareTextClient: CloudflareWorkersAiTextClient,
+  ) {}
 
   async summarizeTurn(
     input: SummarizeConversationTurnInput,
@@ -59,7 +46,7 @@ Rules:
 2. Keep it concise but complete.
 3. If the existing summary is empty, create a new one.
 4. If the latest turn changes the plan, update the summary.
-5. Maximum length: 1800 characters.
+5. Maximum length: 1200 characters.
 6. Return only the updated summary text.
 
 Existing summary:
@@ -73,8 +60,10 @@ ${input.assistantMessage}
     `.trim();
 
     try {
-      const result = await this.model.generateContent(prompt);
-      const summary = result.response.text().trim();
+      const summary = await this.cloudflareTextClient.generateText({
+        prompt,
+        maxTokens: 400,
+      });
 
       if (!summary) {
         return {
@@ -83,12 +72,14 @@ ${input.assistantMessage}
       }
 
       return {
-        summary: this.truncate(summary, 1800),
+        summary: this.truncate(summary, 1200),
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 
-      this.logger.warn(`Conversation summarization failed: ${message}`);
+      this.logger.warn(
+        `Cloudflare conversation summarization failed: ${message}`,
+      );
 
       return {
         summary: input.existingSummary?.trim() || '',

@@ -1,27 +1,41 @@
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { IConversationMemoryRepository } from '../../domain/interfaces/conversation-memory.repository.interface';
 import type { IConversationSummarizerService } from '../../domain/interfaces/conversation-summarizer.service.interface';
+
+export interface UpdateConversationMemoryResult {
+  messageCount: number;
+  summaryUpdated: boolean;
+}
 
 @Injectable()
 export class UpdateConversationMemoryUseCase {
   private readonly logger = new Logger(UpdateConversationMemoryUseCase.name);
 
   constructor(
+    private readonly configService: ConfigService,
+
     @Inject('IConversationMemoryRepository')
     private readonly conversationMemoryRepository: IConversationMemoryRepository,
+
     @Inject('IConversationSummarizerService')
     private readonly conversationSummarizerService: IConversationSummarizerService,
   ) {}
 
-  async execute(payload: ConversationTurnCompletedPayload): Promise<void> {
+  async execute(
+    payload: ConversationTurnCompletedPayload,
+  ): Promise<UpdateConversationMemoryResult> {
     if (
       !payload.userId ||
       !payload.conversationId ||
       !payload.userMessage?.trim() ||
       !payload.assistantMessage?.trim()
     ) {
-      return;
+      return {
+        messageCount: 0,
+        summaryUpdated: false,
+      };
     }
 
     const existing =
@@ -29,28 +43,57 @@ export class UpdateConversationMemoryUseCase {
         payload.conversationId,
       );
 
-    const summarized = await this.conversationSummarizerService.summarizeTurn({
-      existingSummary: existing?.summary,
-      userMessage: payload.userMessage,
-      assistantMessage: payload.assistantMessage,
-    });
+    const nextMessageCount = (existing?.messageCount ?? 0) + 2;
 
-    const summary = summarized.summary.trim();
+    const everyNTurns = this.getPositiveNumber(
+      'AI_CONVERSATION_MEMORY_EVERY_N_TURNS',
+      4,
+    );
 
-    if (!summary) {
-      return;
+    const shouldSummarize =
+      Math.floor(nextMessageCount / 2) % everyNTurns === 0;
+
+    let nextSummary = existing?.summary ?? '';
+    let summaryUpdated = false;
+
+    if (shouldSummarize) {
+      const summarized = await this.conversationSummarizerService.summarizeTurn(
+        {
+          existingSummary: existing?.summary,
+          userMessage: payload.userMessage,
+          assistantMessage: payload.assistantMessage,
+        },
+      );
+
+      const summary = summarized.summary.trim();
+
+      if (summary) {
+        nextSummary = summary;
+        summaryUpdated = true;
+      }
     }
 
     const saved = await this.conversationMemoryRepository.upsert({
       conversationId: payload.conversationId,
       userId: payload.userId,
-      summary,
-      messageCount: (existing?.messageCount ?? 0) + 2,
+      summary: nextSummary,
+      messageCount: nextMessageCount,
       lastMessageAt: new Date(),
     });
 
     this.logger.log(
-      `[ConversationMemory] updated conversationId=${saved.conversationId} messageCount=${saved.messageCount}`,
+      `[ConversationMemory] conversationId=${saved.conversationId} messageCount=${saved.messageCount} summaryUpdated=${summaryUpdated}`,
     );
+
+    return {
+      messageCount: saved.messageCount,
+      summaryUpdated,
+    };
+  }
+
+  private getPositiveNumber(key: string, fallback: number): number {
+    const value = Number(this.configService.get<string>(key) ?? fallback);
+
+    return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 }
