@@ -85,12 +85,6 @@ jobs:
             deploy_all=true
           fi
 
-          shared_library_changes="$(printf '%s\n' "$changed_files" | grep -E '^libs/' | grep -Ev '^libs/common/src/ai/interfaces/conversation-memory\.interface\.ts$' || true)"
-          if [ -n "$shared_library_changes" ]; then
-            build_all=true
-            deploy_all=true
-          fi
-
           if printf '%s\n' "$changed_files" | grep -Eq '^docker-compose\.yml'; then
             deploy_all=true
           fi
@@ -109,14 +103,49 @@ jobs:
             build_services+=("$candidate")
           }
 
+          add_services_importing_common_file() {
+            local common_file="$1"
+            local import_path="${common_file#libs/common/src/}"
+            local matched=false
+
+            import_path="@common/${import_path%.ts}"
+            echo "Resolving common file ${common_file} as import ${import_path}"
+
+            for service in "${all_services[@]}"; do
+              if grep -R -q -F --include='*.ts' "$import_path" "apps/${service}/src"; then
+                echo "Common file ${common_file} affects ${service}"
+                add_build_service "$service"
+                matched=true
+              fi
+            done
+
+            [ "$matched" = true ]
+          }
+
+          if [ "$build_all" != true ]; then
+            while IFS= read -r common_file; do
+              if [ -z "$common_file" ]; then
+                continue
+              fi
+
+              if ! add_services_importing_common_file "$common_file"; then
+                build_all=true
+                deploy_all=true
+                break
+              fi
+            done < <(printf '%s\n' "$changed_files" | grep -E '^libs/common/src/.*\.ts$' || true)
+          fi
+
+          shared_library_changes="$(printf '%s\n' "$changed_files" | grep -E '^libs/' | grep -Ev '^libs/common/src/.*\.ts$' || true)"
+          if [ -n "$shared_library_changes" ]; then
+            build_all=true
+            deploy_all=true
+          fi
+
           if [ "$build_all" = true ]; then
             build_services=("${all_services[@]}")
             deploy_services=("${all_services[@]}")
           else
-            if printf '%s\n' "$changed_files" | grep -Eq '^libs/common/src/ai/interfaces/conversation-memory\.interface\.ts$'; then
-              add_build_service "ai-service"
-            fi
-
             for service in "${all_services[@]}"; do
               if printf '%s\n' "$changed_files" | grep -Eq "^apps/${service}/"; then
                 add_build_service "$service"
