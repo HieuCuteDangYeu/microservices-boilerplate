@@ -1,4 +1,5 @@
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
+import { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
@@ -60,6 +61,18 @@ export class AiServiceAdapter implements IAiService {
           message: 'AI service is temporarily unavailable',
         },
       };
+    }
+  }
+
+  emitConversationTurnCompleted(input: ConversationTurnCompletedPayload): void {
+    try {
+      this.aiClient.emit('ai.conversation_turn_completed', input);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.warn(
+        `Failed to emit ai.conversation_turn_completed for conversation ${input.conversationId}: ${message}`,
+      );
     }
   }
 

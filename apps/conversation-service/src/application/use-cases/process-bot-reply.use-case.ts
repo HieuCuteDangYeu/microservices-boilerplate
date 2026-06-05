@@ -54,6 +54,14 @@ export class ProcessBotReplyUseCase {
         });
 
         botReply = await this.chatRepository.createMessage(botMessage);
+
+        this.aiService.emitConversationTurnCompleted({
+          conversationId: userMessage.conversationId,
+          userId: userMessage.senderId,
+          userMessage: userMessage.content,
+          assistantMessage: result.answer,
+        });
+
         this.logger.debug(
           `Bot reply ${botReply.id} saved for conversation ${userMessage.conversationId}`,
         );

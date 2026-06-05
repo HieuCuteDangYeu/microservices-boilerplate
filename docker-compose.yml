@@ -153,6 +153,8 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      AI_DATABASE_URL: ${AI_DATABASE_URL}
     depends_on:
       rabbitmq:
         condition: service_healthy

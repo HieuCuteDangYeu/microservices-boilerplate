@@ -1,4 +1,5 @@
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
+import { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 
 export interface BotError {
   code: 'AI_UNAVAILABLE' | 'NO_CONTENT' | 'UNKNOWN';
@@ -19,4 +20,5 @@ export interface AskQuestionStreamInput {
 
 export interface IAiService {
   askQuestionStream(input: AskQuestionStreamInput): Promise<AskQuestionResult>;
+  emitConversationTurnCompleted(input: ConversationTurnCompletedPayload): void;
 }

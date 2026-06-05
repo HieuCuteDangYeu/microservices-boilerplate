@@ -1,12 +1,14 @@
+import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
 import type { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
-import { Controller, Inject } from '@nestjs/common';
+import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
+import { Controller } from '@nestjs/common';
 import {
-  ClientProxy,
+  EventPattern,
   MessagePattern,
   Payload,
   RpcException,
@@ -20,8 +22,7 @@ export class AiController {
     private readonly transcribeAudioUseCase: TranscribeAudioUseCase,
     private readonly transcribeAudioBufferUseCase: TranscribeAudioBufferUseCase,
     private readonly streamChatUseCase: StreamChatUseCase,
-    @Inject('CONVERSATION_RMQ')
-    private readonly conversationClient: ClientProxy,
+    private readonly handleConversationTurnCompletedUseCase: HandleConversationTurnCompletedUseCase,
   ) {}
 
   @MessagePattern('ai.generate_embedding')
@@ -153,6 +154,18 @@ export class AiController {
         statusCode: 500,
         message: error.message,
       });
+    }
+  }
+
+  @EventPattern('ai.conversation_turn_completed')
+  async handleConversationTurnCompleted(
+    @Payload() payload: ConversationTurnCompletedPayload,
+  ): Promise<void> {
+    try {
+      await this.handleConversationTurnCompletedUseCase.execute(payload);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[ConversationTurnCompleted] ${message}`);
     }
   }
 }

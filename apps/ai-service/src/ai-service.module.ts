@@ -1,15 +1,22 @@
 import { BuildChatPromptUseCase } from '@ai/application/use-cases/build-chat-prompt.use-case';
+import { ExtractUserMemoriesFromTurnUseCase } from '@ai/application/use-cases/extract-user-memories-from-turn.use-case';
 import { GenerateEmbeddingUseCase } from '@ai/application/use-cases/generate-embedding.use-case';
+import { GetRelevantUserMemoriesUseCase } from '@ai/application/use-cases/get-relevant-user-memories.use-case';
+import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
+import { UpsertUserMemoriesUseCase } from '@ai/application/use-cases/upsert-user-memories.use-case';
 import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { ConversationTokenPublisherAdapter } from '@ai/infrastructure/adapters/conversation-token-publisher.adapter';
 import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
+import { GeminiMemoryExtractorAdapter } from '@ai/infrastructure/adapters/gemini-memory-extractor.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
+import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
+import { PrismaUserMemoryRepository } from '@ai/infrastructure/repositories/prisma-user-memory.repository';
 import { R2AudioStorageService } from '@ai/infrastructure/services/r2-audio-storage.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -67,11 +74,16 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   ],
   controllers: [AiController],
   providers: [
+    PrismaService,
     StreamChatUseCase,
     GenerateEmbeddingUseCase,
     TranscribeAudioUseCase,
     TranscribeAudioBufferUseCase,
     BuildChatPromptUseCase,
+    GetRelevantUserMemoriesUseCase,
+    ExtractUserMemoriesFromTurnUseCase,
+    UpsertUserMemoriesUseCase,
+    HandleConversationTurnCompletedUseCase,
     {
       provide: 'IEmbeddingService',
       useClass: GeminiEmbeddingAdapter,
@@ -99,6 +111,14 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IChatTokenPublisher',
       useClass: ConversationTokenPublisherAdapter,
+    },
+    {
+      provide: 'IUserMemoryRepository',
+      useClass: PrismaUserMemoryRepository,
+    },
+    {
+      provide: 'IMemoryExtractorService',
+      useClass: GeminiMemoryExtractorAdapter,
     },
   ],
 })
