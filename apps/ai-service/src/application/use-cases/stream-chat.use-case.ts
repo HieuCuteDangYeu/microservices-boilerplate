@@ -1,3 +1,4 @@
+import { GetConversationMemoryUseCase } from '@ai/application/use-cases/get-conversation-memory.use-case';
 import { GetRelevantUserMemoriesUseCase } from '@ai/application/use-cases/get-relevant-user-memories.use-case';
 import type { IChatTokenPublisher } from '@ai/domain/interfaces/chat-token-publisher.interface';
 import type { IContentService } from '@ai/domain/interfaces/content.service.interface';
@@ -25,6 +26,7 @@ export class StreamChatUseCase {
     private readonly chatTokenPublisher: IChatTokenPublisher,
     private readonly buildChatPromptUseCase: BuildChatPromptUseCase,
     private readonly getRelevantUserMemoriesUseCase: GetRelevantUserMemoriesUseCase,
+    private readonly getConversationMemoryUseCase: GetConversationMemoryUseCase,
   ) {}
 
   async execute(input: {
@@ -57,8 +59,12 @@ export class StreamChatUseCase {
       limit: 12,
     });
 
+    const conversationMemory = await this.getConversationMemoryUseCase.execute({
+      conversationId: input.conversationId,
+    });
+
     this.logger.log(
-      `[RAG] conversation=${input.conversationId} retrieved=${matches.length} reranked=${rerankedMatches.length} memoryMessages=${input.memory?.recentMessages?.length ?? 0} top=${rerankedMatches
+      `[RAG] conversation=${input.conversationId} retrieved=${matches.length} reranked=${rerankedMatches.length} memoryMessages=${input.memory?.recentMessages?.length ?? 0} memoryItems=${userMemories.memories.length} hasConversationSummary=${Boolean(conversationMemory.summary)} top=${rerankedMatches
         .map(
           (item) =>
             `${item.matchedBy}:retrieval=${item.score ?? 'n/a'}:rerank=${item.rerankScore ?? 'n/a'}:${item.chunkId}`,
@@ -69,6 +75,7 @@ export class StreamChatUseCase {
     const systemPrompt = this.buildChatPromptUseCase.execute({
       currentMessage: input.message,
       memory: input.memory,
+      conversationMemory,
       userMemories,
       retrievedChunks: rerankedMatches,
     });

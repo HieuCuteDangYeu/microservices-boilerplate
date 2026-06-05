@@ -1,6 +1,7 @@
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 import { Injectable, Logger } from '@nestjs/common';
 import { ExtractUserMemoriesFromTurnUseCase } from './extract-user-memories-from-turn.use-case';
+import { UpdateConversationMemoryUseCase } from './update-conversation-memory.use-case';
 import { UpsertUserMemoriesUseCase } from './upsert-user-memories.use-case';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class HandleConversationTurnCompletedUseCase {
   constructor(
     private readonly extractUserMemoriesFromTurnUseCase: ExtractUserMemoriesFromTurnUseCase,
     private readonly upsertUserMemoriesUseCase: UpsertUserMemoriesUseCase,
+    private readonly updateConversationMemoryUseCase: UpdateConversationMemoryUseCase,
   ) {}
 
   async execute(payload: ConversationTurnCompletedPayload): Promise<void> {
@@ -23,6 +25,8 @@ export class HandleConversationTurnCompletedUseCase {
     ) {
       return;
     }
+
+    await this.updateConversationMemoryUseCase.execute(payload);
 
     const extracted = await this.extractUserMemoriesFromTurnUseCase.execute({
       userId: payload.userId,
