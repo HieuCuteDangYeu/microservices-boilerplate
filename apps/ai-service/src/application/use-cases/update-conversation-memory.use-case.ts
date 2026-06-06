@@ -60,6 +60,7 @@ export class UpdateConversationMemoryUseCase {
       const summarized = await this.conversationSummarizerService.summarizeTurn(
         {
           existingSummary: existing?.summary,
+          recentMessages: payload.memory?.recentMessages,
           userMessage: payload.userMessage,
           assistantMessage: payload.assistantMessage,
         },
@@ -86,7 +87,7 @@ export class UpdateConversationMemoryUseCase {
     });
 
     this.logger.log(
-      `[ConversationMemory] conversationId=${saved.conversationId} messageCount=${saved.messageCount} summaryUpdated=${summaryUpdated}`,
+      `[ConversationMemory] conversationId=${saved.conversationId} messageCount=${saved.messageCount} summaryUpdated=${summaryUpdated} recentMessages=${payload.memory?.recentMessages?.length ?? 0}`,
     );
 
     return {

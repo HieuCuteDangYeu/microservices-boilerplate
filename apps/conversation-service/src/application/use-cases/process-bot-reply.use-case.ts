@@ -60,6 +60,7 @@ export class ProcessBotReplyUseCase {
           userId: userMessage.senderId,
           userMessage: userMessage.content,
           assistantMessage: result.answer,
+          memory,
         });
 
         this.logger.debug(

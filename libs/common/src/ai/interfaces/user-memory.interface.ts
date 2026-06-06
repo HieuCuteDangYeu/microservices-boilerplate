@@ -1,3 +1,5 @@
+import type { AiChatMemoryContext } from './chat-memory-context.interface';
+
 export type UserMemoryType =
   | 'PREFERENCE'
   | 'PROFILE'
@@ -26,4 +28,5 @@ export interface ConversationTurnCompletedPayload {
   userId: string;
   userMessage: string;
   assistantMessage: string;
+  memory?: AiChatMemoryContext;
 }

@@ -1,5 +1,8 @@
+import type { AiChatMessageContext } from '@common/ai/interfaces/chat-memory-context.interface';
+
 export interface SummarizeConversationTurnInput {
   existingSummary?: string;
+  recentMessages?: AiChatMessageContext[];
   userMessage: string;
   assistantMessage: string;
 }
