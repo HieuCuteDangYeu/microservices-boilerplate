@@ -1,5 +1,7 @@
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
+import { MessageAnchorExpansionResponse } from '@common/conversation/interfaces/message-anchor-expansion.interface';
+import { MessageAnchorWindowResponse } from '@common/conversation/interfaces/message-anchor-window.interface';
 import type {
   CompletedVideoProcessingPayload,
   FailedVideoProcessingPayload,
@@ -12,7 +14,10 @@ import {
   RpcException,
 } from '@nestjs/microservices';
 import { CreateConversationUseCase } from '../../application/use-cases/create-conversastion.use-case';
+import { GetAnchorNewerMessagesUseCase } from '../../application/use-cases/get-anchor-newer-messages.use-case';
+import { GetAnchorOlderMessagesUseCase } from '../../application/use-cases/get-anchor-older-messages.use-case';
 import { GetConversationUseCase } from '../../application/use-cases/get-conversation.use-case';
+import { GetMessagesAroundUseCase } from '../../application/use-cases/get-messages-around.use-case';
 import { GetMessagesUseCase } from '../../application/use-cases/get-messages.use-case';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
@@ -28,6 +33,9 @@ export class ConversationMicroserviceController {
   constructor(
     private readonly sendMessageUseCase: SendMessageUseCase,
     private readonly getMessagesUseCase: GetMessagesUseCase,
+    private readonly getMessagesAroundUseCase: GetMessagesAroundUseCase,
+    private readonly getAnchorOlderMessagesUseCase: GetAnchorOlderMessagesUseCase,
+    private readonly getAnchorNewerMessagesUseCase: GetAnchorNewerMessagesUseCase,
     private readonly getConversationUseCase: GetConversationUseCase,
     private readonly createConversationUseCase: CreateConversationUseCase,
     private readonly getUserConversationsUseCase: GetUserConversationsUseCase,
@@ -79,6 +87,101 @@ export class ConversationMicroserviceController {
     } catch (err: unknown) {
       const error = err as Error;
       this.logger.error(`❌ [GetMessages] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('get_messages_around')
+  async handleGetMessagesAround(
+    @Payload()
+    data: {
+      conversationId: string;
+      userId: string;
+      messageId: string;
+      before?: number;
+      after?: number;
+    },
+  ): Promise<MessageAnchorWindowResponse> {
+    try {
+      const result = await this.getMessagesAroundUseCase.execute(
+        data.conversationId,
+        data.userId,
+        data.messageId,
+        Number(data.before) || 30,
+        Number(data.after) || 30,
+      );
+
+      return {
+        targetMessageId: result.targetMessageId,
+        messages: result.messages.map((message) => ChatMapper.toDto(message)),
+        hasOlder: result.hasOlder,
+        hasNewer: result.hasNewer,
+        ...(result.oldestCursor ? { oldestCursor: result.oldestCursor } : {}),
+        ...(result.newestCursor ? { newestCursor: result.newestCursor } : {}),
+      };
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [GetMessagesAround] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('get_anchor_older_messages')
+  async handleGetAnchorOlderMessages(
+    @Payload()
+    data: {
+      conversationId: string;
+      userId: string;
+      cursor: string;
+      limit?: number;
+    },
+  ): Promise<MessageAnchorExpansionResponse> {
+    try {
+      const result = await this.getAnchorOlderMessagesUseCase.execute(
+        data.conversationId,
+        data.userId,
+        data.cursor,
+        Number(data.limit) || 30,
+      );
+
+      return {
+        messages: result.messages.map((message) => ChatMapper.toDto(message)),
+        hasMore: result.hasMore,
+        ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+      };
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [GetAnchorOlderMessages] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('get_anchor_newer_messages')
+  async handleGetAnchorNewerMessages(
+    @Payload()
+    data: {
+      conversationId: string;
+      userId: string;
+      cursor: string;
+      limit?: number;
+    },
+  ): Promise<MessageAnchorExpansionResponse> {
+    try {
+      const result = await this.getAnchorNewerMessagesUseCase.execute(
+        data.conversationId,
+        data.userId,
+        data.cursor,
+        Number(data.limit) || 30,
+      );
+
+      return {
+        messages: result.messages.map((message) => ChatMapper.toDto(message)),
+        hasMore: result.hasMore,
+        ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+      };
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [GetAnchorNewerMessages] Error: ${error.message}`);
       throw new RpcException(error.message);
     }
   }

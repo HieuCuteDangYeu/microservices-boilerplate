@@ -7,6 +7,8 @@ import { CreateConversationDto } from '@common/conversation/dtos/create-conversa
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import { MessageDto } from '@common/conversation/dtos/message.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
+import { MessageAnchorExpansionResponse } from '@common/conversation/interfaces/message-anchor-expansion.interface';
+import { MessageAnchorWindowResponse } from '@common/conversation/interfaces/message-anchor-window.interface';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
   BadRequestException,
@@ -120,6 +122,86 @@ export class ConversationController {
         limit: limit ? Number(limit) : 20,
         cursor,
       }),
+    );
+  }
+
+  @Get(':id/messages/around/:messageId')
+  @ApiOperation({ summary: 'Lấy cửa sổ tin nhắn quanh một tin nhắn mục tiêu' })
+  @ApiOkResponse({ type: MessageDto, isArray: true })
+  @ApiQuery({ name: 'before', required: false, type: Number })
+  @ApiQuery({ name: 'after', required: false, type: Number })
+  async getMessagesAround(
+    @Param('id') conversationId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: AuthUser,
+    @Query('before') before?: number,
+    @Query('after') after?: number,
+  ): Promise<MessageAnchorWindowResponse> {
+    return await lastValueFrom(
+      this.conversationClient.send<MessageAnchorWindowResponse>(
+        'get_messages_around',
+        {
+          conversationId,
+          userId: user.id,
+          messageId,
+          before: before ? Number(before) : 30,
+          after: after ? Number(after) : 30,
+        },
+      ),
+    );
+  }
+
+  @Get(':id/messages/anchor/older')
+  @ApiOperation({ summary: 'Lấy thêm tin nhắn cũ hơn trong anchor timeline' })
+  @ApiQuery({ name: 'cursor', required: true, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getAnchorOlderMessages(
+    @Param('id') conversationId: string,
+    @CurrentUser() user: AuthUser,
+    @Query('cursor') cursor: string,
+    @Query('limit') limit?: number,
+  ): Promise<MessageAnchorExpansionResponse> {
+    if (typeof cursor !== 'string' || cursor.trim().length === 0) {
+      throw new BadRequestException('cursor must be a non-empty string');
+    }
+
+    return await lastValueFrom(
+      this.conversationClient.send<MessageAnchorExpansionResponse>(
+        'get_anchor_older_messages',
+        {
+          conversationId,
+          userId: user.id,
+          cursor: cursor.trim(),
+          limit: limit ? Number(limit) : 30,
+        },
+      ),
+    );
+  }
+
+  @Get(':id/messages/anchor/newer')
+  @ApiOperation({ summary: 'Lấy thêm tin nhắn mới hơn trong anchor timeline' })
+  @ApiQuery({ name: 'cursor', required: true, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getAnchorNewerMessages(
+    @Param('id') conversationId: string,
+    @CurrentUser() user: AuthUser,
+    @Query('cursor') cursor: string,
+    @Query('limit') limit?: number,
+  ): Promise<MessageAnchorExpansionResponse> {
+    if (typeof cursor !== 'string' || cursor.trim().length === 0) {
+      throw new BadRequestException('cursor must be a non-empty string');
+    }
+
+    return await lastValueFrom(
+      this.conversationClient.send<MessageAnchorExpansionResponse>(
+        'get_anchor_newer_messages',
+        {
+          conversationId,
+          userId: user.id,
+          cursor: cursor.trim(),
+          limit: limit ? Number(limit) : 30,
+        },
+      ),
     );
   }
 

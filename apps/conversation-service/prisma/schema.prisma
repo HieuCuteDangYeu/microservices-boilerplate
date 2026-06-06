@@ -1,6 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../../node_modules/@prisma/conversation-client"
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/@prisma/conversation-client"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
@@ -32,59 +32,60 @@ model Conversation {
   id             String   @id @default(auto()) @map("_id") @db.ObjectId
   creatorId      String   @map("creator_id")
   participantIds String[]
-  
+
   // lastMessage chỉ lưu text hiển thị preview (ví dụ: "Tin nhắn mới", "[Hình ảnh]")
   // Vì nội dung thật đã bị mã hóa
-  lastMessage    String?
-  lastMessageAt  DateTime?
-  
-  isGroup        Boolean
-  updatedAt      DateTime @updatedAt
-  createdAt      DateTime @default(now())
+  lastMessage   String?
+  lastMessageAt DateTime?
 
-  messages       Message[]
+  isGroup   Boolean
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 
-  @@map("conversations")
+  messages Message[]
+
   @@index([participantIds])
+  @@map("conversations")
 }
 
 model Message {
-  id             String   @id @default(auto()) @map("_id") @db.ObjectId
-  type           String   @default("text")
+  id              String  @id @default(auto()) @map("_id") @db.ObjectId
+  type            String  @default("text")
   clientMessageId String?
 
   // 2. SIGNAL TYPE: Dùng cho Mã hóa (Server chỉ chuyển tiếp)
   // 1: WhisperMessage (Tin bình thường)
   // 3: PreKeyWhisperMessage (Tin thiết lập phiên X3DH)
-  signalType     Int      @map("signal_type")
+  signalType Int @map("signal_type")
 
-  content           String   
-  media             Json?
+  content String
+  media   Json?
 
-  registrationId Int?     // ID thiết bị người gửi
+  registrationId Int? // ID thiết bị người gửi
   senderId       String
-  isRecalled     Boolean  @default(false)
+  isRecalled     Boolean   @default(false)
   recalledAt     DateTime?
-  replyToId      String?  @db.ObjectId
+  replyToId      String?   @db.ObjectId
   replyPreview   Json?
   reactions      Json?
-  
-  conversationId String   @db.ObjectId
+
+  conversationId String       @db.ObjectId
   conversation   Conversation @relation(fields: [conversationId], references: [id])
 
-  createdAt      DateTime @default(now())
-  readBy         MessageReadStatus[]
-  
+  createdAt DateTime            @default(now())
+  readBy    MessageReadStatus[]
+
   @@index([conversationId, createdAt(sort: Desc)])
+  @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([replyToId])
   @@map("messages")
 }
 
 // MODEL MỚI: Quản lý khóa Signal (Key Store)
 model UserKeyBundle {
-  id             String   @id @default(auto()) @map("_id") @db.ObjectId
-  
-  userId         String   @unique // Mỗi user 1 bộ key (hoặc tách theo deviceId nếu cần)
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  userId         String @unique // Mỗi user 1 bộ key (hoặc tách theo deviceId nếu cần)
   deviceId       Int
   registrationId Int
   identityKey    String
@@ -93,8 +94,8 @@ model UserKeyBundle {
   signedPreKey   SignedPreKey
   oneTimePreKeys OneTimePreKey[]
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("user_key_bundles")
 }

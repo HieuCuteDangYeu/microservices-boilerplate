@@ -6,7 +6,10 @@ import Redis from 'ioredis';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { BuildBotMemoryContextUseCase } from 'apps/conversation-service/src/application/use-cases/build-bot-memory-context.use-case';
 import { CreateConversationUseCase } from 'apps/conversation-service/src/application/use-cases/create-conversastion.use-case';
+import { GetAnchorNewerMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-anchor-newer-messages.use-case';
+import { GetAnchorOlderMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-anchor-older-messages.use-case';
 import { GetConversationUseCase } from 'apps/conversation-service/src/application/use-cases/get-conversation.use-case';
+import { GetMessagesAroundUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages-around.use-case';
 import { GetMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages.use-case';
 import { GetUserConversationsUseCase } from 'apps/conversation-service/src/application/use-cases/get-user-conversations.use-case';
 import { ProcessBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/process-bot-reply.use-case';
@@ -83,6 +86,9 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
 
     // --- Use Cases ---
     SendMessageUseCase,
+    GetMessagesAroundUseCase,
+    GetAnchorOlderMessagesUseCase,
+    GetAnchorNewerMessagesUseCase,
     GetMessagesUseCase,
     GetConversationUseCase,
     CreateConversationUseCase,

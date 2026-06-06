@@ -24,6 +24,8 @@ import {
 } from '../../domain/entities/message.entity';
 import {
   IChatRepository,
+  type AnchorMessageExpansion,
+  type AnchorMessageWindow,
   type MediaProcessingSyncResult,
 } from '../../domain/interfaces/chat.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
@@ -62,6 +64,11 @@ const RECALLED_PREVIEW_CONTENT = 'Tin nhắn đã thu hồi';
 const RECALLED_LAST_MESSAGE = '🚫 Message recalled';
 const RECALL_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MEDIA_PROCESSING_TTL_SECONDS = 60 * 60 * 24;
+
+type AnchorBoundary = {
+  createdAt: Date;
+  stableId: string;
+};
 
 @Injectable()
 export class PrismaChatRepository implements IChatRepository {
@@ -371,6 +378,136 @@ export class PrismaChatRepository implements IChatRepository {
 
     // Trả về kết quả (Reverse để client dễ render: Trên cùng là tin cũ, dưới cùng là tin mới)
     return domainMsgs.reverse();
+  }
+
+  async findMessageWindowAroundId(
+    conversationId: string,
+    messageId: string,
+    before: number,
+    after: number,
+  ): Promise<AnchorMessageWindow> {
+    const targetRecord = await this.resolveAnchorBoundaryRecord(
+      conversationId,
+      messageId,
+    );
+    const targetBoundary = this.toAnchorBoundary(targetRecord);
+    const normalizedBefore = Math.max(0, before);
+    const normalizedAfter = Math.max(0, after);
+
+    const [newerRecords, olderRecords] = await Promise.all([
+      normalizedBefore > 0
+        ? this.prisma.message.findMany({
+            where: this.buildNewerThanBoundaryWhere(
+              conversationId,
+              targetBoundary,
+            ),
+            orderBy: this.anchorOrderBy(),
+            take: normalizedBefore,
+          })
+        : Promise.resolve([]),
+      normalizedAfter > 0
+        ? this.prisma.message.findMany({
+            where: this.buildOlderThanBoundaryWhere(
+              conversationId,
+              targetBoundary,
+            ),
+            orderBy: this.anchorOrderBy(),
+            take: normalizedAfter,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const combinedRecords = [...newerRecords, targetRecord, ...olderRecords];
+    const messages = await this.mapPrismaMessagesToDomain(combinedRecords);
+    const newestRecord = combinedRecords[0] ?? targetRecord;
+    const oldestRecord =
+      combinedRecords[combinedRecords.length - 1] ?? targetRecord;
+
+    const [hasNewerRecord, hasOlderRecord] = await Promise.all([
+      this.prisma.message.findFirst({
+        where: this.buildNewerThanBoundaryWhere(
+          conversationId,
+          this.toAnchorBoundary(newestRecord),
+        ),
+        select: { id: true },
+      }),
+      this.prisma.message.findFirst({
+        where: this.buildOlderThanBoundaryWhere(
+          conversationId,
+          this.toAnchorBoundary(oldestRecord),
+        ),
+        select: { id: true },
+      }),
+    ]);
+
+    return {
+      targetMessageId: targetRecord.id,
+      messages,
+      hasOlder: Boolean(hasOlderRecord),
+      hasNewer: Boolean(hasNewerRecord),
+      oldestCursor: oldestRecord.id,
+      newestCursor: newestRecord.id,
+    };
+  }
+
+  async findOlderMessagesFromAnchorCursor(
+    conversationId: string,
+    cursor: string,
+    limit: number,
+  ): Promise<AnchorMessageExpansion> {
+    const boundaryRecord = await this.resolveAnchorBoundaryRecord(
+      conversationId,
+      cursor,
+    );
+    const normalizedLimit = Math.max(1, limit);
+    const records = await this.prisma.message.findMany({
+      where: this.buildOlderThanBoundaryWhere(
+        conversationId,
+        this.toAnchorBoundary(boundaryRecord),
+      ),
+      orderBy: this.anchorOrderBy(),
+      take: normalizedLimit + 1,
+    });
+    const hasMore = records.length > normalizedLimit;
+    const visibleRecords = records.slice(0, normalizedLimit);
+
+    return {
+      messages: await this.mapPrismaMessagesToDomain(visibleRecords),
+      hasMore,
+      ...(visibleRecords.length > 0
+        ? { nextCursor: visibleRecords[visibleRecords.length - 1]?.id }
+        : {}),
+    };
+  }
+
+  async findNewerMessagesFromAnchorCursor(
+    conversationId: string,
+    cursor: string,
+    limit: number,
+  ): Promise<AnchorMessageExpansion> {
+    const boundaryRecord = await this.resolveAnchorBoundaryRecord(
+      conversationId,
+      cursor,
+    );
+    const normalizedLimit = Math.max(1, limit);
+    const records = await this.prisma.message.findMany({
+      where: this.buildNewerThanBoundaryWhere(
+        conversationId,
+        this.toAnchorBoundary(boundaryRecord),
+      ),
+      orderBy: this.anchorOrderBy(),
+      take: normalizedLimit + 1,
+    });
+    const hasMore = records.length > normalizedLimit;
+    const visibleRecords = records.slice(0, normalizedLimit);
+
+    return {
+      messages: await this.mapPrismaMessagesToDomain(visibleRecords),
+      hasMore,
+      ...(visibleRecords.length > 0
+        ? { nextCursor: visibleRecords[0]?.id }
+        : {}),
+    };
   }
 
   private async cacheMessagesToRedis(key: string, messages: Message[]) {
@@ -951,6 +1088,104 @@ export class PrismaChatRepository implements IChatRepository {
         'You are not allowed to access messages in this conversation',
       );
     }
+  }
+
+  private anchorOrderBy(): Prisma.MessageOrderByWithRelationInput[] {
+    return [{ createdAt: 'desc' }, { id: 'desc' }];
+  }
+
+  private toAnchorBoundary(message: {
+    createdAt: Date;
+    id: string;
+  }): AnchorBoundary {
+    return {
+      createdAt: message.createdAt,
+      stableId: message.id,
+    };
+  }
+
+  private buildOlderThanBoundaryWhere(
+    conversationId: string,
+    boundary: AnchorBoundary,
+  ): Prisma.MessageWhereInput {
+    return {
+      conversationId,
+      OR: [
+        { createdAt: { lt: boundary.createdAt } },
+        {
+          createdAt: boundary.createdAt,
+          id: { lt: boundary.stableId },
+        },
+      ],
+    };
+  }
+
+  private buildNewerThanBoundaryWhere(
+    conversationId: string,
+    boundary: AnchorBoundary,
+  ): Prisma.MessageWhereInput {
+    return {
+      conversationId,
+      OR: [
+        { createdAt: { gt: boundary.createdAt } },
+        {
+          createdAt: boundary.createdAt,
+          id: { gt: boundary.stableId },
+        },
+      ],
+    };
+  }
+
+  private async resolveAnchorBoundaryRecord(
+    conversationId: string,
+    messageId: string,
+  ) {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+
+    if (!message || message.conversationId !== conversationId) {
+      throw new NotFoundException('Anchor target not found');
+    }
+
+    return message;
+  }
+
+  private async mapPrismaMessagesToDomain(
+    messages: Array<
+      Prisma.MessageGetPayload<{
+        select: {
+          id: true;
+          conversationId: true;
+          senderId: true;
+          clientMessageId: true;
+          type: true;
+          signalType: true;
+          content: true;
+          media: true;
+          registrationId: true;
+          isRecalled: true;
+          recalledAt: true;
+          replyToId: true;
+          replyPreview: true;
+          reactions: true;
+          createdAt: true;
+          readBy: true;
+        };
+      }>
+    >,
+  ): Promise<Message[]> {
+    return Promise.all(
+      messages.map(async (message) => {
+        const domain = ChatMapper.toDomain(message);
+
+        if (domain.signalType === 0) {
+          domain.content = this.encryptionRepository.decrypt(domain.content);
+        }
+
+        return this.syncPendingMediaTracking(domain);
+      }),
+    );
   }
 
   private async buildReplyPreview(

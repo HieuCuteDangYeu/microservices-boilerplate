@@ -11,6 +11,21 @@ export interface MediaProcessingSyncResult {
   media: MessageMedia;
 }
 
+export interface AnchorMessageWindow {
+  targetMessageId: string;
+  messages: Message[];
+  hasOlder: boolean;
+  hasNewer: boolean;
+  oldestCursor?: string;
+  newestCursor?: string;
+}
+
+export interface AnchorMessageExpansion {
+  messages: Message[];
+  hasMore: boolean;
+  nextCursor?: string;
+}
+
 export abstract class IChatRepository {
   abstract createMessage(message: Message): Promise<Message>;
   abstract assertConversationParticipant(
@@ -22,6 +37,22 @@ export abstract class IChatRepository {
     limit: number,
     cursor?: string,
   ): Promise<Message[]>;
+  abstract findMessageWindowAroundId(
+    conversationId: string,
+    messageId: string,
+    before: number,
+    after: number,
+  ): Promise<AnchorMessageWindow>;
+  abstract findOlderMessagesFromAnchorCursor(
+    conversationId: string,
+    cursor: string,
+    limit: number,
+  ): Promise<AnchorMessageExpansion>;
+  abstract findNewerMessagesFromAnchorCursor(
+    conversationId: string,
+    cursor: string,
+    limit: number,
+  ): Promise<AnchorMessageExpansion>;
   abstract createConversation(
     conversation: Conversation,
   ): Promise<Conversation>;
