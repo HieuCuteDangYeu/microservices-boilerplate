@@ -343,18 +343,37 @@ export class PrismaChatRepository implements IChatRepository {
               ),
             });
           })
+          .sort((left, right) =>
+            this.compareMessagesCanonicalNewestFirst(left, right),
+          )
           .reverse();
       }
     }
 
+    const boundaryRecord = cursor
+      ? await this.prisma.message.findUnique({
+          where: { id: cursor },
+          select: { id: true, conversationId: true, createdAt: true },
+        })
+      : null;
+
+    if (
+      cursor &&
+      (!boundaryRecord || boundaryRecord.conversationId !== conversationId)
+    ) {
+      return [];
+    }
+
     // CASE 2: Redis Miss HOẶC Load History (Có cursor) -> Query MongoDB
-    // Prisma Cursor Pagination logic
     const mongoMsgs = await this.prisma.message.findMany({
-      where: { conversationId },
+      where: boundaryRecord
+        ? this.buildOlderThanBoundaryWhere(
+            conversationId,
+            this.toAnchorBoundary(boundaryRecord),
+          )
+        : { conversationId },
       take: limit,
-      skip: cursor ? 1 : 0, // Nếu có cursor, bỏ qua chính nó
-      cursor: cursor ? { id: cursor } : undefined, // Nhảy tới vị trí con trỏ
-      orderBy: { createdAt: 'desc' }, // Lấy từ mới nhất đổ về cũ nhất
+      orderBy: this.anchorOrderBy(),
     });
 
     const domainMsgs = mongoMsgs.map((msg) => {
@@ -377,7 +396,11 @@ export class PrismaChatRepository implements IChatRepository {
     }
 
     // Trả về kết quả (Reverse để client dễ render: Trên cùng là tin cũ, dưới cùng là tin mới)
-    return domainMsgs.reverse();
+    return domainMsgs
+      .sort((left, right) =>
+        this.compareMessagesCanonicalNewestFirst(left, right),
+      )
+      .reverse();
   }
 
   async findMessageWindowAroundId(
@@ -401,7 +424,7 @@ export class PrismaChatRepository implements IChatRepository {
               conversationId,
               targetBoundary,
             ),
-            orderBy: this.anchorOrderBy(),
+            orderBy: this.anchorOrderByAsc(),
             take: normalizedBefore,
           })
         : Promise.resolve([]),
@@ -417,7 +440,11 @@ export class PrismaChatRepository implements IChatRepository {
         : Promise.resolve([]),
     ]);
 
-    const combinedRecords = [...newerRecords, targetRecord, ...olderRecords];
+    const combinedRecords = [
+      ...[...newerRecords].reverse(),
+      targetRecord,
+      ...olderRecords,
+    ];
     const messages = await this.mapPrismaMessagesToDomain(combinedRecords);
     const newestRecord = combinedRecords[0] ?? targetRecord;
     const oldestRecord =
@@ -495,17 +522,18 @@ export class PrismaChatRepository implements IChatRepository {
         conversationId,
         this.toAnchorBoundary(boundaryRecord),
       ),
-      orderBy: this.anchorOrderBy(),
+      orderBy: this.anchorOrderByAsc(),
       take: normalizedLimit + 1,
     });
     const hasMore = records.length > normalizedLimit;
     const visibleRecords = records.slice(0, normalizedLimit);
+    const visibleRecordsDesc = [...visibleRecords].reverse();
 
     return {
-      messages: await this.mapPrismaMessagesToDomain(visibleRecords),
+      messages: await this.mapPrismaMessagesToDomain(visibleRecordsDesc),
       hasMore,
-      ...(visibleRecords.length > 0
-        ? { nextCursor: visibleRecords[0]?.id }
+      ...(visibleRecordsDesc.length > 0
+        ? { nextCursor: visibleRecordsDesc[0]?.id }
         : {}),
     };
   }
@@ -1092,6 +1120,20 @@ export class PrismaChatRepository implements IChatRepository {
 
   private anchorOrderBy(): Prisma.MessageOrderByWithRelationInput[] {
     return [{ createdAt: 'desc' }, { id: 'desc' }];
+  }
+
+  private anchorOrderByAsc(): Prisma.MessageOrderByWithRelationInput[] {
+    return [{ createdAt: 'asc' }, { id: 'asc' }];
+  }
+
+  private compareMessagesCanonicalNewestFirst(left: Message, right: Message) {
+    const timestampDelta = right.createdAt.getTime() - left.createdAt.getTime();
+
+    if (timestampDelta !== 0) {
+      return timestampDelta;
+    }
+
+    return right.id.localeCompare(left.id);
   }
 
   private toAnchorBoundary(message: {
