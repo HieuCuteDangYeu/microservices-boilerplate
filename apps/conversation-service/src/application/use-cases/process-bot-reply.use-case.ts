@@ -7,6 +7,7 @@ import type {
 } from '../../domain/interfaces/ai-service.interface';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { BuildBotMemoryContextUseCase } from './build-bot-memory-context.use-case';
+import { BuildCompletedTurnMemoryContextUseCase } from './build-completed-turn-memory-context.use-case';
 
 export interface ProcessBotReplyResult {
   botReply?: Message;
@@ -20,9 +21,12 @@ export class ProcessBotReplyUseCase {
   constructor(
     @Inject('IChatRepository')
     private readonly chatRepository: IChatRepository,
+
     @Inject('IAiService')
     private readonly aiService: IAiService,
+
     private readonly buildBotMemoryContextUseCase: BuildBotMemoryContextUseCase,
+    private readonly buildCompletedTurnMemoryContextUseCase: BuildCompletedTurnMemoryContextUseCase,
   ) {}
 
   async execute(userMessage: Message): Promise<ProcessBotReplyResult> {
@@ -30,7 +34,7 @@ export class ProcessBotReplyUseCase {
     let botError: BotError | undefined;
 
     try {
-      const memory = await this.buildBotMemoryContextUseCase.execute({
+      const answerMemory = await this.buildBotMemoryContextUseCase.execute({
         conversationId: userMessage.conversationId,
         currentMessageId: userMessage.id,
       });
@@ -39,7 +43,7 @@ export class ProcessBotReplyUseCase {
         message: userMessage.content,
         userId: userMessage.senderId,
         conversationId: userMessage.conversationId,
-        memory,
+        memory: answerMemory,
       });
 
       if (result.answer) {
@@ -55,12 +59,19 @@ export class ProcessBotReplyUseCase {
 
         botReply = await this.chatRepository.createMessage(botMessage);
 
+        const completedTurnMemory =
+          this.buildCompletedTurnMemoryContextUseCase.execute({
+            previousMemory: answerMemory,
+            userMessage,
+            assistantMessage: botReply,
+          });
+
         this.aiService.emitConversationTurnCompleted({
           conversationId: userMessage.conversationId,
           userId: userMessage.senderId,
           userMessage: userMessage.content,
           assistantMessage: result.answer,
-          memory,
+          memory: completedTurnMemory,
         });
 
         this.logger.debug(

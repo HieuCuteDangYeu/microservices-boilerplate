@@ -5,6 +5,7 @@ import Redis from 'ioredis';
 // Import UseCases & Infra
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { BuildBotMemoryContextUseCase } from 'apps/conversation-service/src/application/use-cases/build-bot-memory-context.use-case';
+import { BuildCompletedTurnMemoryContextUseCase } from 'apps/conversation-service/src/application/use-cases/build-completed-turn-memory-context.use-case';
 import { CreateConversationUseCase } from 'apps/conversation-service/src/application/use-cases/create-conversastion.use-case';
 import { GetAnchorNewerMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-anchor-newer-messages.use-case';
 import { GetAnchorOlderMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-anchor-older-messages.use-case';
@@ -96,6 +97,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     ProcessBotReplyUseCase,
     TriggerBotReplyUseCase,
     BuildBotMemoryContextUseCase,
+    BuildCompletedTurnMemoryContextUseCase,
 
     // --- Repositories ---
     PrismaChatRepository,
