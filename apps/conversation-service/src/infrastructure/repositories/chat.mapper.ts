@@ -183,6 +183,9 @@ export class ChatMapper {
       lastMessage: domain.lastMessage,
       lastMessageAt: domain.lastMessageAt?.toISOString() ?? null,
       isGroup: domain.isGroup,
+      ...(domain.unreadCount !== undefined
+        ? { unreadCount: domain.unreadCount }
+        : {}),
       createdAt: domain.createdAt.toISOString(),
       updatedAt: domain.updatedAt.toISOString(),
     };

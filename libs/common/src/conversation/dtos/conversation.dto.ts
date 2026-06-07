@@ -7,6 +7,7 @@ export const ConversationSchema = z.object({
   lastMessage: z.string().optional().nullable(),
   lastMessageAt: z.string().datetime().optional().nullable(),
   isGroup: z.boolean(),
+  unreadCount: z.number().int().nonnegative().optional(),
   updatedAt: z.string().datetime(),
 });
 

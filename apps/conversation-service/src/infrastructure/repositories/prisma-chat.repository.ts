@@ -645,6 +645,22 @@ export class PrismaChatRepository implements IChatRepository {
 
     if (!conversations.length) return [];
 
+    const unreadCountsByConversationId = new Map<string, number>();
+
+    await Promise.all(
+      conversations.map(async (conversation) => {
+        const unreadCount = await this.prisma.message.count({
+          where: {
+            conversationId: conversation.id,
+            senderId: { not: userId },
+            readBy: { none: { userId } },
+          },
+        });
+
+        unreadCountsByConversationId.set(conversation.id, unreadCount);
+      }),
+    );
+
     // 2. Gom ID để Bulk Fetch User Info (Giữ nguyên logic tối ưu cũ)
     const allParticipantIds = [
       ...new Set(conversations.flatMap((c) => c.participantIds)),
@@ -680,6 +696,7 @@ export class PrismaChatRepository implements IChatRepository {
       domainConv.participants = c.participantIds
         .map((id) => usersMap.get(id))
         .filter((u): u is ChatParticipant => u !== undefined);
+      domainConv.unreadCount = unreadCountsByConversationId.get(c.id) ?? 0;
       return domainConv;
     });
   }

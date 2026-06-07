@@ -13,6 +13,7 @@ export class Conversation {
   participants?: ChatParticipant[];
   lastMessage?: string | null;
   lastMessageAt?: Date | null;
+  unreadCount?: number;
   createdAt!: Date;
   updatedAt!: Date;
   messages?: Message[]; // Optional relation
