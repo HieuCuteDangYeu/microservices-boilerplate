@@ -10,6 +10,7 @@ import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-aud
 import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/update-conversation-memory.use-case';
 import { UpsertUserMemoriesUseCase } from '@ai/application/use-cases/upsert-user-memories.use-case';
 import { CloudflareConversationSummarizerAdapter } from '@ai/infrastructure/adapters/cloudflare-conversation-summarizer.adapter';
+import { CloudflareLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-llm.adapter';
 import { CloudflareMemoryExtractorAdapter } from '@ai/infrastructure/adapters/cloudflare-memory-extractor.adapter';
 import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { CloudflareWorkersAiTextClient } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
@@ -105,7 +106,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'ILlmService',
-      useClass: GeminiLlmAdapter,
+      useClass:
+        process.env.AI_CHAT_PROVIDER === 'cloudflare'
+          ? CloudflareLlmAdapter
+          : GeminiLlmAdapter,
     },
     {
       provide: 'IContentService',
