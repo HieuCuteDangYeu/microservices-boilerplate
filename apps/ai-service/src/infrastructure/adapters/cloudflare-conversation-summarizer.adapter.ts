@@ -358,13 +358,7 @@ ${input.assistantMessage}
   }
 
   private isEvidenceGrounded(evidence: string, groundingText: string): boolean {
-    const evidenceComparable = this.toComparable(evidence);
-
-    if (!evidenceComparable) {
-      return false;
-    }
-
-    return groundingText.includes(evidenceComparable);
+    return this.isGroundedInText(evidence, groundingText, 0.34);
   }
 
   private isContentSupportedByEvidence(
@@ -377,7 +371,11 @@ ${input.assistantMessage}
     return this.isGroundedInText(content, supportText);
   }
 
-  private isGroundedInText(value: string, comparableText: string): boolean {
+  private isGroundedInText(
+    value: string,
+    comparableText: string,
+    threshold = 0.5,
+  ): boolean {
     const valueTokens = this.toComparable(value)
       .split(' ')
       .filter((token) => token.length >= 4);
@@ -390,7 +388,7 @@ ${input.assistantMessage}
       comparableText.includes(token),
     );
 
-    return matchedTokens.length / valueTokens.length >= 0.5;
+    return matchedTokens.length / valueTokens.length >= threshold;
   }
 
   private buildGroundingText(input: SummarizeConversationTurnInput): string {
