@@ -9,6 +9,7 @@ export interface SummarizeConversationTurnInput {
 
 export interface SummarizeConversationTurnResult {
   summary: string;
+  shouldUpdate: boolean;
 }
 
 export interface IConversationSummarizerService {

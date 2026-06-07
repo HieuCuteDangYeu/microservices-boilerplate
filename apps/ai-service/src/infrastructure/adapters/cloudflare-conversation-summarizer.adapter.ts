@@ -39,30 +39,40 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
 
       const structured = this.tryParseStructuredSummary(response);
 
-      if (structured) {
-        const rendered = this.renderSummary(structured);
-
-        if (rendered) {
-          return {
-            summary: this.truncate(rendered, 1200),
-          };
-        }
-      }
-
-      const fallbackSummary = this.cleanPlainTextSummary(response);
-
-      if (fallbackSummary) {
+      if (!structured) {
         this.logger.warn(
-          'Cloudflare summarizer returned non-JSON output; using cleaned plain-text fallback.',
+          'Cloudflare summarizer returned invalid structured output; keeping existing summary.',
         );
 
         return {
-          summary: this.truncate(fallbackSummary, 1200),
+          summary: input.existingSummary?.trim() || '',
+          shouldUpdate: false,
+        };
+      }
+
+      if (!this.hasUsefulStructuredContent(structured)) {
+        this.logger.warn(
+          'Cloudflare summarizer returned structured output without useful memory; keeping existing summary.',
+        );
+
+        return {
+          summary: input.existingSummary?.trim() || '',
+          shouldUpdate: false,
+        };
+      }
+
+      const rendered = this.renderSummary(structured);
+
+      if (!rendered) {
+        return {
+          summary: input.existingSummary?.trim() || '',
+          shouldUpdate: false,
         };
       }
 
       return {
-        summary: input.existingSummary?.trim() || '',
+        summary: this.truncate(rendered, 1200),
+        shouldUpdate: true,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -73,6 +83,7 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
 
       return {
         summary: input.existingSummary?.trim() || '',
+        shouldUpdate: false,
       };
     }
   }
@@ -100,12 +111,13 @@ Rules:
 1. Return only valid JSON.
 2. Do not wrap JSON in markdown fences.
 3. Do not add headings, explanations, or prose outside JSON.
-4. Only include information useful for future responses in this same conversation.
-5. Prefer concrete technical details: services, files, architecture decisions, bugs, fixes, and next steps.
-6. If a category has no useful information, return an empty array or empty string.
-7. Use the existing summary as prior memory and update it with recent chat history and the latest turn.
-8. If new information corrects older information, keep the newer information.
-9. Do not include secrets, credentials, tokens, or private sensitive information.
+4. Do not add fields outside the JSON shape.
+5. Use the existing summary as prior memory.
+6. Update it using recent chat history and the latest turn.
+7. Keep only information useful for future responses in this same conversation.
+8. Preserve concrete implementation details, decisions, unresolved issues, constraints, and next steps.
+9. If a category has no useful information, return an empty array or empty string.
+10. Do not include secrets, credentials, tokens, or private sensitive information.
 
 Existing summary:
 <existing_summary>
@@ -141,20 +153,67 @@ ${input.assistantMessage}
       try {
         const parsed = JSON.parse(candidate) as StructuredConversationSummary;
 
-        return {
+        return this.dedupeStructuredSummary({
           currentGoal: this.cleanText(parsed.currentGoal),
           implemented: this.cleanList(parsed.implemented),
           decisions: this.cleanList(parsed.decisions),
           openIssues: this.cleanList(parsed.openIssues),
           nextSteps: this.cleanList(parsed.nextSteps),
           constraints: this.cleanList(parsed.constraints),
-        };
+        });
       } catch {
         continue;
       }
     }
 
     return null;
+  }
+
+  private hasUsefulStructuredContent(
+    summary: StructuredConversationSummary,
+  ): boolean {
+    const concreteItemCount =
+      (summary.implemented?.length ?? 0) +
+      (summary.decisions?.length ?? 0) +
+      (summary.openIssues?.length ?? 0) +
+      (summary.nextSteps?.length ?? 0) +
+      (summary.constraints?.length ?? 0);
+
+    return concreteItemCount > 0;
+  }
+
+  private dedupeStructuredSummary(
+    summary: StructuredConversationSummary,
+  ): StructuredConversationSummary {
+    const used = new Set<string>();
+
+    const addUnique = (values?: string[]): string[] => {
+      return this.cleanList(values).filter((value) => {
+        const key = this.normalize(value);
+
+        if (used.has(key)) {
+          return false;
+        }
+
+        used.add(key);
+        return true;
+      });
+    };
+
+    const currentGoal = this.cleanText(summary.currentGoal);
+
+    if (currentGoal) {
+      used.add(this.normalize(currentGoal));
+    }
+
+    return {
+      currentGoal,
+      implemented: addUnique(summary.implemented),
+      decisions: addUnique(summary.decisions),
+      openIssues: addUnique(summary.openIssues),
+      nextSteps: addUnique(summary.nextSteps),
+      constraints: addUnique(summary.constraints),
+    };
   }
 
   private stripMarkdownFence(text: string): string {
@@ -237,23 +296,6 @@ ${input.assistantMessage}
     return cleaned.length > 0 ? cleaned : undefined;
   }
 
-  private cleanPlainTextSummary(text: string): string {
-    return text
-      .trim()
-      .replace(/^```[\s\S]*?```$/g, '')
-      .split('\n')
-      .map((line) =>
-        line
-          .replace(/^#{1,6}\s*/g, '')
-          .replace(/^\s*[-*]\s+/g, '')
-          .replace(/\*\*/g, '')
-          .trim(),
-      )
-      .filter((line) => line.length > 0)
-      .join('\n')
-      .trim();
-  }
-
   private formatRecentMessages(messages?: AiChatMessageContext[]): string {
     if (!messages || messages.length === 0) {
       return '';
@@ -265,6 +307,10 @@ ${input.assistantMessage}
         return `${role}: ${message.content}`;
       })
       .join('\n');
+  }
+
+  private normalize(value: string): string {
+    return value.toLowerCase().replace(/\s+/g, ' ').trim();
   }
 
   private truncate(value: string, maxLength: number): string {

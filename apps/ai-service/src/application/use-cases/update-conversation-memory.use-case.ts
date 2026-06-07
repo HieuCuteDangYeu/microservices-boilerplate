@@ -66,15 +66,21 @@ export class UpdateConversationMemoryUseCase {
         },
       );
 
-      const summary = this.sanitizeSummary(summarized.summary);
-
-      if (this.isInvalidSummary(summary)) {
+      if (!summarized.shouldUpdate) {
         this.logger.warn(
-          `[ConversationMemory] skipped invalid summary conversationId=${payload.conversationId}`,
+          `[ConversationMemory] summarizer skipped update conversationId=${payload.conversationId}`,
         );
       } else {
-        nextSummary = summary;
-        summaryUpdated = true;
+        const summary = this.sanitizeSummary(summarized.summary);
+
+        if (this.isInvalidSummary(summary)) {
+          this.logger.warn(
+            `[ConversationMemory] skipped invalid summary conversationId=${payload.conversationId}`,
+          );
+        } else {
+          nextSummary = summary;
+          summaryUpdated = true;
+        }
       }
     }
 

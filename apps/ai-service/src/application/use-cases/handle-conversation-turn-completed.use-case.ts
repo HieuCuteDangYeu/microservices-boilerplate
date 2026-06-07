@@ -86,6 +86,7 @@ export class HandleConversationTurnCompletedUseCase {
       const saved = await this.upsertUserMemoriesUseCase.execute({
         userId: payload.userId,
         conversationId: payload.conversationId,
+        userMessage: payload.userMessage,
         memories: extracted.memories,
       });
 
