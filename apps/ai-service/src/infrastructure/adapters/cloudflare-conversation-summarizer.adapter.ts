@@ -50,7 +50,7 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
         };
       }
 
-      if (!this.hasUsefulStructuredContent(structured, input)) {
+      if (!this.hasUsefulStructuredContent(structured)) {
         this.logger.warn(
           'Cloudflare summarizer returned structured output without useful memory; keeping existing summary.',
         );
@@ -108,7 +108,7 @@ Return JSON with exactly these keys:
 }
 
 Field meanings:
-- currentGoal: the current objective of this conversation.
+- currentGoal: the ongoing objective only when it is clearly different from completed work.
 - implemented: completed work mentioned in the conversation.
 - decisions: technical or architecture decisions made in the conversation.
 - openIssues: unresolved bugs, problems, or unclear points.
@@ -128,7 +128,8 @@ Rules:
 10. Preserve concrete implementation details, decisions, unresolved issues, constraints, and next steps.
 11. Do not include secrets, credentials, tokens, or private sensitive information.
 12. Put completed work in "implemented", not in "currentGoal".
-13. Use "currentGoal" only for the ongoing objective of the conversation.
+13. If the user says something was added, implemented, fixed, changed, created, updated, removed, or completed, put it in "implemented".
+14. Use "currentGoal" only for the ongoing objective of the conversation.
 
 Existing summary:
 <existing_summary>
@@ -182,7 +183,6 @@ ${input.assistantMessage}
 
   private hasUsefulStructuredContent(
     summary: StructuredConversationSummary,
-    input: SummarizeConversationTurnInput,
   ): boolean {
     const concreteItemCount =
       (summary.implemented?.length ?? 0) +
@@ -191,33 +191,7 @@ ${input.assistantMessage}
       (summary.nextSteps?.length ?? 0) +
       (summary.constraints?.length ?? 0);
 
-    if (concreteItemCount > 0) {
-      return true;
-    }
-
-    const currentGoal = summary.currentGoal?.trim();
-
-    if (!currentGoal) {
-      return false;
-    }
-
-    return !this.isDirectCopyOfLatestTurn(currentGoal, input);
-  }
-
-  private isDirectCopyOfLatestTurn(
-    value: string,
-    input: SummarizeConversationTurnInput,
-  ): boolean {
-    const normalizedValue = this.normalize(value);
-
-    const latestUserMessage = this.normalize(input.userMessage);
-    const latestAssistantMessage = this.normalize(input.assistantMessage);
-
-    return (
-      normalizedValue.length > 0 &&
-      (normalizedValue === latestUserMessage ||
-        normalizedValue === latestAssistantMessage)
-    );
+    return concreteItemCount > 0;
   }
 
   private dedupeStructuredSummary(
