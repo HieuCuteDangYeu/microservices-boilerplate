@@ -39,6 +39,8 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
 
       const structured = this.tryParseStructuredSummary(response, input);
 
+      this.logStructuredSummaryShape(structured);
+
       if (!structured) {
         this.logger.warn(
           'Cloudflare summarizer returned invalid structured output; keeping existing summary.',
@@ -374,7 +376,7 @@ ${input.assistantMessage}
       groundingText.includes(token),
     );
 
-    return matchedTokens.length / valueTokens.length >= 0.5;
+    return matchedTokens.length / valueTokens.length >= 0.34;
   }
 
   private formatRecentMessages(messages?: AiChatMessageContext[]): string {
@@ -408,5 +410,24 @@ ${input.assistantMessage}
     }
 
     return `${value.slice(0, maxLength).trim()}...`;
+  }
+
+  private logStructuredSummaryShape(
+    summary: StructuredConversationSummary | null,
+  ): void {
+    if (!summary) {
+      this.logger.debug('[ConversationSummary] parsed=null');
+      return;
+    }
+
+    this.logger.debug(
+      `[ConversationSummary] groundedShape currentGoal=${Boolean(
+        summary.currentGoal,
+      )} implemented=${summary.implemented?.length ?? 0} decisions=${
+        summary.decisions?.length ?? 0
+      } openIssues=${summary.openIssues?.length ?? 0} nextSteps=${
+        summary.nextSteps?.length ?? 0
+      } constraints=${summary.constraints?.length ?? 0}`,
+    );
   }
 }
