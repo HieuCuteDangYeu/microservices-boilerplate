@@ -1,10 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-interface CloudflareAiResponse {
+interface CloudflareAiRunResponse {
   success: boolean;
   result?: {
     response?: string;
+  };
+  errors?: Array<{
+    message?: string;
+  }>;
+}
+
+interface CloudflareChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface CloudflareChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  error?: {
+    message?: string;
   };
   errors?: Array<{
     message?: string;
@@ -17,6 +36,14 @@ export class CloudflareWorkersAiTextClient {
 
   constructor(private readonly configService: ConfigService) {}
 
+  /**
+   * Use this for simple single-prompt background tasks:
+   * - memory extraction
+   * - conversation summarization
+   *
+   * Do not use this for the chatbot answer, because chat models behave better
+   * with role-based messages.
+   */
   async generateText(input: {
     prompt: string;
     model?: string;
@@ -49,7 +76,7 @@ export class CloudflareWorkersAiTextClient {
       }),
     });
 
-    const json = (await response.json()) as CloudflareAiResponse;
+    const json = (await response.json()) as CloudflareAiRunResponse;
 
     if (!response.ok || !json.success) {
       const message =
@@ -64,5 +91,59 @@ export class CloudflareWorkersAiTextClient {
     }
 
     return json.result?.response?.trim() ?? '';
+  }
+
+  /**
+   * Use this for chatbot replies.
+   *
+   * This calls Cloudflare's OpenAI-compatible chat completions endpoint,
+   * so the model receives proper system/user roles instead of one flat prompt.
+   */
+  async generateChatText(input: {
+    model: string;
+    messages: CloudflareChatMessage[];
+    maxTokens?: number;
+    temperature?: number;
+  }): Promise<string> {
+    const accountId = this.configService.getOrThrow<string>(
+      'CLOUDFLARE_ACCOUNT_ID',
+    );
+
+    const apiToken = this.configService.getOrThrow<string>(
+      'CLOUDFLARE_API_TOKEN',
+    );
+
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages,
+        max_tokens: input.maxTokens ?? 700,
+        temperature: input.temperature ?? 0.3,
+      }),
+    });
+
+    const json = (await response.json()) as CloudflareChatCompletionResponse;
+
+    if (!response.ok) {
+      const message =
+        json.error?.message ||
+        json.errors
+          ?.map((error) => error.message)
+          .filter(Boolean)
+          .join(', ') ||
+        `Cloudflare chat completion failed with status ${response.status}`;
+
+      this.logger.warn(message);
+      throw new Error(message);
+    }
+
+    return json.choices?.[0]?.message?.content?.trim() ?? '';
   }
 }
