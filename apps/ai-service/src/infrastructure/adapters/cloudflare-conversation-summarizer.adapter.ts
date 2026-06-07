@@ -37,7 +37,7 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
         maxTokens: 700,
       });
 
-      const structured = this.tryParseStructuredSummary(response);
+      const structured = this.tryParseStructuredSummary(response, input);
 
       if (!structured) {
         this.logger.warn(
@@ -52,7 +52,7 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
 
       if (!this.hasUsefulStructuredContent(structured)) {
         this.logger.warn(
-          'Cloudflare summarizer returned structured output without useful memory; keeping existing summary.',
+          'Cloudflare summarizer returned structured output without grounded useful memory; keeping existing summary.',
         );
 
         return {
@@ -130,6 +130,7 @@ Rules:
 12. Put completed work in "implemented", not in "currentGoal".
 13. If the user says something was added, implemented, fixed, changed, created, updated, removed, or completed, put it in "implemented".
 14. Use "currentGoal" only for the ongoing objective of the conversation.
+15. Do not invent details that are not present in the existing summary, recent chat history, latest user message, or latest assistant answer.
 
 Existing summary:
 <existing_summary>
@@ -155,7 +156,10 @@ ${input.assistantMessage}
 
   private tryParseStructuredSummary(
     text: string,
+    input: SummarizeConversationTurnInput,
   ): StructuredConversationSummary | null {
+    const groundingText = this.buildGroundingText(input);
+
     const candidates = [
       this.stripMarkdownFence(text),
       this.extractFirstJsonObject(text),
@@ -166,12 +170,12 @@ ${input.assistantMessage}
         const parsed = JSON.parse(candidate) as StructuredConversationSummary;
 
         return this.dedupeStructuredSummary({
-          currentGoal: this.cleanText(parsed.currentGoal),
-          implemented: this.cleanList(parsed.implemented),
-          decisions: this.cleanList(parsed.decisions),
-          openIssues: this.cleanList(parsed.openIssues),
-          nextSteps: this.cleanList(parsed.nextSteps),
-          constraints: this.cleanList(parsed.constraints),
+          currentGoal: this.cleanText(parsed.currentGoal, groundingText),
+          implemented: this.cleanList(parsed.implemented, groundingText),
+          decisions: this.cleanList(parsed.decisions, groundingText),
+          openIssues: this.cleanList(parsed.openIssues, groundingText),
+          nextSteps: this.cleanList(parsed.nextSteps, groundingText),
+          constraints: this.cleanList(parsed.constraints, groundingText),
         });
       } catch {
         continue;
@@ -199,14 +203,14 @@ ${input.assistantMessage}
   ): StructuredConversationSummary {
     const used = new Set<string>();
 
-    const currentGoal = this.cleanText(summary.currentGoal);
+    const currentGoal = summary.currentGoal;
 
     if (currentGoal) {
       used.add(this.normalize(currentGoal));
     }
 
     const addUnique = (values?: string[]): string[] => {
-      return this.cleanList(values).filter((value) => {
+      return (values ?? []).filter((value) => {
         const key = this.normalize(value);
 
         if (used.has(key)) {
@@ -279,7 +283,7 @@ ${input.assistantMessage}
   }
 
   private renderList(label: string, values?: string[]): string | undefined {
-    const items = this.cleanList(values);
+    const items = values ?? [];
 
     if (items.length === 0) {
       return undefined;
@@ -288,17 +292,20 @@ ${input.assistantMessage}
     return `${label}: ${items.join('; ')}`;
   }
 
-  private cleanList(values?: unknown): string[] {
+  private cleanList(values?: unknown, groundingText?: string): string[] {
     if (!Array.isArray(values)) {
       return [];
     }
 
     return values
-      .map((value) => this.cleanText(value))
+      .map((value) => this.cleanText(value, groundingText))
       .filter((value): value is string => Boolean(value));
   }
 
-  private cleanText(value?: unknown): string | undefined {
+  private cleanText(
+    value?: unknown,
+    groundingText?: string,
+  ): string | undefined {
     if (typeof value !== 'string') {
       return undefined;
     }
@@ -310,6 +317,13 @@ ${input.assistantMessage}
     }
 
     if (this.isSchemaPlaceholderValue(cleaned)) {
+      return undefined;
+    }
+
+    if (
+      groundingText &&
+      !this.isGroundedInConversation(cleaned, groundingText)
+    ) {
       return undefined;
     }
 
@@ -331,6 +345,38 @@ ${input.assistantMessage}
     return schemaPlaceholders.has(normalized);
   }
 
+  private buildGroundingText(input: SummarizeConversationTurnInput): string {
+    return this.toComparable(
+      [
+        input.existingSummary,
+        this.formatRecentMessages(input.recentMessages),
+        input.userMessage,
+        input.assistantMessage,
+      ]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .join('\n'),
+    );
+  }
+
+  private isGroundedInConversation(
+    value: string,
+    groundingText: string,
+  ): boolean {
+    const valueTokens = this.toComparable(value)
+      .split(' ')
+      .filter((token) => token.length >= 4);
+
+    if (valueTokens.length === 0) {
+      return false;
+    }
+
+    const matchedTokens = valueTokens.filter((token) =>
+      groundingText.includes(token),
+    );
+
+    return matchedTokens.length / valueTokens.length >= 0.5;
+  }
+
   private formatRecentMessages(messages?: AiChatMessageContext[]): string {
     if (!messages || messages.length === 0) {
       return '';
@@ -346,6 +392,14 @@ ${input.assistantMessage}
 
   private normalize(value: string): string {
     return value.toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  private toComparable(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private truncate(value: string, maxLength: number): string {
