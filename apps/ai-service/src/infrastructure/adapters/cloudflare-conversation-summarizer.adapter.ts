@@ -50,7 +50,7 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
         };
       }
 
-      if (!this.hasUsefulStructuredContent(structured)) {
+      if (!this.hasUsefulStructuredContent(structured, input)) {
         this.logger.warn(
           'Cloudflare summarizer returned structured output without useful memory; keeping existing summary.',
         );
@@ -118,6 +118,8 @@ Rules:
 8. Preserve concrete implementation details, decisions, unresolved issues, constraints, and next steps.
 9. If a category has no useful information, return an empty array or empty string.
 10. Do not include secrets, credentials, tokens, or private sensitive information.
+11. Put completed work in "implemented", not in "currentGoal".
+12. Use "currentGoal" only for the ongoing objective of the conversation.
 
 Existing summary:
 <existing_summary>
@@ -171,6 +173,7 @@ ${input.assistantMessage}
 
   private hasUsefulStructuredContent(
     summary: StructuredConversationSummary,
+    input: SummarizeConversationTurnInput,
   ): boolean {
     const concreteItemCount =
       (summary.implemented?.length ?? 0) +
@@ -179,7 +182,33 @@ ${input.assistantMessage}
       (summary.nextSteps?.length ?? 0) +
       (summary.constraints?.length ?? 0);
 
-    return concreteItemCount > 0;
+    if (concreteItemCount > 0) {
+      return true;
+    }
+
+    const currentGoal = summary.currentGoal?.trim();
+
+    if (!currentGoal) {
+      return false;
+    }
+
+    return !this.isDirectCopyOfLatestTurn(currentGoal, input);
+  }
+
+  private isDirectCopyOfLatestTurn(
+    value: string,
+    input: SummarizeConversationTurnInput,
+  ): boolean {
+    const normalizedValue = this.normalize(value);
+
+    const latestUserMessage = this.normalize(input.userMessage);
+    const latestAssistantMessage = this.normalize(input.assistantMessage);
+
+    return (
+      normalizedValue.length > 0 &&
+      (normalizedValue === latestUserMessage ||
+        normalizedValue === latestAssistantMessage)
+    );
   }
 
   private dedupeStructuredSummary(
