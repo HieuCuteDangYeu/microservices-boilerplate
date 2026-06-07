@@ -73,9 +73,9 @@ export class UpdateConversationMemoryUseCase {
       } else {
         const summary = this.sanitizeSummary(summarized.summary);
 
-        if (this.isInvalidSummary(summary)) {
+        if (!summary) {
           this.logger.warn(
-            `[ConversationMemory] skipped invalid summary conversationId=${payload.conversationId}`,
+            `[ConversationMemory] skipped empty summary conversationId=${payload.conversationId}`,
           );
         } else {
           nextSummary = summary;
@@ -109,20 +109,6 @@ export class UpdateConversationMemoryUseCase {
       .replace(/^\*\*summary\*\*\s*:?\s*/i, '')
       .replace(/^summary\s*:?\s*/i, '')
       .trim();
-  }
-
-  private isInvalidSummary(value: string): boolean {
-    const normalized = value.toLowerCase().replace(/\s+/g, ' ').trim();
-
-    return (
-      normalized.length === 0 ||
-      normalized === 'no existing summary.' ||
-      normalized === 'no existing summary' ||
-      normalized === '(empty)' ||
-      normalized === 'empty' ||
-      normalized === '**summary** no existing summary.' ||
-      normalized === '**summary** no existing summary'
-    );
   }
 
   private getPositiveNumber(key: string, fallback: number): number {
