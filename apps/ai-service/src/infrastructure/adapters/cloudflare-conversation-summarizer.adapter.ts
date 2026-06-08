@@ -256,7 +256,7 @@ ${input.assistantMessage}
       (summary.nextSteps?.length ?? 0) +
       (summary.constraints?.length ?? 0);
 
-    return concreteItemCount > 0;
+    return Boolean(summary.currentGoal) || concreteItemCount > 0;
   }
 
   private dedupeStructuredSummary(
