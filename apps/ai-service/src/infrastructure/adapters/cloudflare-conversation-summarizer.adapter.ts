@@ -219,23 +219,53 @@ ${input.assistantMessage}
         ) as RawStructuredConversationSummary;
 
         return this.dedupeStructuredSummary({
-          currentGoal: this.cleanSummaryItem(parsed.currentGoal, groundingText),
+          currentGoal: this.cleanSummaryItem(
+            parsed.currentGoal,
+            groundingText,
+            {
+              allowStringItem: true,
+              requireEvidence: false,
+            },
+          ),
           implemented: this.cleanSummaryItemList(
             parsed.implemented,
             groundingText,
+            {
+              allowStringItem: true,
+              requireEvidence: false,
+            },
           ),
           decisions: this.cleanSummaryItemList(
             parsed.decisions,
             decisionGroundingText,
+            {
+              allowStringItem: false,
+              requireEvidence: true,
+            },
           ),
           openIssues: this.cleanSummaryItemList(
             parsed.openIssues,
             groundingText,
+            {
+              allowStringItem: true,
+              requireEvidence: false,
+            },
           ),
-          nextSteps: this.cleanSummaryItemList(parsed.nextSteps, groundingText),
+          nextSteps: this.cleanSummaryItemList(
+            parsed.nextSteps,
+            groundingText,
+            {
+              allowStringItem: true,
+              requireEvidence: false,
+            },
+          ),
           constraints: this.cleanSummaryItemList(
             parsed.constraints,
             groundingText,
+            {
+              allowStringItem: true,
+              requireEvidence: false,
+            },
           ),
         });
       } catch {
@@ -296,20 +326,50 @@ ${input.assistantMessage}
   private cleanSummaryItemList(
     values: unknown,
     groundingText: string,
+    options: {
+      allowStringItem: boolean;
+      requireEvidence: boolean;
+    } = {
+      allowStringItem: true,
+      requireEvidence: false,
+    },
   ): string[] {
     if (!Array.isArray(values)) {
       return [];
     }
 
     return values
-      .map((value) => this.cleanSummaryItem(value, groundingText))
+      .map((value) => this.cleanSummaryItem(value, groundingText, options))
       .filter((value): value is string => Boolean(value));
   }
 
   private cleanSummaryItem(
     value: unknown,
     groundingText: string,
+    options: {
+      allowStringItem: boolean;
+      requireEvidence: boolean;
+    } = {
+      allowStringItem: true,
+      requireEvidence: false,
+    },
   ): string | undefined {
+    if (typeof value === 'string') {
+      if (!options.allowStringItem) {
+        return undefined;
+      }
+
+      const cleaned = this.cleanText(value);
+
+      if (!cleaned) {
+        return undefined;
+      }
+
+      return this.isGroundedInText(cleaned, groundingText, 0.34)
+        ? cleaned
+        : undefined;
+    }
+
     const item = this.toStructuredSummaryItem(value);
 
     if (!item) {
@@ -319,15 +379,23 @@ ${input.assistantMessage}
     const content = this.cleanText(item.content);
     const evidence = this.cleanText(item.evidence);
 
-    if (!content || !evidence) {
+    if (!content) {
       return undefined;
     }
 
-    if (!this.isEvidenceGrounded(evidence, groundingText)) {
+    if (options.requireEvidence && !evidence) {
       return undefined;
     }
 
-    if (!this.isContentSupportedByEvidence(content, evidence, groundingText)) {
+    if (evidence && !this.isEvidenceGrounded(evidence, groundingText)) {
+      return undefined;
+    }
+
+    const supportText = evidence
+      ? this.toComparable(`${evidence}\n${groundingText}`)
+      : groundingText;
+
+    if (!this.isGroundedInText(content, supportText, 0.34)) {
       return undefined;
     }
 
