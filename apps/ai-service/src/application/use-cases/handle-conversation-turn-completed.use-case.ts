@@ -81,14 +81,21 @@ export class HandleConversationTurnCompletedUseCase {
         conversationId: payload.conversationId,
         userMessage: payload.userMessage,
         assistantMessage: payload.assistantMessage,
+        memory: payload.memory,
       });
 
       const saved = await this.upsertUserMemoriesUseCase.execute({
         userId: payload.userId,
         conversationId: payload.conversationId,
-        userMessage: payload.userMessage,
+        userMessage: extracted.sourceText,
         memories: extracted.memories,
       });
+
+      this.logger.debug(
+        `[UserMemory] sourceMessages=${this.countSourceMessages(
+          extracted.sourceText,
+        )} extracted=${extracted.memories.length} saved=${saved.length}`,
+      );
 
       if (saved.length > 0) {
         this.logger.log(
@@ -102,6 +109,17 @@ export class HandleConversationTurnCompletedUseCase {
         `[UserMemory] skipped userId=${payload.userId} conversationId=${payload.conversationId}: ${message}`,
       );
     }
+  }
+
+  private countSourceMessages(source: string): number {
+    if (!source.trim()) {
+      return 0;
+    }
+
+    return source
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0).length;
   }
 
   private shouldExtractUserMemory(messageCount: number): boolean {
