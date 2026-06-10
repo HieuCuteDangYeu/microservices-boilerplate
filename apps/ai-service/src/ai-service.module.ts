@@ -1,23 +1,31 @@
+import { AnswerAgentUseCase } from '@ai/application/use-cases/answer-agent.use-case';
 import { BuildChatPromptUseCase } from '@ai/application/use-cases/build-chat-prompt.use-case';
 import { ExtractUserMemoriesFromTurnUseCase } from '@ai/application/use-cases/extract-user-memories-from-turn.use-case';
 import { GenerateEmbeddingUseCase } from '@ai/application/use-cases/generate-embedding.use-case';
 import { GetConversationMemoryUseCase } from '@ai/application/use-cases/get-conversation-memory.use-case';
 import { GetRelevantUserMemoriesUseCase } from '@ai/application/use-cases/get-relevant-user-memories.use-case';
 import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
+import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-case';
+import { MemoryWriterAgentUseCase } from '@ai/application/use-cases/memory-writer-agent.use-case';
+import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
+import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/update-conversation-memory.use-case';
 import { UpsertUserMemoriesUseCase } from '@ai/application/use-cases/upsert-user-memories.use-case';
+import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.use-case';
 import { CloudflareConversationSummarizerAdapter } from '@ai/infrastructure/adapters/cloudflare-conversation-summarizer.adapter';
 import { CloudflareLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-llm.adapter';
 import { CloudflareMemoryExtractorAdapter } from '@ai/infrastructure/adapters/cloudflare-memory-extractor.adapter';
+import { CloudflareStructuredLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-structured-llm.adapter';
 import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { CloudflareWorkersAiTextClient } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { ConversationTokenPublisherAdapter } from '@ai/infrastructure/adapters/conversation-token-publisher.adapter';
 import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
+import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/langgraph-rag-chat-workflow.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
@@ -92,6 +100,12 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     HandleConversationTurnCompletedUseCase,
     GetConversationMemoryUseCase,
     UpdateConversationMemoryUseCase,
+    QueryRouterAgentUseCase,
+    RetrievalAgentUseCase,
+    MemoryAgentUseCase,
+    AnswerAgentUseCase,
+    VerifierAgentUseCase,
+    MemoryWriterAgentUseCase,
     {
       provide: 'IEmbeddingService',
       useClass: GeminiEmbeddingAdapter,
@@ -138,6 +152,14 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IConversationSummarizerService',
       useClass: CloudflareConversationSummarizerAdapter,
+    },
+    {
+      provide: 'IStructuredLlmService',
+      useClass: CloudflareStructuredLlmAdapter,
+    },
+    {
+      provide: 'IRagChatWorkflow',
+      useClass: LangGraphRagChatWorkflowAdapter,
     },
     CloudflareWorkersAiTextClient,
   ],

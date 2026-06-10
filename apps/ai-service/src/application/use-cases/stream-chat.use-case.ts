@@ -1,32 +1,15 @@
-import { GetConversationMemoryUseCase } from '@ai/application/use-cases/get-conversation-memory.use-case';
-import { GetRelevantUserMemoriesUseCase } from '@ai/application/use-cases/get-relevant-user-memories.use-case';
-import type { IChatTokenPublisher } from '@ai/domain/interfaces/chat-token-publisher.interface';
-import type { IContentService } from '@ai/domain/interfaces/content.service.interface';
-import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
+import type {
+  IRagChatWorkflow,
+  RagChatWorkflowInput,
+} from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { IEmbeddingService } from '../../domain/interfaces/embedding.service.interface';
-import type { ILlmService } from '../../domain/interfaces/llm.service.interface';
-import { BuildChatPromptUseCase } from './build-chat-prompt.use-case';
+import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
 export class StreamChatUseCase {
-  private readonly logger = new Logger(StreamChatUseCase.name);
-
   constructor(
-    @Inject('IEmbeddingService')
-    private readonly embeddingService: IEmbeddingService,
-    @Inject('ILlmService')
-    private readonly llmService: ILlmService,
-    @Inject('IContentService')
-    private readonly contentService: IContentService,
-    @Inject('IRerankerService')
-    private readonly rerankerService: IRerankerService,
-    @Inject('IChatTokenPublisher')
-    private readonly chatTokenPublisher: IChatTokenPublisher,
-    private readonly buildChatPromptUseCase: BuildChatPromptUseCase,
-    private readonly getRelevantUserMemoriesUseCase: GetRelevantUserMemoriesUseCase,
-    private readonly getConversationMemoryUseCase: GetConversationMemoryUseCase,
+    @Inject('IRagChatWorkflow')
+    private readonly ragChatWorkflow: IRagChatWorkflow,
   ) {}
 
   async execute(input: {
@@ -35,62 +18,13 @@ export class StreamChatUseCase {
     conversationId: string;
     memory?: AiChatMemoryContext;
   }): Promise<string> {
-    const queryEmbedding = await this.embeddingService.generateVector({
-      text: input.message,
-      taskType: 'RETRIEVAL_QUERY',
-    });
-
-    const matches = await this.contentService.searchReelContext({
-      queryVector: queryEmbedding.values,
-      queryText: input.message,
+    const result = await this.ragChatWorkflow.execute({
+      message: input.message,
       userId: input.userId,
-      limit: 8,
-    });
-
-    const rerankedMatches = await this.rerankerService.rerank({
-      queryText: input.message,
-      candidates: matches,
-      limit: 5,
-    });
-
-    const userMemories = await this.getRelevantUserMemoriesUseCase.execute({
-      userId: input.userId,
-      queryText: input.message,
-      limit: 12,
-    });
-
-    const conversationMemory = await this.getConversationMemoryUseCase.execute({
       conversationId: input.conversationId,
-    });
-
-    this.logger.log(
-      `[RAG] conversation=${input.conversationId} retrieved=${matches.length} reranked=${rerankedMatches.length} memoryMessages=${input.memory?.recentMessages?.length ?? 0} memoryItems=${userMemories.memories.length} hasConversationSummary=${Boolean(conversationMemory.summary)} top=${rerankedMatches
-        .map(
-          (item) =>
-            `${item.matchedBy}:retrieval=${item.score ?? 'n/a'}:rerank=${item.rerankScore ?? 'n/a'}:${item.chunkId}`,
-        )
-        .join(',')}`,
-    );
-
-    const systemPrompt = this.buildChatPromptUseCase.execute({
-      currentMessage: input.message,
       memory: input.memory,
-      conversationMemory,
-      userMemories,
-      retrievedChunks: rerankedMatches,
-    });
+    } satisfies RagChatWorkflowInput);
 
-    return await this.llmService.generateResponseStream(
-      input.message,
-      systemPrompt,
-      input.userId,
-      (token: string) => {
-        this.chatTokenPublisher.publishToken({
-          conversationId: input.conversationId,
-          userId: input.userId,
-          token,
-        });
-      },
-    );
+    return result.answer;
   }
 }

@@ -1,0 +1,84 @@
+import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
+import type { ConversationMemoryContext } from '@common/ai/interfaces/conversation-memory.interface';
+import type { RelevantUserMemoriesContext } from '@common/ai/interfaces/user-memory.interface';
+import type { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+
+export type RagChatIntent =
+  | 'NORMAL_CHAT'
+  | 'REEL_VIDEO_QUESTION'
+  | 'CONVERSATION_MEMORY_QUESTION'
+  | 'USER_MEMORY_QUESTION'
+  | 'TASK_ACTION_REQUEST';
+
+export interface RagChatRouteDecision {
+  intent: RagChatIntent;
+  needsRetrieval: boolean;
+  needsUserMemory: boolean;
+  needsConversationSummary: boolean;
+  needsVerification: boolean;
+  reason: string;
+}
+
+export type RagRetrievalMode = 'NONE' | 'REEL_VECTOR' | 'REEL_HYBRID';
+
+export interface RagRetrievalPlan {
+  mode: RagRetrievalMode;
+  query: string;
+  rewrittenQuery?: string;
+  searchLimit: number;
+  rerankLimit: number;
+  shouldRerank: boolean;
+  reason: string;
+}
+
+export interface RagMemorySelection {
+  includeRecentHistory: boolean;
+  includeConversationSummary: boolean;
+  includeUserMemory: boolean;
+  includeRetrievedChunks: boolean;
+  reason: string;
+}
+
+export interface RagVerificationResult {
+  passed: boolean;
+  confidence: number;
+  issues: string[];
+  requiresRevision: boolean;
+  revisedInstruction?: string;
+}
+
+export interface RagChatWorkflowInput {
+  message: string;
+  userId: string;
+  conversationId: string;
+  memory?: AiChatMemoryContext;
+}
+
+export interface RagChatWorkflowResult {
+  answer: string;
+}
+
+export interface RagChatWorkflowState {
+  userId: string;
+  conversationId: string;
+  userMessage: string;
+  memory?: AiChatMemoryContext;
+
+  route?: RagChatRouteDecision;
+  retrievalPlan?: RagRetrievalPlan;
+
+  retrievedChunks: ReelContextSearchResult[];
+  rerankedChunks: ReelContextSearchResult[];
+
+  conversationMemory?: ConversationMemoryContext;
+  userMemories?: RelevantUserMemoriesContext;
+  memorySelection?: RagMemorySelection;
+
+  answer?: string;
+  verification?: RagVerificationResult;
+  retryCount: number;
+}
+
+export interface IRagChatWorkflow {
+  execute(input: RagChatWorkflowInput): Promise<RagChatWorkflowResult>;
+}
