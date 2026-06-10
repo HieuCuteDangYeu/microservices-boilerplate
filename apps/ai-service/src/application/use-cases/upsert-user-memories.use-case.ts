@@ -14,7 +14,6 @@ export class UpsertUserMemoriesUseCase {
   private readonly allowedTypes = new Set<UserMemoryType>([
     'PREFERENCE',
     'PROFILE',
-    'PROJECT',
     'TECHNICAL_CONTEXT',
     'COMMUNICATION_STYLE',
     'OTHER',

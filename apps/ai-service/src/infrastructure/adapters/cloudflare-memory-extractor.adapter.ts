@@ -28,7 +28,6 @@ export class CloudflareMemoryExtractorAdapter implements IMemoryExtractorService
   private readonly allowedTypes = new Set<UserMemoryType>([
     'PREFERENCE',
     'PROFILE',
-    'PROJECT',
     'TECHNICAL_CONTEXT',
     'COMMUNICATION_STYLE',
     'OTHER',
@@ -91,7 +90,6 @@ Required JSON shape:
 Allowed type values:
 - PREFERENCE
 - PROFILE
-- PROJECT
 - TECHNICAL_CONTEXT
 - COMMUNICATION_STYLE
 - OTHER
@@ -111,7 +109,7 @@ Rules:
 1. Return only valid JSON.
 2. Do not wrap JSON in markdown fences.
 3. Do not copy the field meanings into the JSON values.
-4. Do not output combined enum strings such as "PREFERENCE|PROFILE|PROJECT|TECHNICAL_CONTEXT|COMMUNICATION_STYLE|OTHER".
+4. Do not output combined enum strings such as "PREFERENCE|PROFILE|TECHNICAL_CONTEXT|COMMUNICATION_STYLE|OTHER".
 5. Do not output combined scope strings such as "LONG_TERM|TEMPORARY".
 6. Only return LONG_TERM memories when the USER MESSAGE contains durable context useful in future conversations.
 7. Return TEMPORARY for short-lived status updates, one-time debugging steps, or current-turn-only information.

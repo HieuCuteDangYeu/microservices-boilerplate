@@ -3,7 +3,6 @@ import type { AiChatMemoryContext } from './chat-memory-context.interface';
 export type UserMemoryType =
   | 'PREFERENCE'
   | 'PROFILE'
-  | 'PROJECT'
   | 'TECHNICAL_CONTEXT'
   | 'COMMUNICATION_STYLE'
   | 'OTHER';
