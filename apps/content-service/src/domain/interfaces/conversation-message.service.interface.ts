@@ -12,6 +12,11 @@ export interface CreatedConversationMessage {
 }
 
 export interface IConversationMessageService {
+  isBotConversation(input: {
+    conversationId: string;
+    userId: string;
+  }): Promise<boolean>;
+
   createReelMessage(input: {
     conversationId: string;
     senderId: string;

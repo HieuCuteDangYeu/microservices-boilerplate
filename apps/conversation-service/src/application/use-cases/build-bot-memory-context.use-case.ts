@@ -4,6 +4,7 @@ import type {
 } from '@common/ai/interfaces/chat-memory-context.interface';
 import { BOT_USER_ID } from '@common/constants/seed.constants';
 import { Inject, Injectable } from '@nestjs/common';
+import type { Message } from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 
 @Injectable()
@@ -27,7 +28,7 @@ export class BuildBotMemoryContextUseCase {
 
     const recentMessages = messages
       .filter((message) => message.id !== input.currentMessageId)
-      .filter((message) => message.type === 'text')
+      .filter((message) => this.isMemoryEligibleMessage(message))
       .filter((message) => message.signalType === 0)
       .filter((message) => !message.isRecalled)
       .map((message) => {
@@ -36,7 +37,7 @@ export class BuildBotMemoryContextUseCase {
 
         return {
           role,
-          content: message.content?.trim() ?? '',
+          content: this.toMemoryContent(message),
           createdAt: message.createdAt.toISOString(),
         };
       })
@@ -46,5 +47,20 @@ export class BuildBotMemoryContextUseCase {
     return {
       recentMessages,
     };
+  }
+
+  private isMemoryEligibleMessage(message: Message): boolean {
+    return message.type === 'text' || message.type === 'reel';
+  }
+
+  private toMemoryContent(message: Message): string {
+    if (message.type !== 'reel') {
+      return message.content?.trim() ?? '';
+    }
+
+    const title =
+      message.media?.reelTitle?.trim() || message.content?.trim() || 'Untitled';
+
+    return `[Shared reel] ${title}`;
   }
 }

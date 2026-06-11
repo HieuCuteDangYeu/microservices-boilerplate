@@ -1,15 +1,26 @@
+import { BOT_USER_ID } from '@common/constants/seed.constants';
 import type { Reel } from '@content/domain/entities/reel.entity';
 import type {
   CreatedConversationMessage,
   IConversationMessageService,
 } from '@content/domain/interfaces/conversation-message.service.interface';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 
+interface ConversationDetailResponse {
+  id?: string;
+  participantIds?: string[];
+  participants?: Array<{
+    id?: string;
+    userId?: string;
+  }>;
+}
+
 @Injectable()
 export class ConversationMessageAdapter implements IConversationMessageService {
+  private readonly logger = new Logger(ConversationMessageAdapter.name);
   private readonly cdnDomain: string;
 
   constructor(
@@ -20,6 +31,34 @@ export class ConversationMessageAdapter implements IConversationMessageService {
     this.cdnDomain = this.configService
       .getOrThrow<string>('R2_PUBLIC_DOMAIN')
       .replace(/\/$/, '');
+  }
+
+  async isBotConversation(input: {
+    conversationId: string;
+    userId: string;
+  }): Promise<boolean> {
+    try {
+      const conversation = await firstValueFrom(
+        this.conversationClient.send<ConversationDetailResponse>(
+          'get_conversation_detail',
+          {
+            id: input.conversationId,
+            userId: input.userId,
+          },
+        ),
+      );
+
+      const participantIds = this.extractParticipantIds(conversation);
+
+      return participantIds.includes(BOT_USER_ID);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[ReelShare] Bot conversation check failed conversation=${input.conversationId}: ${message}`,
+      );
+
+      return false;
+    }
   }
 
   async createReelMessage(input: {
@@ -54,6 +93,32 @@ export class ConversationMessageAdapter implements IConversationMessageService {
     );
 
     return response.message;
+  }
+
+  private extractParticipantIds(
+    conversation: ConversationDetailResponse | null | undefined,
+  ): string[] {
+    if (!conversation) {
+      return [];
+    }
+
+    if (Array.isArray(conversation.participantIds)) {
+      return conversation.participantIds.filter(
+        (participantId): participantId is string =>
+          typeof participantId === 'string' && participantId.length > 0,
+      );
+    }
+
+    if (Array.isArray(conversation.participants)) {
+      return conversation.participants
+        .map((participant) => participant.id ?? participant.userId)
+        .filter(
+          (participantId): participantId is string =>
+            typeof participantId === 'string' && participantId.length > 0,
+        );
+    }
+
+    return [];
   }
 
   private buildStreamUrl(mediaKey: string): string {

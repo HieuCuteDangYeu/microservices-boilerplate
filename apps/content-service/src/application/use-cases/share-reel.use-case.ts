@@ -29,6 +29,8 @@ export class ShareReelUseCase {
     conversationId: string;
     sharedWithUserId?: string;
   }): Promise<ReelShareResponse> {
+    const sharedWithUserId = input.sharedWithUserId?.trim() || BOT_USER_ID;
+
     const reel = await this.contentRepository.findById(input.reelId);
 
     if (!reel) {
@@ -45,10 +47,15 @@ export class ShareReelUseCase {
       sharedByUserId: input.sharedByUserId,
     });
 
-    if (input.sharedWithUserId) {
+    if (sharedWithUserId === BOT_USER_ID) {
+      await this.assertConversationContainsBot({
+        conversationId: input.conversationId,
+        sharedByUserId: input.sharedByUserId,
+      });
+    } else {
       await this.assertCanShareWithTargetUser({
         sharedByUserId: input.sharedByUserId,
-        sharedWithUserId: input.sharedWithUserId,
+        sharedWithUserId,
       });
     }
 
@@ -56,10 +63,23 @@ export class ShareReelUseCase {
       reelId: reel.id,
       ownerId: reel.userId,
       sharedByUserId: input.sharedByUserId,
-      sharedWithUserId: input.sharedWithUserId ?? null,
+      sharedWithUserId,
       conversationId: input.conversationId,
       messageId: null,
     });
+
+    if (share.messageId) {
+      return {
+        id: share.id,
+        reelId: share.reelId,
+        ownerId: share.ownerId,
+        sharedByUserId: share.sharedByUserId,
+        sharedWithUserId: share.sharedWithUserId,
+        conversationId: share.conversationId,
+        messageId: share.messageId,
+        createdAt: share.createdAt.toISOString(),
+      };
+    }
 
     const message = await this.conversationMessageService.createReelMessage({
       conversationId: input.conversationId,
@@ -103,14 +123,27 @@ export class ShareReelUseCase {
     );
   }
 
+  private async assertConversationContainsBot(input: {
+    conversationId: string;
+    sharedByUserId: string;
+  }): Promise<void> {
+    const isBotConversation =
+      await this.conversationMessageService.isBotConversation({
+        conversationId: input.conversationId,
+        userId: input.sharedByUserId,
+      });
+
+    if (!isBotConversation) {
+      throw new ReelShareForbiddenError(
+        'Bot shares are only allowed in conversations that include the bot.',
+      );
+    }
+  }
+
   private async assertCanShareWithTargetUser(input: {
     sharedByUserId: string;
     sharedWithUserId: string;
   }): Promise<void> {
-    if (input.sharedWithUserId === BOT_USER_ID) {
-      return;
-    }
-
     if (input.sharedByUserId === input.sharedWithUserId) {
       return;
     }
