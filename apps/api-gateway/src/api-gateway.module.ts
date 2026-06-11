@@ -1,7 +1,8 @@
 import { AuthController } from '@gateway/auth/auth.controller';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
-import { ReelAuthorService } from '@gateway/content/reel-author.service';
 import { ContentController } from '@gateway/content/content.controller';
+import { PublicReelShareController } from '@gateway/content/public-reel-share.controller';
+import { ReelAuthorService } from '@gateway/content/reel-author.service';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
 import { MessageController } from '@gateway/conversation/message.controller';
@@ -68,6 +69,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     MessageController,
     GatewayKeyController,
     ContentController,
+    PublicReelShareController,
   ],
   providers: [JwtAuthGuard, ReelAuthorService],
 })

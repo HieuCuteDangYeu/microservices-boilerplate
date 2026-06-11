@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import { ReelShareLink } from '../entities/reel-share-link.entity';
 import { ReelShare } from '../entities/reel-share.entity';
 import { Reel } from '../entities/reel.entity';
 
@@ -68,6 +69,19 @@ export interface ReelShareCreateInput {
   messageId?: string | null;
 }
 
+export interface ReelShareLinkCreateInput {
+  reelId: string;
+  ownerId: string;
+  token: string;
+  createdBy: string;
+  expiresAt?: Date | null;
+}
+
+export interface ReelShareLinkWithReel {
+  link: ReelShareLink;
+  reel: Reel;
+}
+
 export interface IContentRepository {
   createReel(reel: Partial<Reel>): Promise<Reel>;
 
@@ -92,6 +106,25 @@ export interface IContentRepository {
     shareId: string,
     messageId: string,
   ): Promise<ReelShare>;
+
+  createReelShareLink(input: ReelShareLinkCreateInput): Promise<ReelShareLink>;
+
+  findActiveReelShareLinkByReelAndCreator(input: {
+    reelId: string;
+    createdBy: string;
+    now: Date;
+  }): Promise<ReelShareLink | null>;
+
+  findReelShareLinkByToken(
+    token: string,
+  ): Promise<ReelShareLinkWithReel | null>;
+
+  incrementReelShareLinkClickCount(id: string): Promise<ReelShareLink>;
+
+  revokeReelShareLink(input: {
+    token: string;
+    revokedByUserId: string;
+  }): Promise<ReelShareLink | null>;
 
   searchReelContext(
     input: ReelContextSearchRequest,

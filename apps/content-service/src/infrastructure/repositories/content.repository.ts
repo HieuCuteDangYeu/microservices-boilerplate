@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { ReelShare } from '@content/domain/entities/reel-share.entity';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/content-client';
@@ -15,6 +16,8 @@ import {
   ReelProfileContextQuery,
   ReelProfileContextResult,
   ReelShareCreateInput,
+  ReelShareLinkCreateInput,
+  ReelShareLinkWithReel,
   ReelUpdateData,
 } from '../../domain/interfaces/content.repository.interface';
 
@@ -697,5 +700,101 @@ export class ContentRepository
       createdAt: record['createdAt'] as Date,
       updatedAt: record['updatedAt'] as Date,
     });
+  }
+
+  private toReelShareLinkDomain(
+    record: Record<string, unknown>,
+  ): ReelShareLink {
+    return new ReelShareLink({
+      id: record['id'] as string,
+      reelId: record['reelId'] as string,
+      ownerId: record['ownerId'] as string,
+      token: record['token'] as string,
+      createdBy: record['createdBy'] as string,
+      expiresAt: (record['expiresAt'] as Date | null | undefined) ?? null,
+      revokedAt: (record['revokedAt'] as Date | null | undefined) ?? null,
+      clickCount: record['clickCount'] as bigint,
+      createdAt: record['createdAt'] as Date,
+      updatedAt: record['updatedAt'] as Date,
+    });
+  }
+
+  async createReelShareLink(
+    input: ReelShareLinkCreateInput,
+  ): Promise<ReelShareLink> {
+    const record = await this.reelShareLink.create({
+      data: {
+        reelId: input.reelId,
+        ownerId: input.ownerId,
+        token: input.token,
+        createdBy: input.createdBy,
+        expiresAt: input.expiresAt,
+      },
+    });
+
+    return this.toReelShareLinkDomain(record);
+  }
+
+  async findActiveReelShareLinkByReelAndCreator(input: {
+    reelId: string;
+    createdBy: string;
+    now: Date;
+  }): Promise<ReelShareLink | null> {
+    const record = await this.reelShareLink.findFirst({
+      where: {
+        reelId: input.reelId,
+        createdBy: input.createdBy,
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: input.now } }],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return record ? this.toReelShareLinkDomain(record) : null;
+  }
+
+  async findReelShareLinkByToken(
+    token: string,
+  ): Promise<ReelShareLinkWithReel | null> {
+    const record = await this.reelShareLink.findUnique({
+      where: { token },
+      include: { reel: true },
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return {
+      link: this.toReelShareLinkDomain(record),
+      reel: this.toDomain(record.reel),
+    };
+  }
+
+  async incrementReelShareLinkClickCount(id: string): Promise<ReelShareLink> {
+    const record = await this.reelShareLink.update({
+      where: { id },
+      data: {
+        clickCount: {
+          increment: 1,
+        },
+      },
+    });
+
+    return this.toReelShareLinkDomain(record);
+  }
+
+  async revokeReelShareLink(input: {
+    token: string;
+    revokedByUserId: string;
+  }): Promise<ReelShareLink | null> {
+    const record = await this.reelShareLink.update({
+      where: { token: input.token },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    return this.toReelShareLinkDomain(record);
   }
 }

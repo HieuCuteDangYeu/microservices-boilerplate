@@ -1,4 +1,5 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
+import { CreateReelShareLinkDto } from '@common/content/dtos/create-reel-share-link.dto';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { GetReelContextQueryDto } from '@common/content/dtos/get-reel-context.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
@@ -12,6 +13,7 @@ import {
   ReelFeedListItem,
   ReelListItem,
 } from '@common/content/interfaces/reel-response.interface';
+import { ReelShareLinkResponse } from '@common/content/interfaces/reel-share-link.interface';
 import { ReelShareResponse } from '@common/content/interfaces/reel-share.interface';
 import { Reel } from '@content/domain/entities/reel.entity';
 import {
@@ -47,6 +49,7 @@ import { ReelAuthorService } from './reel-author.service';
 export class ContentController {
   private readonly logger = new Logger(ContentController.name);
   private readonly cdnDomain: string;
+  private readonly externalShareBaseUrl: string;
 
   constructor(
     @Inject('CONTENT_SERVICE') private readonly contentClient: ClientProxy,
@@ -56,6 +59,16 @@ export class ContentController {
     this.cdnDomain = this.configService
       .getOrThrow<string>('R2_PUBLIC_DOMAIN')
       .replace(/\/$/, '');
+
+    this.externalShareBaseUrl = (
+      this.configService.get<string>('EXTERNAL_SHARE_BASE_URL') ||
+      this.configService.get<string>('FRONTEND_URL') ||
+      'http://localhost:3000'
+    ).replace(/\/$/, '');
+  }
+
+  private buildExternalShareUrl(token: string): string {
+    return `${this.externalShareBaseUrl}/r/${token}`;
   }
 
   @Post('reels')
@@ -258,6 +271,51 @@ export class ContentController {
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
+  }
+
+  @Post('reels/:id/share-link')
+  @ApiOperation({ summary: 'Create an external public share link for a reel' })
+  async createReelShareLink(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+    @Body() body: CreateReelShareLinkDto,
+  ): Promise<ReelShareLinkResponse> {
+    const link = await lastValueFrom(
+      this.contentClient
+        .send<ReelShareLinkResponse>('content.create_reel_share_link', {
+          reelId,
+          createdBy: request.user!.id,
+          expiresInDays: body?.expiresInDays,
+          reuseExisting: body?.reuseExisting,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return {
+      ...link,
+      publicUrl: this.buildExternalShareUrl(link.token),
+    };
+  }
+
+  @Delete('reels/share-links/:token')
+  @ApiOperation({ summary: 'Revoke an external reel share link' })
+  async revokeReelShareLink(
+    @Req() request: AuthenticatedRequest,
+    @Param('token') token: string,
+  ): Promise<ReelShareLinkResponse> {
+    const link = await lastValueFrom(
+      this.contentClient
+        .send<ReelShareLinkResponse>('content.revoke_reel_share_link', {
+          token,
+          revokedByUserId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return {
+      ...link,
+      publicUrl: this.buildExternalShareUrl(link.token),
+    };
   }
 
   @Patch('reels/:id')

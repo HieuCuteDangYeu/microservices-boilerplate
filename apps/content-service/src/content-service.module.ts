@@ -1,10 +1,13 @@
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
+import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
+import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
+import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
@@ -78,6 +81,9 @@ function createRmqClientRegistration(name: string, queue: string) {
     GetReelStatusUseCase,
     SearchReelContextUseCase,
     ShareReelUseCase,
+    CreateReelShareLinkUseCase,
+    ResolveReelShareLinkUseCase,
+    RevokeReelShareLinkUseCase,
     BackfillReelChunksUseCase,
     {
       provide: 'IContentRepository',

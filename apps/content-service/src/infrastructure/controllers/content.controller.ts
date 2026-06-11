@@ -2,15 +2,19 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
+import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
+import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
+import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
+import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { Reel } from '@content/domain/entities/reel.entity';
 import { InvalidMediaFileError } from '@content/domain/errors/content.error';
 import {
@@ -41,6 +45,9 @@ export class ContentController {
     private readonly getReelStatusUseCase: GetReelStatusUseCase,
     private readonly searchReelContextUseCase: SearchReelContextUseCase,
     private readonly shareReelUseCase: ShareReelUseCase,
+    private readonly createReelShareLinkUseCase: CreateReelShareLinkUseCase,
+    private readonly resolveReelShareLinkUseCase: ResolveReelShareLinkUseCase,
+    private readonly revokeReelShareLinkUseCase: RevokeReelShareLinkUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -73,6 +80,37 @@ export class ContentController {
     } | null,
   ): string | null {
     return cursor ? `${cursor.createdAt.toISOString()}|${cursor.id}` : null;
+  }
+
+  private serializeShareLink(link: ReelShareLink) {
+    return {
+      id: link.id,
+      reelId: link.reelId,
+      ownerId: link.ownerId,
+      token: link.token,
+      createdBy: link.createdBy,
+      expiresAt: link.expiresAt?.toISOString() ?? null,
+      revokedAt: link.revokedAt?.toISOString() ?? null,
+      clickCount: Number(link.clickCount),
+      createdAt: link.createdAt.toISOString(),
+      updatedAt: link.updatedAt.toISOString(),
+    };
+  }
+
+  private toExternalShareReelSerializable(reel: Reel): Record<string, unknown> {
+    return {
+      id: reel.id,
+      userId: reel.userId,
+      mediaKey: reel.mediaKey,
+      title: reel.title,
+      description: reel.description,
+      tags: reel.tags,
+      status: reel.status,
+      visibility: reel.visibility,
+      thumbnailKey: reel.thumbnailKey,
+      createdAt: reel.createdAt,
+      updatedAt: reel.updatedAt,
+    };
   }
 
   @MessagePattern('content.create_reel')
@@ -546,6 +584,188 @@ export class ContentController {
       throw new RpcException({
         statusCode: 500,
         message: `Reel Share Error: ${err.message}`,
+      });
+    }
+  }
+
+  @MessagePattern('content.create_reel_share_link')
+  async createReelShareLink(
+    @Payload()
+    payload: {
+      reelId: string;
+      createdBy: string;
+      expiresInDays?: number;
+      reuseExisting?: boolean;
+    },
+  ) {
+    if (
+      !payload ||
+      typeof payload.reelId !== 'string' ||
+      payload.reelId.trim().length === 0 ||
+      typeof payload.createdBy !== 'string' ||
+      payload.createdBy.trim().length === 0 ||
+      (payload.expiresInDays !== undefined &&
+        (!Number.isInteger(payload.expiresInDays) ||
+          payload.expiresInDays < 1 ||
+          payload.expiresInDays > 365))
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for reel share link creation',
+      });
+    }
+
+    try {
+      const link = await this.createReelShareLinkUseCase.execute({
+        reelId: payload.reelId.trim(),
+        createdBy: payload.createdBy.trim(),
+        expiresInDays: payload.expiresInDays,
+        reuseExisting: payload.reuseExisting,
+      });
+
+      return this.serializeShareLink(link);
+    } catch (error: unknown) {
+      const err = error as Error;
+
+      if (err.name === 'ReelNotFoundError') {
+        throw new RpcException({
+          statusCode: 404,
+          message: err.message,
+        });
+      }
+
+      if (err.name === 'ReelNotReadyError') {
+        throw new RpcException({
+          statusCode: 409,
+          message: err.message,
+        });
+      }
+
+      if (err.name === 'ReelShareForbiddenError') {
+        throw new RpcException({
+          statusCode: 403,
+          message: err.message,
+        });
+      }
+
+      throw new RpcException({
+        statusCode: 500,
+        message: `Create Reel Share Link Error: ${err.message}`,
+      });
+    }
+  }
+
+  @MessagePattern('content.resolve_reel_share_link')
+  async resolveReelShareLink(@Payload() payload: { token: string }) {
+    if (
+      !payload ||
+      typeof payload.token !== 'string' ||
+      payload.token.trim().length === 0
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for reel share link resolution',
+      });
+    }
+
+    try {
+      const result = await this.resolveReelShareLinkUseCase.execute({
+        token: payload.token.trim(),
+      });
+
+      return {
+        link: this.serializeShareLink(result.link),
+        reel: this.toExternalShareReelSerializable(result.reel),
+      };
+    } catch (error: unknown) {
+      const err = error as Error;
+
+      if (err.name === 'ReelShareLinkNotFoundError') {
+        throw new RpcException({
+          statusCode: 404,
+          message: err.message,
+        });
+      }
+
+      if (
+        err.name === 'ReelShareLinkExpiredError' ||
+        err.name === 'ReelShareLinkRevokedError'
+      ) {
+        throw new RpcException({
+          statusCode: 410,
+          message: err.message,
+        });
+      }
+
+      if (err.name === 'ReelNotReadyError') {
+        throw new RpcException({
+          statusCode: 409,
+          message: err.message,
+        });
+      }
+
+      if (err.name === 'ReelShareForbiddenError') {
+        throw new RpcException({
+          statusCode: 403,
+          message: err.message,
+        });
+      }
+
+      throw new RpcException({
+        statusCode: 500,
+        message: `Resolve Reel Share Link Error: ${err.message}`,
+      });
+    }
+  }
+
+  @MessagePattern('content.revoke_reel_share_link')
+  async revokeReelShareLink(
+    @Payload()
+    payload: {
+      token: string;
+      revokedByUserId: string;
+    },
+  ) {
+    if (
+      !payload ||
+      typeof payload.token !== 'string' ||
+      payload.token.trim().length === 0 ||
+      typeof payload.revokedByUserId !== 'string' ||
+      payload.revokedByUserId.trim().length === 0
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for reel share link revocation',
+      });
+    }
+
+    try {
+      const link = await this.revokeReelShareLinkUseCase.execute({
+        token: payload.token.trim(),
+        revokedByUserId: payload.revokedByUserId.trim(),
+      });
+
+      return this.serializeShareLink(link);
+    } catch (error: unknown) {
+      const err = error as Error;
+
+      if (err.name === 'ReelShareLinkNotFoundError') {
+        throw new RpcException({
+          statusCode: 404,
+          message: err.message,
+        });
+      }
+
+      if (err.name === 'ReelShareForbiddenError') {
+        throw new RpcException({
+          statusCode: 403,
+          message: err.message,
+        });
+      }
+
+      throw new RpcException({
+        statusCode: 500,
+        message: `Revoke Reel Share Link Error: ${err.message}`,
       });
     }
   }
