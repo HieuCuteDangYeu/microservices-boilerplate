@@ -9,7 +9,9 @@ import { MessageDto } from '@common/conversation/dtos/message.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
 import { MessageAnchorExpansionResponse } from '@common/conversation/interfaces/message-anchor-expansion.interface';
 import { MessageAnchorWindowResponse } from '@common/conversation/interfaces/message-anchor-window.interface';
+import type { Reel } from '@content/domain/entities/reel.entity';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { ReelAuthorService } from '@gateway/content/reel-author.service';
 import {
   BadRequestException,
   Body,
@@ -50,7 +52,71 @@ export class ConversationController {
   constructor(
     @Inject('CONVERSATION_SERVICE')
     private readonly conversationClient: ClientProxy,
+    @Inject('CONTENT_SERVICE')
+    private readonly contentClient: ClientProxy,
+    private readonly reelAuthorService: ReelAuthorService,
   ) {}
+
+  private async enrichReelOwnerInMessageResponse(
+    message: MessageDto,
+  ): Promise<MessageDto> {
+    if (message.type !== 'reel' || !message.media) {
+      return message;
+    }
+
+    const media = message.media as Record<string, unknown>;
+    const reelOwnerId =
+      typeof media.reelOwnerId === 'string'
+        ? media.reelOwnerId
+        : await this.resolveReelOwnerId(media);
+
+    const responseMedia = { ...media };
+    delete responseMedia.reelOwnerId;
+
+    if (!reelOwnerId) {
+      return {
+        ...message,
+        media: responseMedia as MessageDto['media'],
+      };
+    }
+
+    const authorsById = await this.reelAuthorService.loadAuthorMap([
+      reelOwnerId,
+    ]);
+    const author = this.reelAuthorService.resolveAuthor(
+      authorsById,
+      reelOwnerId,
+    );
+
+    return {
+      ...message,
+      media: {
+        ...responseMedia,
+        ...(author.username ? { reelOwnerUsername: author.username } : {}),
+        ...(author.avatarUrl ? { reelOwnerAvatarUrl: author.avatarUrl } : {}),
+      } as MessageDto['media'],
+    };
+  }
+
+  private async resolveReelOwnerId(
+    media: Record<string, unknown>,
+  ): Promise<string | null> {
+    if (typeof media.reelId !== 'string' || media.reelId.trim().length === 0) {
+      return null;
+    }
+
+    try {
+      const reel = await lastValueFrom(
+        this.contentClient.send<Reel>('content.get_reel', {
+          reelId: media.reelId.trim(),
+        }),
+      );
+
+      return typeof reel?.userId === 'string' ? reel.userId : null;
+    } catch {
+      return null;
+    }
+  }
 
   @Post()
   @ApiOperation({ summary: 'Tạo cuộc hội thoại mới' })
@@ -272,7 +338,7 @@ export class ConversationController {
       }),
     );
 
-    return response.message;
+    return await this.enrichReelOwnerInMessageResponse(response.message);
   }
 
   @Patch(':id/messages/:messageId')
@@ -413,7 +479,7 @@ export class ConversationController {
         senderId: user.id,
       }),
     );
-    return response.message;
+    return await this.enrichReelOwnerInMessageResponse(response.message);
   }
 
   @Post('chat')

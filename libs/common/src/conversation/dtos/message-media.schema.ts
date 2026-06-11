@@ -19,6 +19,8 @@ export const MessageMediaSchema = z.object({
   failureReason: z.string().min(1).optional(),
   reelId: z.string().min(1).optional(),
   reelOwnerId: z.string().min(1).optional(),
+  reelOwnerUsername: z.string().min(1).optional(),
+  reelOwnerAvatarUrl: z.string().min(1).optional(),
   reelTitle: z.string().min(1).optional(),
   reelDescription: z.string().min(1).optional(),
 });

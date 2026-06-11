@@ -37,6 +37,8 @@ export interface MessageMedia {
   failureReason?: string;
   reelId?: string;
   reelOwnerId?: string;
+  reelOwnerUsername?: string;
+  reelOwnerAvatarUrl?: string;
   reelTitle?: string;
   reelDescription?: string;
 }

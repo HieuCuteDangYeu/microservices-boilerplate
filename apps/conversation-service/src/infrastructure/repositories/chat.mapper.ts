@@ -106,6 +106,8 @@ export class ChatMapper {
     const failureReason = record.failureReason;
     const reelId = record.reelId;
     const reelOwnerId = record.reelOwnerId;
+    const reelOwnerUsername = record.reelOwnerUsername;
+    const reelOwnerAvatarUrl = record.reelOwnerAvatarUrl;
     const reelTitle = record.reelTitle;
     const reelDescription = record.reelDescription;
 
@@ -124,6 +126,8 @@ export class ChatMapper {
       ...(typeof failureReason === 'string' ? { failureReason } : {}),
       ...(typeof reelId === 'string' ? { reelId } : {}),
       ...(typeof reelOwnerId === 'string' ? { reelOwnerId } : {}),
+      ...(typeof reelOwnerUsername === 'string' ? { reelOwnerUsername } : {}),
+      ...(typeof reelOwnerAvatarUrl === 'string' ? { reelOwnerAvatarUrl } : {}),
       ...(typeof reelTitle === 'string' ? { reelTitle } : {}),
       ...(typeof reelDescription === 'string' ? { reelDescription } : {}),
     };
