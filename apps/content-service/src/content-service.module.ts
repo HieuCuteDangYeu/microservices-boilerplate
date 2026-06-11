@@ -6,9 +6,12 @@ import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
+import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-embedding-service.adapter';
+import { ConversationMessageAdapter } from '@content/infrastructure/adapters/conversation-message.adapter';
+import { FriendSharePolicyAdapter } from '@content/infrastructure/adapters/friend-share-policy.adapter';
 import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { Module } from '@nestjs/common';
@@ -18,6 +21,34 @@ import { CreateReelUseCase } from './application/use-cases/create-reel.use-case'
 import { ContentController } from './infrastructure/controllers/content.controller';
 import { ContentRepository } from './infrastructure/repositories/content.repository';
 
+function createRmqClientRegistration(name: string, queue: string) {
+  return {
+    name,
+    useFactory: (configService: ConfigService) => {
+      const heartbeat = Number(
+        configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
+      );
+
+      return {
+        transport: Transport.RMQ as const,
+        options: {
+          urls: [
+            configService.get<string>('RABBITMQ_URL') ||
+              'amqp://localhost:5672',
+          ],
+          queue,
+          queueOptions: { durable: true },
+          heartbeat:
+            Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
+          retryAttempts: 10,
+          retryDelay: 3000,
+        },
+      };
+    },
+    inject: [ConfigService],
+  };
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -25,56 +56,13 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
       envFilePath: '.env',
     }),
     ClientsModule.registerAsync([
-      {
-        name: 'PROCESSING_SERVICE',
-        useFactory: (configService: ConfigService) => {
-          const heartbeat = Number(
-            configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
-          );
-
-          return {
-            transport: Transport.RMQ,
-            options: {
-              urls: [
-                configService.get<string>('RABBITMQ_URL') ||
-                  'amqp://localhost:5672',
-              ],
-              queue: 'processing_queue',
-              queueOptions: { durable: true },
-              heartbeat:
-                Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
-              retryAttempts: 10,
-              retryDelay: 3000,
-            },
-          };
-        },
-        inject: [ConfigService],
-      },
-      {
-        name: 'AI_SERVICE_RMQ',
-        useFactory: (configService: ConfigService) => {
-          const heartbeat = Number(
-            configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
-          );
-
-          return {
-            transport: Transport.RMQ,
-            options: {
-              urls: [
-                configService.get<string>('RABBITMQ_URL') ||
-                  'amqp://localhost:5672',
-              ],
-              queue: 'ai_queue',
-              queueOptions: { durable: true },
-              heartbeat:
-                Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
-              retryAttempts: 10,
-              retryDelay: 3000,
-            },
-          };
-        },
-        inject: [ConfigService],
-      },
+      createRmqClientRegistration('PROCESSING_SERVICE', 'processing_queue'),
+      createRmqClientRegistration('AI_SERVICE_RMQ', 'ai_queue'),
+      createRmqClientRegistration('FRIEND_SERVICE_RMQ', 'friend_queue'),
+      createRmqClientRegistration(
+        'CONVERSATION_SERVICE_RMQ',
+        'conversation_queue',
+      ),
     ]),
   ],
   controllers: [ContentController],
@@ -89,6 +77,7 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
     UpdateReelStatusUseCase,
     GetReelStatusUseCase,
     SearchReelContextUseCase,
+    ShareReelUseCase,
     BackfillReelChunksUseCase,
     {
       provide: 'IContentRepository',
@@ -105,6 +94,14 @@ import { ContentRepository } from './infrastructure/repositories/content.reposit
     {
       provide: 'IAiEmbeddingService',
       useClass: AiEmbeddingServiceAdapter,
+    },
+    {
+      provide: 'IFriendSharePolicyService',
+      useClass: FriendSharePolicyAdapter,
+    },
+    {
+      provide: 'IConversationMessageService',
+      useClass: ConversationMessageAdapter,
     },
   ],
 })

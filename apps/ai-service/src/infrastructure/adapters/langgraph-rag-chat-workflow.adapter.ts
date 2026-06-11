@@ -128,6 +128,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     const result = await this.timed('retrievalNode', () =>
       this.retrievalAgentUseCase.execute({
         userId: state.userId,
+        conversationId: state.conversationId,
         message: state.userMessage,
         route,
       }),

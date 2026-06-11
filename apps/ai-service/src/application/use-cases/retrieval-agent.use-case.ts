@@ -42,6 +42,7 @@ export class RetrievalAgentUseCase {
 
   async execute(input: {
     userId: string;
+    conversationId: string;
     message: string;
     route: RagChatRouteDecision;
   }): Promise<{
@@ -70,6 +71,8 @@ export class RetrievalAgentUseCase {
       queryVector: queryEmbedding.values,
       queryText,
       userId: input.userId,
+      conversationId: input.conversationId,
+      sharedOnly: true,
       limit: plan.searchLimit,
     });
 
@@ -141,6 +144,7 @@ Rules:
 3. Keep the query focused on reel/video/transcript search.
 4. Rewrite only when the user message is conversational, ambiguous, or contains references.
 5. Do not invent facts not present in the user message.
+6. Retrieval is scoped to reels shared into the current conversation.
 `.trim();
   }
 

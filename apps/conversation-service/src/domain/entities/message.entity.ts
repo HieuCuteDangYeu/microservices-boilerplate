@@ -7,13 +7,21 @@ export interface MessageReaction {
 
 export type MessageReactionMap = Record<string, MessageReaction>;
 
+export type ConversationMessageType =
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'file'
+  | 'call'
+  | 'reel';
+
 export interface MessageReplyPreview {
   senderName: string;
   content: string;
   thumbnailUri?: string;
   mediaWidth?: number;
   mediaHeight?: number;
-  type: 'text' | 'image' | 'video' | 'file' | 'call';
+  type: ConversationMessageType;
 }
 
 export interface MessageMedia {
@@ -27,6 +35,10 @@ export interface MessageMedia {
   durationMs?: number;
   status?: 'ready' | 'processing' | 'failed';
   failureReason?: string;
+  reelId?: string;
+  reelOwnerId?: string;
+  reelTitle?: string;
+  reelDescription?: string;
 }
 
 export interface RecallMessageResult {

@@ -2,6 +2,7 @@ import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { GetReelContextQueryDto } from '@common/content/dtos/get-reel-context.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
+import { ShareReelDto } from '@common/content/dtos/share-reel.dto';
 import { UpdateReelDto } from '@common/content/dtos/update-reel.dto';
 import { ReelProfileContextResponse } from '@common/content/interfaces/reel-context-response.interface';
 import { ReelProcessingStatus } from '@common/content/interfaces/reel-processing-status.interface';
@@ -11,6 +12,7 @@ import {
   ReelFeedListItem,
   ReelListItem,
 } from '@common/content/interfaces/reel-response.interface';
+import { ReelShareResponse } from '@common/content/interfaces/reel-share.interface';
 import { Reel } from '@content/domain/entities/reel.entity';
 import {
   JwtAuthGuard,
@@ -230,6 +232,32 @@ export class ContentController {
         ? this.buildStreamUrl(status.mediaKey)
         : undefined,
     };
+  }
+
+  @Post('reels/:id/share')
+  @ApiOperation({ summary: 'Share a reel into a conversation' })
+  async shareReel(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+    @Body() body: ShareReelDto,
+  ): Promise<ReelShareResponse> {
+    if (!body?.conversationId || body.conversationId.trim().length === 0) {
+      throw new HttpException(
+        'conversationId is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return await lastValueFrom(
+      this.contentClient
+        .send<ReelShareResponse>('content.share_reel', {
+          reelId,
+          sharedByUserId: request.user!.id,
+          conversationId: body.conversationId.trim(),
+          sharedWithUserId: body.sharedWithUserId?.trim(),
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
   }
 
   @Patch('reels/:id')

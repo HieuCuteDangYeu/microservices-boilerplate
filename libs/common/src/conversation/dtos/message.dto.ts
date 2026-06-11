@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { ConversationMessageTypeSchema } from './create-message.dto';
 import { MessageMediaSchema } from './message-media.schema';
 
 export const MessageSchema = z.object({
@@ -22,7 +23,7 @@ export const MessageSchema = z.object({
       thumbnailUri: z.string().optional(),
       mediaWidth: z.number().optional(),
       mediaHeight: z.number().optional(),
-      type: z.enum(['text', 'image', 'video', 'file', 'call']),
+      type: ConversationMessageTypeSchema,
     })
     .optional(),
   reactions: z

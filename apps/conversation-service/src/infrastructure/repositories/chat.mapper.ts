@@ -88,20 +88,26 @@ export class ChatMapper {
       return undefined;
     }
 
-    const fileUrl = (value as Record<string, unknown>).fileUrl;
+    const record = value as Record<string, unknown>;
+
+    const fileUrl = record.fileUrl;
     if (typeof fileUrl !== 'string' || !fileUrl) {
       return undefined;
     }
 
-    const fileKey = (value as Record<string, unknown>).fileKey;
-    const thumbnailKey = (value as Record<string, unknown>).thumbnailKey;
-    const thumbnailUrl = (value as Record<string, unknown>).thumbnailUrl;
-    const mimeType = (value as Record<string, unknown>).mimeType;
-    const width = (value as Record<string, unknown>).width;
-    const height = (value as Record<string, unknown>).height;
-    const durationMs = (value as Record<string, unknown>).durationMs;
-    const status = (value as Record<string, unknown>).status;
-    const failureReason = (value as Record<string, unknown>).failureReason;
+    const fileKey = record.fileKey;
+    const thumbnailKey = record.thumbnailKey;
+    const thumbnailUrl = record.thumbnailUrl;
+    const mimeType = record.mimeType;
+    const width = record.width;
+    const height = record.height;
+    const durationMs = record.durationMs;
+    const status = record.status;
+    const failureReason = record.failureReason;
+    const reelId = record.reelId;
+    const reelOwnerId = record.reelOwnerId;
+    const reelTitle = record.reelTitle;
+    const reelDescription = record.reelDescription;
 
     return {
       ...(typeof fileKey === 'string' ? { fileKey } : {}),
@@ -116,6 +122,10 @@ export class ChatMapper {
         ? { status }
         : {}),
       ...(typeof failureReason === 'string' ? { failureReason } : {}),
+      ...(typeof reelId === 'string' ? { reelId } : {}),
+      ...(typeof reelOwnerId === 'string' ? { reelOwnerId } : {}),
+      ...(typeof reelTitle === 'string' ? { reelTitle } : {}),
+      ...(typeof reelDescription === 'string' ? { reelDescription } : {}),
     };
   }
 
@@ -136,7 +146,7 @@ export class ChatMapper {
     if (
       typeof senderName !== 'string' ||
       typeof content !== 'string' ||
-      !['text', 'image', 'video', 'file', 'call'].includes(String(type))
+      !['text', 'image', 'video', 'file', 'call', 'reel'].includes(String(type))
     ) {
       return undefined;
     }
@@ -150,6 +160,7 @@ export class ChatMapper {
       type: type as MessageReplyPreview['type'],
     };
   }
+
   static toDto(domain: Message) {
     return {
       id: domain.id,

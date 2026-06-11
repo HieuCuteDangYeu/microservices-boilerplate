@@ -17,6 +17,10 @@ export const MessageMediaSchema = z.object({
   durationMs: z.number().int().nonnegative().optional(),
   status: MessageMediaStatusSchema.optional(),
   failureReason: z.string().min(1).optional(),
+  reelId: z.string().min(1).optional(),
+  reelOwnerId: z.string().min(1).optional(),
+  reelTitle: z.string().min(1).optional(),
+  reelDescription: z.string().min(1).optional(),
 });
 
 export type MessageMediaDto = z.infer<typeof MessageMediaSchema>;

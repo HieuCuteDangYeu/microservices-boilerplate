@@ -37,6 +37,7 @@ model Reel {
   updatedAt          DateTime         @updatedAt
 
   chunks ReelChunk[]
+  shares ReelShare[]
 
   @@index([userId])
   @@index([visibility, createdAt(sort: Desc)])
@@ -62,4 +63,26 @@ model ReelChunk {
   @@index([reelId])
   @@index([userId])
   @@index([createdAt])
+}
+
+model ReelShare {
+  id               String   @id @default(uuid())
+  reelId           String
+  ownerId          String
+  sharedByUserId   String
+  sharedWithUserId String?
+  conversationId   String
+  messageId        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  reel Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  @@unique([reelId, conversationId])
+  @@index([reelId])
+  @@index([ownerId])
+  @@index([sharedByUserId])
+  @@index([sharedWithUserId])
+  @@index([conversationId])
+  @@index([messageId])
 }

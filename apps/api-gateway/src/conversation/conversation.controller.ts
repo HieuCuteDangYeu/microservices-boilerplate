@@ -214,7 +214,7 @@ export class ConversationController {
     body: {
       clientMessageId?: string;
       content?: string;
-      type?: 'text' | 'image' | 'video' | 'file' | 'call';
+      type?: 'text' | 'image' | 'video' | 'file' | 'call' | 'reel';
       media?: {
         fileKey?: string;
         fileUrl: string;
@@ -226,6 +226,10 @@ export class ConversationController {
         durationMs?: number;
         status?: 'ready' | 'processing' | 'failed';
         failureReason?: string;
+        reelId?: string;
+        reelOwnerId?: string;
+        reelTitle?: string;
+        reelDescription?: string;
       };
       signalType?: number;
       registrationId?: number;
@@ -238,7 +242,7 @@ export class ConversationController {
     }
 
     const type = body?.type ?? 'text';
-    if (!['text', 'image', 'video', 'file', 'call'].includes(type)) {
+    if (!['text', 'image', 'video', 'file', 'call', 'reel'].includes(type)) {
       throw new BadRequestException('Invalid message type');
     }
 

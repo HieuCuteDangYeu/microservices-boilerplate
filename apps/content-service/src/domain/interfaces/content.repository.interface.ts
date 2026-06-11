@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import { ReelShare } from '../entities/reel-share.entity';
 import { Reel } from '../entities/reel.entity';
 
 export interface ReelListQuery {
@@ -58,6 +59,15 @@ export interface ReelChunkBackfillPage {
   nextCursor: ReelChunkBackfillCursor | null;
 }
 
+export interface ReelShareCreateInput {
+  reelId: string;
+  ownerId: string;
+  sharedByUserId: string;
+  sharedWithUserId?: string | null;
+  conversationId: string;
+  messageId?: string | null;
+}
+
 export interface IContentRepository {
   createReel(reel: Partial<Reel>): Promise<Reel>;
 
@@ -75,6 +85,13 @@ export interface IContentRepository {
   ): Promise<Reel>;
 
   findById(id: string): Promise<Reel | null>;
+
+  shareReel(input: ReelShareCreateInput): Promise<ReelShare>;
+
+  updateReelShareMessageId(
+    shareId: string,
+    messageId: string,
+  ): Promise<ReelShare>;
 
   searchReelContext(
     input: ReelContextSearchRequest,

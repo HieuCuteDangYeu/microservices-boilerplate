@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import { ReelShare } from '@content/domain/entities/reel-share.entity';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/content-client';
 import { Reel } from '../../domain/entities/reel.entity';
@@ -13,6 +14,7 @@ import {
   ReelListQuery,
   ReelProfileContextQuery,
   ReelProfileContextResult,
+  ReelShareCreateInput,
   ReelUpdateData,
 } from '../../domain/interfaces/content.repository.interface';
 
@@ -170,6 +172,43 @@ export class ContentRepository
     return this.toDomain(record);
   }
 
+  async shareReel(input: ReelShareCreateInput): Promise<ReelShare> {
+    const record = await this.reelShare.upsert({
+      where: {
+        reelId_conversationId: {
+          reelId: input.reelId,
+          conversationId: input.conversationId,
+        },
+      },
+      create: {
+        reelId: input.reelId,
+        ownerId: input.ownerId,
+        sharedByUserId: input.sharedByUserId,
+        sharedWithUserId: input.sharedWithUserId,
+        conversationId: input.conversationId,
+        messageId: input.messageId,
+      },
+      update: {
+        sharedByUserId: input.sharedByUserId,
+        sharedWithUserId: input.sharedWithUserId,
+      },
+    });
+
+    return this.toReelShareDomain(record);
+  }
+
+  async updateReelShareMessageId(
+    shareId: string,
+    messageId: string,
+  ): Promise<ReelShare> {
+    const record = await this.reelShare.update({
+      where: { id: shareId },
+      data: { messageId },
+    });
+
+    return this.toReelShareDomain(record);
+  }
+
   async searchReelContext(
     input: ReelContextSearchRequest,
   ): Promise<ReelContextSearchResult[]> {
@@ -179,6 +218,9 @@ export class ContentRepository
     const maxDistance = 0.65;
     const candidateLimit = 50;
     const finalLimit = Math.min(Math.max(input.limit ?? 8, 1), 20);
+
+    const sharedOnly = input.sharedOnly === true;
+    const conversationId = input.conversationId ?? null;
 
     return this.$queryRaw<ReelContextSearchResult[]>`
     WITH vector_candidates AS (
@@ -198,7 +240,23 @@ export class ContentRepository
       INNER JOIN "Reel" r ON r.id = rc."reelId"
       WHERE r.status = 'COMPLETED'
         AND rc.embedding IS NOT NULL
-        AND (r.visibility = 'public' OR r."userId" = ${input.userId})
+        AND (
+          ${sharedOnly} = false
+          OR (
+            ${conversationId}::text IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM "ReelShare" rs
+              WHERE rs."reelId" = r.id
+                AND rs."conversationId" = ${conversationId}
+            )
+          )
+        )
+        AND (
+          ${sharedOnly} = true
+          OR r.visibility = 'public'
+          OR r."userId" = ${input.userId}
+        )
         AND (rc.embedding <=> ${vectorLiteral}::vector)::float <= ${maxDistance}
       ORDER BY distance ASC
       LIMIT ${candidateLimit}
@@ -243,7 +301,23 @@ export class ContentRepository
       FROM "ReelChunk" rc
       INNER JOIN "Reel" r ON r.id = rc."reelId"
       WHERE r.status = 'COMPLETED'
-        AND (r.visibility = 'public' OR r."userId" = ${input.userId})
+        AND (
+          ${sharedOnly} = false
+          OR (
+            ${conversationId}::text IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM "ReelShare" rs
+              WHERE rs."reelId" = r.id
+                AND rs."conversationId" = ${conversationId}
+            )
+          )
+        )
+        AND (
+          ${sharedOnly} = true
+          OR r.visibility = 'public'
+          OR r."userId" = ${input.userId}
+        )
         AND (
           to_tsvector('simple', coalesce(rc.text, ''))
             @@ plainto_tsquery('simple', ${queryText})
@@ -607,6 +681,21 @@ export class ContentRepository
         WHERE id = ${created.id}
       `;
       }
+    });
+  }
+
+  private toReelShareDomain(record: Record<string, unknown>): ReelShare {
+    return new ReelShare({
+      id: record['id'] as string,
+      reelId: record['reelId'] as string,
+      ownerId: record['ownerId'] as string,
+      sharedByUserId: record['sharedByUserId'] as string,
+      sharedWithUserId:
+        (record['sharedWithUserId'] as string | null | undefined) ?? null,
+      conversationId: record['conversationId'] as string,
+      messageId: (record['messageId'] as string | null | undefined) ?? null,
+      createdAt: record['createdAt'] as Date,
+      updatedAt: record['updatedAt'] as Date,
     });
   }
 }

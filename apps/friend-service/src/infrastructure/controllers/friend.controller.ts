@@ -1,5 +1,6 @@
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
 import { AcceptFriendRequestUseCase } from '@friend/application/use-cases/accept-friend-request.use-case';
+import { CanShareWithUserUseCase } from '@friend/application/use-cases/can-share-with-user.use-case';
 import { CancelFriendRequestUseCase } from '@friend/application/use-cases/cancel-friend-request.use-case';
 import { GetFriendshipStatusUseCase } from '@friend/application/use-cases/get-friendship-status.use-case';
 import { ListFriendsUseCase } from '@friend/application/use-cases/list-friends.use-case';
@@ -31,6 +32,7 @@ export class FriendController {
     private readonly listFriendsUseCase: ListFriendsUseCase,
     private readonly removeFriendUseCase: RemoveFriendUseCase,
     private readonly getFriendshipStatusUseCase: GetFriendshipStatusUseCase,
+    private readonly canShareWithUserUseCase: CanShareWithUserUseCase,
   ) {}
 
   @MessagePattern('friend.send_request')
@@ -162,6 +164,17 @@ export class FriendController {
     } catch (error) {
       this.handleError(error);
     }
+  }
+
+  @MessagePattern('friend.can_share_with_user')
+  async canShareWithUser(
+    @Payload()
+    data: {
+      requesterId: string;
+      targetUserId: string;
+    },
+  ) {
+    return await this.canShareWithUserUseCase.execute(data);
   }
 
   private handleError(error: unknown): never {

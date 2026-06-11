@@ -141,6 +141,7 @@ export class PrismaChatRepository implements IChatRepository {
         video: '[Video]',
         file: '[Tập tin]',
         call: '📞 Cuộc gọi',
+        reel: '[Reel]',
       };
       previewText = typeMap[message.type] || 'Tin nhắn mới';
     }

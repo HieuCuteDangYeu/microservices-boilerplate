@@ -1,7 +1,5 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AcceptFriendRequestUseCase } from '@friend/application/use-cases/accept-friend-request.use-case';
+import { CanShareWithUserUseCase } from '@friend/application/use-cases/can-share-with-user.use-case';
 import { CancelFriendRequestUseCase } from '@friend/application/use-cases/cancel-friend-request.use-case';
 import { GetFriendshipStatusUseCase } from '@friend/application/use-cases/get-friendship-status.use-case';
 import { ListFriendsUseCase } from '@friend/application/use-cases/list-friends.use-case';
@@ -15,6 +13,9 @@ import { UserServiceAdapter } from '@friend/infrastructure/adapters/user-service
 import { FriendController } from '@friend/infrastructure/controllers/friend.controller';
 import { PrismaService } from '@friend/infrastructure/prisma/prisma.service';
 import { FriendRepository } from '@friend/infrastructure/repositories/friend.repository';
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ClientsModule, Transport } from '@nestjs/microservices';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { FriendRepository } from '@friend/infrastructure/repositories/friend.rep
     ListFriendsUseCase,
     RemoveFriendUseCase,
     GetFriendshipStatusUseCase,
+    CanShareWithUserUseCase,
     {
       provide: 'IFriendRepository',
       useClass: FriendRepository,

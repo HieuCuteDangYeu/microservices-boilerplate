@@ -8,6 +8,7 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
+import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { Reel } from '@content/domain/entities/reel.entity';
@@ -39,6 +40,7 @@ export class ContentController {
     private readonly updateReelStatusUseCase: UpdateReelStatusUseCase,
     private readonly getReelStatusUseCase: GetReelStatusUseCase,
     private readonly searchReelContextUseCase: SearchReelContextUseCase,
+    private readonly shareReelUseCase: ShareReelUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -271,6 +273,9 @@ export class ContentController {
       payload.queryText.trim().length === 0 ||
       typeof payload.userId !== 'string' ||
       payload.userId.trim().length === 0 ||
+      (payload.sharedOnly === true &&
+        (typeof payload.conversationId !== 'string' ||
+          payload.conversationId.trim().length === 0)) ||
       (payload.limit !== undefined &&
         (!Number.isInteger(payload.limit) ||
           payload.limit < 1 ||
@@ -475,6 +480,72 @@ export class ContentController {
       throw new RpcException({
         statusCode: 500,
         message: `Delete Reel Error: ${err.message}`,
+      });
+    }
+  }
+
+  @MessagePattern('content.share_reel')
+  async shareReel(
+    @Payload()
+    payload: {
+      reelId: string;
+      sharedByUserId: string;
+      conversationId: string;
+      sharedWithUserId?: string;
+    },
+  ) {
+    if (
+      !payload ||
+      typeof payload.reelId !== 'string' ||
+      payload.reelId.trim().length === 0 ||
+      typeof payload.sharedByUserId !== 'string' ||
+      payload.sharedByUserId.trim().length === 0 ||
+      typeof payload.conversationId !== 'string' ||
+      payload.conversationId.trim().length === 0 ||
+      (payload.sharedWithUserId !== undefined &&
+        (typeof payload.sharedWithUserId !== 'string' ||
+          payload.sharedWithUserId.trim().length === 0))
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for reel sharing',
+      });
+    }
+
+    try {
+      return await this.shareReelUseCase.execute({
+        reelId: payload.reelId.trim(),
+        sharedByUserId: payload.sharedByUserId.trim(),
+        conversationId: payload.conversationId.trim(),
+        sharedWithUserId: payload.sharedWithUserId?.trim(),
+      });
+    } catch (error: unknown) {
+      const err = error as Error;
+
+      if (err.name === 'ReelNotFoundError') {
+        throw new RpcException({
+          statusCode: 404,
+          message: err.message,
+        });
+      }
+
+      if (err.name === 'ReelNotReadyError') {
+        throw new RpcException({
+          statusCode: 409,
+          message: err.message,
+        });
+      }
+
+      if (err.name === 'ReelShareForbiddenError') {
+        throw new RpcException({
+          statusCode: 403,
+          message: err.message,
+        });
+      }
+
+      throw new RpcException({
+        statusCode: 500,
+        message: `Reel Share Error: ${err.message}`,
       });
     }
   }
