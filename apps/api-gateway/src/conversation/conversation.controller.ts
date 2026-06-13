@@ -57,19 +57,62 @@ export class ConversationController {
     private readonly reelAuthorService: ReelAuthorService,
   ) {}
 
+  private async enrichReelOwnersInMessageResponses(
+    messages: MessageDto[],
+  ): Promise<MessageDto[]> {
+    const reelOwnerIdsByIndex = new Map<number, string>();
+
+    await Promise.all(
+      messages.map(async (message, index) => {
+        if (message.type !== 'reel' || !message.media) {
+          return;
+        }
+
+        const media = message.media as Record<string, unknown>;
+        const reelOwnerId =
+          typeof media.reelOwnerId === 'string'
+            ? media.reelOwnerId
+            : await this.resolveReelOwnerId(media);
+
+        if (reelOwnerId) {
+          reelOwnerIdsByIndex.set(index, reelOwnerId);
+        }
+      }),
+    );
+
+    const authorsById = await this.reelAuthorService.loadAuthorMap([
+      ...new Set(reelOwnerIdsByIndex.values()),
+    ]);
+
+    return messages.map((message, index) =>
+      this.buildReelOwnerEnrichedMessageResponse(
+        message,
+        reelOwnerIdsByIndex.get(index) ?? null,
+        authorsById,
+      ),
+    );
+  }
+
   private async enrichReelOwnerInMessageResponse(
     message: MessageDto,
   ): Promise<MessageDto> {
+    const [enrichedMessage] = await this.enrichReelOwnersInMessageResponses([
+      message,
+    ]);
+
+    return enrichedMessage;
+  }
+
+  private buildReelOwnerEnrichedMessageResponse(
+    message: MessageDto,
+    reelOwnerId: string | null,
+    authorsById: Parameters<ReelAuthorService['resolveAuthor']>[0],
+  ): MessageDto {
     if (message.type !== 'reel' || !message.media) {
       return message;
     }
 
     const media = message.media as Record<string, unknown>;
-    const reelOwnerId =
-      typeof media.reelOwnerId === 'string'
-        ? media.reelOwnerId
-        : await this.resolveReelOwnerId(media);
-
     const responseMedia = { ...media };
     delete responseMedia.reelOwnerId;
 
@@ -80,9 +123,6 @@ export class ConversationController {
       };
     }
 
-    const authorsById = await this.reelAuthorService.loadAuthorMap([
-      reelOwnerId,
-    ]);
     const author = this.reelAuthorService.resolveAuthor(
       authorsById,
       reelOwnerId,
@@ -181,7 +221,7 @@ export class ConversationController {
     @Query('limit') limit?: number,
     @Query('cursor') cursor?: string,
   ): Promise<MessageDto[]> {
-    return await lastValueFrom(
+    const messages = await lastValueFrom(
       this.conversationClient.send<MessageDto[]>('get_messages', {
         conversationId,
         userId: user.id,
@@ -189,6 +229,8 @@ export class ConversationController {
         cursor,
       }),
     );
+
+    return await this.enrichReelOwnersInMessageResponses(messages);
   }
 
   @Get(':id/messages/around/:messageId')
@@ -203,7 +245,7 @@ export class ConversationController {
     @Query('before') before?: number,
     @Query('after') after?: number,
   ): Promise<MessageAnchorWindowResponse> {
-    return await lastValueFrom(
+    const response = await lastValueFrom(
       this.conversationClient.send<MessageAnchorWindowResponse>(
         'get_messages_around',
         {
@@ -215,6 +257,13 @@ export class ConversationController {
         },
       ),
     );
+
+    return {
+      ...response,
+      messages: await this.enrichReelOwnersInMessageResponses(
+        response.messages,
+      ),
+    };
   }
 
   @Get(':id/messages/anchor/older')
@@ -231,7 +280,7 @@ export class ConversationController {
       throw new BadRequestException('cursor must be a non-empty string');
     }
 
-    return await lastValueFrom(
+    const response = await lastValueFrom(
       this.conversationClient.send<MessageAnchorExpansionResponse>(
         'get_anchor_older_messages',
         {
@@ -242,6 +291,13 @@ export class ConversationController {
         },
       ),
     );
+
+    return {
+      ...response,
+      messages: await this.enrichReelOwnersInMessageResponses(
+        response.messages,
+      ),
+    };
   }
 
   @Get(':id/messages/anchor/newer')
@@ -258,7 +314,7 @@ export class ConversationController {
       throw new BadRequestException('cursor must be a non-empty string');
     }
 
-    return await lastValueFrom(
+    const response = await lastValueFrom(
       this.conversationClient.send<MessageAnchorExpansionResponse>(
         'get_anchor_newer_messages',
         {
@@ -269,6 +325,13 @@ export class ConversationController {
         },
       ),
     );
+
+    return {
+      ...response,
+      messages: await this.enrichReelOwnersInMessageResponses(
+        response.messages,
+      ),
+    };
   }
 
   @Post(':id/messages')
