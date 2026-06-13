@@ -71,6 +71,41 @@ export class ContentController {
     return `${this.externalShareBaseUrl}/r/${token}`;
   }
 
+  private async enrichReelShareResponse(
+    share: ReelShareResponse,
+  ): Promise<ReelShareResponse> {
+    if (
+      !share.message?.media ||
+      typeof share.message.media !== 'object' ||
+      Array.isArray(share.message.media)
+    ) {
+      return share;
+    }
+
+    const media = { ...(share.message.media as Record<string, unknown>) };
+    delete media.reelOwnerId;
+
+    const authorsById = await this.reelAuthorService.loadAuthorMap([
+      share.ownerId,
+    ]);
+    const author = this.reelAuthorService.resolveAuthor(
+      authorsById,
+      share.ownerId,
+    );
+
+    return {
+      ...share,
+      message: {
+        ...share.message,
+        media: {
+          ...media,
+          ...(author.username ? { reelOwnerUsername: author.username } : {}),
+          ...(author.avatarUrl ? { reelOwnerAvatarUrl: author.avatarUrl } : {}),
+        },
+      },
+    };
+  }
+
   @Post('reels')
   @ApiOperation({ summary: 'Create a new reel from an uploaded S3 key' })
   async createReel(
@@ -261,7 +296,7 @@ export class ContentController {
       );
     }
 
-    return await lastValueFrom(
+    const share = await lastValueFrom(
       this.contentClient
         .send<ReelShareResponse>('content.share_reel', {
           reelId,
@@ -271,6 +306,8 @@ export class ContentController {
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
+
+    return await this.enrichReelShareResponse(share);
   }
 
   @Post('reels/:id/share-link')
