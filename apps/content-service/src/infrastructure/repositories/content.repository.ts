@@ -176,24 +176,14 @@ export class ContentRepository
   }
 
   async shareReel(input: ReelShareCreateInput): Promise<ReelShare> {
-    const record = await this.reelShare.upsert({
-      where: {
-        reelId_conversationId: {
-          reelId: input.reelId,
-          conversationId: input.conversationId,
-        },
-      },
-      create: {
+    const record = await this.reelShare.create({
+      data: {
         reelId: input.reelId,
         ownerId: input.ownerId,
         sharedByUserId: input.sharedByUserId,
         sharedWithUserId: input.sharedWithUserId,
         conversationId: input.conversationId,
         messageId: input.messageId,
-      },
-      update: {
-        sharedByUserId: input.sharedByUserId,
-        sharedWithUserId: input.sharedWithUserId,
       },
     });
 

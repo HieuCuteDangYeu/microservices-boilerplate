@@ -79,7 +79,6 @@ model ReelShare {
 
   reel Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
 
-  @@unique([reelId, conversationId])
   @@index([reelId])
   @@index([ownerId])
   @@index([sharedByUserId])
