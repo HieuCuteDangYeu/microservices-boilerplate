@@ -1,7 +1,12 @@
-import { AnswerAgentUseCase } from '@ai/application/use-cases/answer-agent.use-case';
+import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
+import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-context-sufficiency.use-case';
+import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
+import { GenerateDraftAnswerUseCase } from '@ai/application/use-cases/generate-draft-answer.use-case';
 import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-case';
 import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
 import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
+import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
+import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
 import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.use-case';
 import type {
   IRagChatWorkflow,
@@ -25,13 +30,18 @@ const RagChatStateSchema = new StateSchema({
   retrievedChunks: z.array(z.any()).default([]),
   rerankedChunks: z.array(z.any()).default([]),
 
+  contextSufficiency: z.any().optional(),
+
   conversationMemory: z.any().optional(),
   userMemories: z.any().optional(),
   memorySelection: z.any().optional(),
 
   answer: z.string().optional(),
   verification: z.any().optional(),
+  citations: z.array(z.any()).default([]),
+
   retryCount: z.number().default(0),
+  retrievalRetryCount: z.number().default(0),
 });
 
 @Injectable()
@@ -41,13 +51,20 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
   constructor(
     private readonly queryRouterAgentUseCase: QueryRouterAgentUseCase,
     private readonly retrievalAgentUseCase: RetrievalAgentUseCase,
+    private readonly checkContextSufficiencyUseCase: CheckContextSufficiencyUseCase,
     private readonly memoryAgentUseCase: MemoryAgentUseCase,
-    private readonly answerAgentUseCase: AnswerAgentUseCase,
+    private readonly generateDraftAnswerUseCase: GenerateDraftAnswerUseCase,
+    private readonly streamFinalAnswerUseCase: StreamFinalAnswerUseCase,
     private readonly verifierAgentUseCase: VerifierAgentUseCase,
+    private readonly createNoContextAnswerUseCase: CreateNoContextAnswerUseCase,
+    private readonly buildRagCitationsUseCase: BuildRagCitationsUseCase,
+    private readonly saveRagTraceUseCase: SaveRagTraceUseCase,
   ) {}
 
   async execute(input: RagChatWorkflowInput): Promise<RagChatWorkflowResult> {
-    const graph = this.buildGraph();
+    const nodeTimings: Record<string, number> = {};
+    const graph = this.buildGraph(nodeTimings);
+    const startedAt = Date.now();
 
     const initialState: RagChatWorkflowState = {
       userId: input.userId,
@@ -56,24 +73,47 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       memory: input.memory,
       retrievedChunks: [],
       rerankedChunks: [],
+      citations: [],
       retryCount: 0,
+      retrievalRetryCount: 0,
     };
 
-    const result = (await graph.invoke(initialState)) as RagChatWorkflowState;
+    let result: RagChatWorkflowState = initialState;
 
-    return {
-      answer: result.answer?.trim() ?? '',
-    };
+    try {
+      result = await graph.invoke(initialState);
+
+      return {
+        answer: result.answer?.trim() ?? '',
+        citations: result.citations ?? [],
+      };
+    } finally {
+      await this.saveRagTraceUseCase.execute({
+        state: result,
+        latencyMs: Date.now() - startedAt,
+        nodeTimings,
+      });
+    }
   }
 
-  private buildGraph() {
+  private buildGraph(nodeTimings: Record<string, number>) {
     return new StateGraph(RagChatStateSchema)
-      .addNode('queryRouterNode', this.queryRouterNode)
-      .addNode('retrievalNode', this.retrievalNode)
-      .addNode('memorySelectorNode', this.memoryNode)
-      .addNode('answerGenerationNode', this.answerNode)
-      .addNode('verifierNode', this.verifierNode)
-      .addNode('answerRevisionNode', this.answerRevisionNode)
+      .addNode('queryRouterNode', this.createQueryRouterNode(nodeTimings))
+      .addNode('retrievalNode', this.createRetrievalNode(nodeTimings))
+      .addNode(
+        'contextSufficiencyNode',
+        this.createContextSufficiencyNode(nodeTimings),
+      )
+      .addNode('memorySelectorNode', this.createMemoryNode(nodeTimings))
+      .addNode('draftAnswerNode', this.createDraftAnswerNode(nodeTimings))
+      .addNode('verifierNode', this.createVerifierNode(nodeTimings))
+      .addNode('revisionDraftNode', this.createRevisionDraftNode(nodeTimings))
+      .addNode('finalAnswerNode', this.createFinalAnswerNode(nodeTimings))
+      .addNode(
+        'noContextAnswerNode',
+        this.createNoContextAnswerNode(nodeTimings),
+      )
+      .addNode('citationNode', this.createCitationNode(nodeTimings))
 
       .addEdge(START, 'queryRouterNode')
 
@@ -82,132 +122,213 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         'memorySelectorNode',
       ])
 
-      .addEdge('retrievalNode', 'memorySelectorNode')
-      .addEdge('memorySelectorNode', 'answerGenerationNode')
+      .addEdge('retrievalNode', 'contextSufficiencyNode')
 
-      .addConditionalEdges('answerGenerationNode', this.routeAfterAnswer, [
+      .addConditionalEdges(
+        'contextSufficiencyNode',
+        this.routeAfterContextSufficiency,
+        ['memorySelectorNode', 'noContextAnswerNode'],
+      )
+
+      .addEdge('memorySelectorNode', 'draftAnswerNode')
+
+      .addConditionalEdges('draftAnswerNode', this.routeAfterDraftAnswer, [
         'verifierNode',
-        END,
+        'finalAnswerNode',
       ])
 
       .addConditionalEdges('verifierNode', this.routeAfterVerifier, [
-        'answerRevisionNode',
-        END,
+        'revisionDraftNode',
+        'finalAnswerNode',
       ])
 
-      .addEdge('answerRevisionNode', 'verifierNode')
+      .addEdge('revisionDraftNode', 'verifierNode')
+      .addEdge('finalAnswerNode', 'citationNode')
+      .addEdge('noContextAnswerNode', 'citationNode')
+      .addEdge('citationNode', END)
+
       .compile();
   }
 
-  private queryRouterNode = async (
-    state: RagChatWorkflowState,
-  ): Promise<Partial<RagChatWorkflowState>> => {
-    const route = await this.timed('queryRouterNode', () =>
-      this.queryRouterAgentUseCase.execute({
-        message: state.userMessage,
-        recentHistory: this.formatRecentHistory(state),
-      }),
-    );
+  private createQueryRouterNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const route = await this.timed('queryRouterNode', nodeTimings, () =>
+        this.queryRouterAgentUseCase.execute({
+          message: state.userMessage,
+          recentHistory: this.formatRecentHistory(state),
+        }),
+      );
 
-    this.logger.debug(
-      `[RagGraph] route intent=${route.intent} retrieval=${route.needsRetrieval}`,
-    );
+      this.logger.debug(
+        `[RagGraph] route intent=${route.intent} retrieval=${route.needsRetrieval}`,
+      );
 
-    return { route };
-  };
-
-  private retrievalNode = async (
-    state: RagChatWorkflowState,
-  ): Promise<Partial<RagChatWorkflowState>> => {
-    const route = state.route;
-
-    if (!route) {
-      return {};
-    }
-
-    const result = await this.timed('retrievalNode', () =>
-      this.retrievalAgentUseCase.execute({
-        userId: state.userId,
-        conversationId: state.conversationId,
-        message: state.userMessage,
-        route,
-      }),
-    );
-
-    this.logger.log(
-      `[RagGraph] retrieved=${result.retrievedChunks.length} reranked=${result.rerankedChunks.length}`,
-    );
-
-    return {
-      retrievalPlan: result.plan,
-      retrievedChunks: result.retrievedChunks,
-      rerankedChunks: result.rerankedChunks,
+      return { route };
     };
-  };
+  }
 
-  private memoryNode = async (
-    state: RagChatWorkflowState,
-  ): Promise<Partial<RagChatWorkflowState>> => {
-    const route = state.route;
+  private createRetrievalNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const route = state.route;
 
-    if (!route) {
-      return {};
-    }
+      if (!route) {
+        return {};
+      }
 
-    const result = await this.timed('memorySelectorNode', () =>
-      this.memoryAgentUseCase.execute({
-        userId: state.userId,
-        conversationId: state.conversationId,
-        message: state.userMessage,
-        route,
-        memory: state.memory,
-      }),
-    );
+      const result = await this.timed('retrievalNode', nodeTimings, () =>
+        this.retrievalAgentUseCase.execute({
+          userId: state.userId,
+          conversationId: state.conversationId,
+          message: state.userMessage,
+          route,
+        }),
+      );
 
-    return {
-      memorySelection: result.selection,
-      conversationMemory: result.conversationMemory,
-      userMemories: result.userMemories,
+      this.logger.log(
+        `[RagGraph] retrieved=${result.retrievedChunks.length} reranked=${result.rerankedChunks.length}`,
+      );
+
+      return {
+        retrievalPlan: result.plan,
+        retrievedChunks: result.retrievedChunks,
+        rerankedChunks: result.rerankedChunks,
+      };
     };
-  };
+  }
 
-  private answerNode = async (
-    state: RagChatWorkflowState,
-  ): Promise<Partial<RagChatWorkflowState>> => {
-    const answer = await this.timed('answerGenerationNode', () =>
-      this.answerAgentUseCase.execute(state),
-    );
+  private createContextSufficiencyNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const contextSufficiency = await this.timed(
+        'contextSufficiencyNode',
+        nodeTimings,
+        () => this.checkContextSufficiencyUseCase.execute(state),
+      );
 
-    return { answer };
-  };
+      this.logger.debug(
+        `[RagGraph] context sufficient=${contextSufficiency.sufficient} action=${contextSufficiency.recommendedAction}`,
+      );
 
-  private verifierNode = async (
-    state: RagChatWorkflowState,
-  ): Promise<Partial<RagChatWorkflowState>> => {
-    const verification = await this.timed('verifierNode', () =>
-      this.verifierAgentUseCase.execute(state),
-    );
-
-    return { verification };
-  };
-
-  private answerRevisionNode = async (
-    state: RagChatWorkflowState,
-  ): Promise<Partial<RagChatWorkflowState>> => {
-    const nextState: RagChatWorkflowState = {
-      ...state,
-      retryCount: state.retryCount + 1,
+      return { contextSufficiency };
     };
+  }
 
-    const answer = await this.timed('answerRevisionNode', () =>
-      this.answerAgentUseCase.execute(nextState),
-    );
+  private createMemoryNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const route = state.route;
 
-    return {
-      answer,
-      retryCount: nextState.retryCount,
+      if (!route) {
+        return {};
+      }
+
+      const result = await this.timed('memorySelectorNode', nodeTimings, () =>
+        this.memoryAgentUseCase.execute({
+          userId: state.userId,
+          conversationId: state.conversationId,
+          message: state.userMessage,
+          route,
+          memory: state.memory,
+        }),
+      );
+
+      return {
+        memorySelection: result.selection,
+        conversationMemory: result.conversationMemory,
+        userMemories: result.userMemories,
+      };
     };
-  };
+  }
+
+  private createDraftAnswerNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      if (!state.route?.needsVerification) {
+        return {};
+      }
+
+      const answer = await this.timed('draftAnswerNode', nodeTimings, () =>
+        this.generateDraftAnswerUseCase.execute(state),
+      );
+
+      return { answer };
+    };
+  }
+
+  private createVerifierNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const verification = await this.timed('verifierNode', nodeTimings, () =>
+        this.verifierAgentUseCase.execute(state),
+      );
+
+      return { verification };
+    };
+  }
+
+  private createRevisionDraftNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const nextState: RagChatWorkflowState = {
+        ...state,
+        retryCount: state.retryCount + 1,
+      };
+
+      const answer = await this.timed('revisionDraftNode', nodeTimings, () =>
+        this.generateDraftAnswerUseCase.execute(nextState),
+      );
+
+      return {
+        answer,
+        retryCount: nextState.retryCount,
+      };
+    };
+  }
+
+  private createFinalAnswerNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const answer = await this.timed('finalAnswerNode', nodeTimings, () =>
+        this.streamFinalAnswerUseCase.execute(state),
+      );
+
+      return { answer };
+    };
+  }
+
+  private createNoContextAnswerNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const answer = await this.timed('noContextAnswerNode', nodeTimings, () =>
+        Promise.resolve(this.createNoContextAnswerUseCase.execute(state)),
+      );
+
+      return { answer };
+    };
+  }
+
+  private createCitationNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const citations = await this.timed('citationNode', nodeTimings, () =>
+        Promise.resolve(this.buildRagCitationsUseCase.execute(state)),
+      );
+
+      return { citations };
+    };
+  }
 
   private routeAfterQueryRouter = (
     state: RagChatWorkflowState,
@@ -215,35 +336,57 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     return state.route?.needsRetrieval ? 'retrievalNode' : 'memorySelectorNode';
   };
 
-  private routeAfterAnswer = (
+  private routeAfterContextSufficiency = (
     state: RagChatWorkflowState,
-  ): 'verifierNode' | typeof END => {
-    return state.route?.needsVerification ? 'verifierNode' : END;
+  ): 'memorySelectorNode' | 'noContextAnswerNode' => {
+    if (!state.contextSufficiency) {
+      return 'memorySelectorNode';
+    }
+
+    if (
+      state.contextSufficiency.sufficient &&
+      state.contextSufficiency.recommendedAction === 'ANSWER'
+    ) {
+      return 'memorySelectorNode';
+    }
+
+    return 'noContextAnswerNode';
+  };
+
+  private routeAfterDraftAnswer = (
+    state: RagChatWorkflowState,
+  ): 'verifierNode' | 'finalAnswerNode' => {
+    return state.route?.needsVerification ? 'verifierNode' : 'finalAnswerNode';
   };
 
   private routeAfterVerifier = (
     state: RagChatWorkflowState,
-  ): 'answerRevisionNode' | typeof END => {
+  ): 'revisionDraftNode' | 'finalAnswerNode' => {
     if (
       state.verification?.requiresRevision &&
       !state.verification.passed &&
       state.retryCount < 1
     ) {
-      return 'answerRevisionNode';
+      return 'revisionDraftNode';
     }
 
-    return END;
+    return 'finalAnswerNode';
   };
 
-  private async timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  private async timed<T>(
+    label: string,
+    nodeTimings: Record<string, number>,
+    fn: () => Promise<T>,
+  ): Promise<T> {
     const startedAt = Date.now();
 
     try {
       return await fn();
     } finally {
-      this.logger.debug(
-        `[RagGraphTiming] ${label}=${Date.now() - startedAt}ms`,
-      );
+      const duration = Date.now() - startedAt;
+      nodeTimings[label] = duration;
+
+      this.logger.debug(`[RagGraphTiming] ${label}=${duration}ms`);
     }
   }
 

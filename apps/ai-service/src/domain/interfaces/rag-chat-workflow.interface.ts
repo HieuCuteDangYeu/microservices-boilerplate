@@ -25,6 +25,7 @@ export interface RagRetrievalPlan {
   mode: RagRetrievalMode;
   query: string;
   rewrittenQuery?: string;
+  queries?: string[];
   searchLimit: number;
   rerankLimit: number;
   shouldRerank: boolean;
@@ -47,6 +48,22 @@ export interface RagVerificationResult {
   revisedInstruction?: string;
 }
 
+export interface RagContextSufficiencyResult {
+  sufficient: boolean;
+  confidence: number;
+  reason: string;
+  missingInfo?: string;
+  recommendedAction: 'ANSWER' | 'REFUSE_NO_CONTEXT' | 'REWRITE_AND_RETRY';
+}
+
+export interface RagCitation {
+  sourceType: 'REEL';
+  title?: string;
+  startTime?: number;
+  endTime?: number;
+  quote?: string;
+}
+
 export interface RagChatWorkflowInput {
   message: string;
   userId: string;
@@ -56,6 +73,7 @@ export interface RagChatWorkflowInput {
 
 export interface RagChatWorkflowResult {
   answer: string;
+  citations?: RagCitation[];
 }
 
 export interface RagChatWorkflowState {
@@ -70,13 +88,18 @@ export interface RagChatWorkflowState {
   retrievedChunks: ReelContextSearchResult[];
   rerankedChunks: ReelContextSearchResult[];
 
+  contextSufficiency?: RagContextSufficiencyResult;
+
   conversationMemory?: ConversationMemoryContext;
   userMemories?: RelevantUserMemoriesContext;
   memorySelection?: RagMemorySelection;
 
   answer?: string;
   verification?: RagVerificationResult;
+  citations?: RagCitation[];
+
   retryCount: number;
+  retrievalRetryCount: number;
 }
 
 export interface IRagChatWorkflow {
