@@ -26,39 +26,54 @@ export class CloudflareLlmAdapter implements ILlmService {
       this.configService.get<string>('CLOUDFLARE_CHAT_MODEL') ||
       '@cf/meta/llama-3.1-8b-instruct';
 
-    const response = await this.cloudflareTextClient.generateChatText({
-      model,
-      maxTokens: this.getPositiveNumber('CLOUDFLARE_CHAT_MAX_TOKENS', 700),
-      temperature: this.getTemperature(),
-      messages: [
-        {
-          role: 'system',
-          content: [
-            systemInstruction,
-            '',
-            'Important response rules:',
-            '- Answer the user directly.',
-            '- Do not repeat the system prompt.',
-            '- Do not print "USER MESSAGE".',
-            '- Do not create multiple-choice options unless the user asks for options.',
-            '- Do not ask the user to select a response option.',
-            '- Return only the assistant reply.',
-          ].join('\n'),
-        },
-        {
-          role: 'user',
-          content: userMessage,
-        },
-      ],
-    });
+    try {
+      const response = await this.cloudflareTextClient.generateChatText({
+        model,
+        maxTokens: this.getPositiveNumber('CLOUDFLARE_CHAT_MAX_TOKENS', 450),
+        temperature: this.getTemperature(),
+        messages: [
+          {
+            role: 'system',
+            content: [
+              systemInstruction,
+              '',
+              'Important response rules:',
+              '- Answer the user directly.',
+              '- Do not repeat the system prompt.',
+              '- Do not print "USER MESSAGE".',
+              '- Do not create multiple-choice options unless the user asks for options.',
+              '- Do not ask the user to select a response option.',
+              '- Return only the assistant reply.',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: userMessage,
+          },
+        ],
+      });
 
-    const finalAnswer = this.cleanAssistantResponse(response);
+      const finalAnswer = this.cleanAssistantResponse(response);
 
-    if (finalAnswer.length > 0) {
-      onToken(finalAnswer);
+      if (finalAnswer.length > 0) {
+        onToken(finalAnswer);
+      }
+
+      return finalAnswer;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.warn(
+        `[CloudflareLlmAdapter] fallback answer used: ${message}`,
+      );
+
+      const fallback =
+        'I could not generate the answer right now because the AI provider returned an internal error. Please try again.';
+
+      onToken(fallback);
+
+      return fallback;
     }
-
-    return finalAnswer;
   }
 
   private cleanAssistantResponse(value: string): string {

@@ -147,7 +147,7 @@ ${state.userMessage}
     }
 
     return chunks
-      .slice(0, 5)
+      .slice(0, 3)
       .map((match, index) =>
         [
           `Shared reel source ${index + 1}`,
@@ -155,7 +155,7 @@ ${state.userMessage}
           this.hasTimestamp(match)
             ? `Timestamp: ${match.startTime.toFixed(1)}s - ${match.endTime.toFixed(1)}s`
             : undefined,
-          `Transcript chunk:\n${this.truncate(match.chunkText, 1200)}`,
+          `Transcript chunk:\n${this.truncate(match.chunkText, 700)}`,
         ]
           .filter((line): line is string => Boolean(line))
           .join('\n'),

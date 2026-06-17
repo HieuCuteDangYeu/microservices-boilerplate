@@ -115,35 +115,59 @@ export class CloudflareWorkersAiTextClient {
 
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: input.model,
-        messages: input.messages,
-        max_tokens: input.maxTokens ?? 700,
-        temperature: input.temperature ?? 0.3,
-      }),
-    });
+    const maxAttempts = 3;
 
-    const json = (await response.json()) as CloudflareChatCompletionResponse;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: input.model,
+            messages: input.messages,
+            max_tokens: input.maxTokens ?? 700,
+            temperature: input.temperature ?? 0.3,
+          }),
+        });
 
-    if (!response.ok) {
-      const message =
-        json.error?.message ||
-        json.errors
-          ?.map((error) => error.message)
-          .filter(Boolean)
-          .join(', ') ||
-        `Cloudflare chat completion failed with status ${response.status}`;
+        const json =
+          (await response.json()) as CloudflareChatCompletionResponse;
 
-      this.logger.warn(message);
-      throw new Error(message);
+        if (!response.ok) {
+          const message =
+            json.error?.message ||
+            json.errors
+              ?.map((error) => error.message)
+              .filter(Boolean)
+              .join(', ') ||
+            `Cloudflare chat completion failed with status ${response.status}`;
+
+          throw new Error(message);
+        }
+
+        return json.choices?.[0]?.message?.content?.trim() ?? '';
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        this.logger.warn(
+          `[CloudflareChat] attempt=${attempt}/${maxAttempts} failed: ${message}`,
+        );
+
+        if (attempt === maxAttempts) {
+          throw error;
+        }
+
+        await this.sleep(300 * attempt);
+      }
     }
 
-    return json.choices?.[0]?.message?.content?.trim() ?? '';
+    return '';
+  }
+
+  private sleep(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 }
