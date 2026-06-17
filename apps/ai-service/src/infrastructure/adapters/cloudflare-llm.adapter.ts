@@ -55,9 +55,11 @@ export class CloudflareLlmAdapter implements ILlmService {
 
       const finalAnswer = this.cleanAssistantResponse(response);
 
-      if (finalAnswer.length > 0) {
-        onToken(finalAnswer);
+      if (finalAnswer.length === 0) {
+        throw new Error('Cloudflare chat completion returned empty answer.');
       }
+
+      onToken(finalAnswer);
 
       return finalAnswer;
     } catch (error: unknown) {
@@ -68,7 +70,7 @@ export class CloudflareLlmAdapter implements ILlmService {
       );
 
       const fallback =
-        'I could not generate the answer right now because the AI provider returned an internal error. Please try again.';
+        'I could not generate the answer right now because the AI provider returned an empty or failed response. Please try again.';
 
       onToken(fallback);
 

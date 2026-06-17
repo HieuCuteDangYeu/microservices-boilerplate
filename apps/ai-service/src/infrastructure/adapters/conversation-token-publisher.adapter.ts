@@ -15,18 +15,21 @@ export class ConversationTokenPublisherAdapter implements IChatTokenPublisher {
   ) {}
 
   publishToken(input: PublishChatTokenInput): void {
-    try {
-      this.conversationClient.emit('ai.stream_token', {
+    this.conversationClient
+      .emit('ai.stream_token', {
         conversationId: input.conversationId,
         userId: input.userId,
         token: input.token,
-      });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      })
+      .subscribe({
+        error: (error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
 
-      this.logger.warn(
-        `Failed to publish AI stream token for conversation ${input.conversationId}: ${message}`,
-      );
-    }
+          this.logger.warn(
+            `Failed to publish AI stream token for conversation ${input.conversationId}: ${message}`,
+          );
+        },
+      });
   }
 }

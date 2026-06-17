@@ -445,6 +445,10 @@ export class ConversationMicroserviceController {
   handleStreamToken(
     @Payload() data: { conversationId: string; userId: string; token: string },
   ): void {
+    this.logger.debug(
+      `[AI_STREAM_TOKEN] conversation=${data.conversationId} tokenLength=${data.token.length}`,
+    );
+
     this.chatGateway.server.to(data.conversationId).emit('bot_token', {
       conversationId: data.conversationId,
       token: data.token,

@@ -2,10 +2,12 @@ import type { IChatPromptBuilder } from '@ai/domain/interfaces/chat-prompt-build
 import type { IChatTokenPublisher } from '@ai/domain/interfaces/chat-token-publisher.interface';
 import type { ILlmService } from '@ai/domain/interfaces/llm.service.interface';
 import type { RagChatWorkflowState } from '@ai/domain/interfaces/rag-chat-workflow.interface';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 @Injectable()
 export class StreamFinalAnswerUseCase {
+  private readonly logger = new Logger(StreamFinalAnswerUseCase.name);
+
   constructor(
     @Inject('ILlmService')
     private readonly llmService: ILlmService,
@@ -21,17 +23,25 @@ export class StreamFinalAnswerUseCase {
     const existingVerifiedAnswer = state.answer?.trim();
 
     if (existingVerifiedAnswer) {
+      this.logger.debug(
+        `[FinalAnswer] publishing existing verified answer length=${existingVerifiedAnswer.length}`,
+      );
+
       this.publishExistingAnswer(state, existingVerifiedAnswer);
       return existingVerifiedAnswer;
     }
 
     const systemPrompt = this.chatPromptBuilder.build(state);
 
-    return await this.llmService.generateResponseStream(
+    const answer = await this.llmService.generateResponseStream(
       state.userMessage,
       systemPrompt,
       state.userId,
       (token: string) => {
+        this.logger.debug(
+          `[FinalAnswer] publishing token length=${token.length}`,
+        );
+
         this.chatTokenPublisher.publishToken({
           conversationId: state.conversationId,
           userId: state.userId,
@@ -39,6 +49,10 @@ export class StreamFinalAnswerUseCase {
         });
       },
     );
+
+    this.logger.debug(`[FinalAnswer] generated answer length=${answer.length}`);
+
+    return answer;
   }
 
   private publishExistingAnswer(
