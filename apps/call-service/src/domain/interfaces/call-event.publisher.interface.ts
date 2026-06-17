@@ -1,3 +1,5 @@
+import type { CallType } from '../entities/call-session.entity';
+
 export type CallLifecycleEvent =
   | 'call.initiated'
   | 'call.answered'
@@ -5,9 +7,12 @@ export type CallLifecycleEvent =
   | 'call.rejected';
 
 export interface CallLifecyclePayload {
-  roomId: string;
+  callId: string;
+  conversationId: string;
+  initiatorId: string;
+  targetUserId: string;
   userId: string;
-  targetUserId?: string;
+  callType: CallType;
   reason?: string;
   at: string;
 }

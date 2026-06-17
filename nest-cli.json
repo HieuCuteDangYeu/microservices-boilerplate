@@ -78,6 +78,16 @@
         "webpack": false
       }
     },
+    "call-service": {
+      "type": "application",
+      "root": "apps/call-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/call-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/call-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "mail-service": {
       "type": "application",
       "root": "apps/mail-service",

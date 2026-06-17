@@ -9,7 +9,7 @@ export class RedisCallSessionRepository implements ICallSessionRepository {
 
   async save(session: CallSession): Promise<CallSession> {
     await this.redis.set(
-      this.key(session.roomId),
+      this.key(session.callId),
       JSON.stringify(session),
       'EX',
       60 * 60 * 6,
@@ -17,26 +17,17 @@ export class RedisCallSessionRepository implements ICallSessionRepository {
     return session;
   }
 
-  async findByRoomId(roomId: string): Promise<CallSession | null> {
-    const raw = await this.redis.get(this.key(roomId));
+  async findByCallId(callId: string): Promise<CallSession | null> {
+    const raw = await this.redis.get(this.key(callId));
     if (!raw) return null;
     return new CallSession(JSON.parse(raw) as Partial<CallSession>);
   }
 
-  async updateStatus(
-    roomId: string,
-    status: CallSession['status'],
-  ): Promise<CallSession | null> {
-    const session = await this.findByRoomId(roomId);
-    if (!session) return null;
-
-    session.status = status;
-    session.updatedAt = new Date();
-    await this.save(session);
-    return session;
+  async delete(callId: string): Promise<void> {
+    await this.redis.del(this.key(callId));
   }
 
-  private key(roomId: string): string {
-    return `call:${roomId}:session`;
+  private key(callId: string): string {
+    return `call:${callId}:session`;
   }
 }

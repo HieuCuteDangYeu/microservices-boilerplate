@@ -25,7 +25,7 @@ async function bootstrap() {
 
   await app.startAllMicroservices();
 
-  const port = configService.get<number>('CALL_PORT') || 3006;
+  const port = configService.get<number>('CALL_PORT') || 3007;
   await app.listen(port);
 
   console.log(`Call service is running on: http://localhost:${port}/api`);

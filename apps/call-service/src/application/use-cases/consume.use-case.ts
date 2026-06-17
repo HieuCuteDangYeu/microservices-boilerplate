@@ -7,7 +7,19 @@ export class ConsumeUseCase {
     @Inject('ICallMediaEngine') private readonly mediaEngine: ICallMediaEngine,
   ) {}
 
-  async execute(roomId: string, userId: string, producerId: string) {
-    return this.mediaEngine.consume(roomId, userId, producerId);
+  async execute(
+    callId: string,
+    userId: string,
+    transportId: string,
+    producerId: string,
+    rtpCapabilities: Record<string, unknown>,
+  ) {
+    return this.mediaEngine.consume(
+      callId,
+      userId,
+      transportId,
+      producerId,
+      rtpCapabilities,
+    );
   }
 }

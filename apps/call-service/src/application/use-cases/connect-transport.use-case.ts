@@ -8,13 +8,13 @@ export class ConnectTransportUseCase {
   ) {}
 
   async execute(
-    roomId: string,
+    callId: string,
     userId: string,
     transportId: string,
     dtlsParameters: Record<string, unknown>,
   ): Promise<void> {
     await this.mediaEngine.connectTransport(
-      roomId,
+      callId,
       userId,
       transportId,
       dtlsParameters,

@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
 
 @Injectable()
-export class ProduceUseCase {
+export class ResumeConsumerUseCase {
   constructor(
     @Inject('ICallMediaEngine') private readonly mediaEngine: ICallMediaEngine,
   ) {}
@@ -10,16 +10,8 @@ export class ProduceUseCase {
   async execute(
     callId: string,
     userId: string,
-    transportId: string,
-    kind: 'audio' | 'video',
-    rtpParameters: Record<string, unknown>,
-  ) {
-    return this.mediaEngine.produce(
-      callId,
-      userId,
-      transportId,
-      kind,
-      rtpParameters,
-    );
+    consumerId: string,
+  ): Promise<void> {
+    await this.mediaEngine.resumeConsumer(callId, userId, consumerId);
   }
 }

@@ -1,18 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
-import { CallTransport } from '../../domain/entities/call-transport.entity';
 import { ICallStateRepository } from '../../domain/interfaces/call-state.repository.interface';
 
 export interface StoredRoomState {
-  roomId: string;
+  callId: string;
   routerId: string;
   workerId: string;
 }
 
 export interface StoredTransportState {
   transportId: string;
-  roomId: string;
+  callId: string;
   userId: string;
   direction: 'send' | 'recv';
   connected: boolean;
@@ -21,7 +20,7 @@ export interface StoredTransportState {
 export interface StoredProducerState {
   producerId: string;
   transportId: string;
-  roomId: string;
+  callId: string;
   userId: string;
   kind: 'audio' | 'video';
 }
@@ -31,104 +30,175 @@ export class RedisCallStateRepository implements ICallStateRepository {
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
 
   async upsertParticipant(participant: CallParticipant): Promise<void> {
-    const key = this.participantKey(participant.roomId);
-    await this.redis.hset(key, participant.userId, JSON.stringify(participant));
+    const existing = await this.getParticipant(
+      participant.callId,
+      participant.userId,
+    );
+    const mergedSocketIds = [
+      ...(existing?.socketIds ?? []),
+      ...participant.socketIds,
+    ];
+    const nextParticipant = new CallParticipant({
+      ...existing,
+      ...participant,
+      socketIds: [...new Set(mergedSocketIds)],
+      isConnected: true,
+    });
+    const key = this.participantKey(participant.callId);
+    await this.redis.hset(
+      key,
+      participant.userId,
+      JSON.stringify(nextParticipant),
+    );
     await this.redis.expire(key, 60 * 60 * 6);
   }
 
-  async removeParticipant(roomId: string, userId: string): Promise<void> {
-    await this.redis.hdel(this.participantKey(roomId), userId);
+  async removeParticipant(callId: string, userId: string): Promise<void> {
+    await this.redis.hdel(this.participantKey(callId), userId);
   }
 
-  async getParticipants(roomId: string): Promise<CallParticipant[]> {
-    const entries = await this.redis.hgetall(this.participantKey(roomId));
+  async removeParticipantSocket(
+    callId: string,
+    userId: string,
+    socketId: string,
+  ): Promise<CallParticipant | null> {
+    const participant = await this.getParticipant(callId, userId);
+    if (!participant) {
+      return null;
+    }
+
+    const remainingSocketIds = participant.socketIds.filter(
+      (storedSocketId) => storedSocketId !== socketId,
+    );
+    const nextParticipant = new CallParticipant({
+      ...participant,
+      socketId: remainingSocketIds[0],
+      socketIds: remainingSocketIds,
+      isConnected: remainingSocketIds.length > 0,
+    });
+
+    if (remainingSocketIds.length === 0) {
+      await this.redis.hdel(this.participantKey(callId), userId);
+      return nextParticipant;
+    }
+
+    const key = this.participantKey(callId);
+    await this.redis.hset(key, userId, JSON.stringify(nextParticipant));
+    await this.redis.expire(key, 60 * 60 * 6);
+    return nextParticipant;
+  }
+
+  async getParticipants(callId: string): Promise<CallParticipant[]> {
+    const entries = await this.redis.hgetall(this.participantKey(callId));
     return Object.values(entries).map(
       (value) =>
         new CallParticipant(JSON.parse(value) as Partial<CallParticipant>),
     );
   }
 
-  async saveTransport(transport: CallTransport): Promise<void> {
-    await this.saveTransportState({
-      transportId: transport.id,
-      roomId: transport.roomId,
-      userId: transport.userId,
-      direction: transport.direction,
-      connected: false,
-    });
+  async getParticipant(
+    callId: string,
+    userId: string,
+  ): Promise<CallParticipant | null> {
+    const raw = await this.redis.hget(this.participantKey(callId), userId);
+    if (!raw) {
+      return null;
+    }
+
+    return new CallParticipant(JSON.parse(raw) as Partial<CallParticipant>);
+  }
+
+  async clearCallState(callId: string): Promise<void> {
+    const transportKeys = await this.redis.smembers(
+      this.transportIndexKey(callId),
+    );
+    const producerKeys = await this.redis.smembers(
+      this.producerIndexKey(callId),
+    );
+    const keys = [
+      this.roomKey(callId),
+      this.participantKey(callId),
+      this.transportIndexKey(callId),
+      this.producerIndexKey(callId),
+      ...transportKeys,
+      ...producerKeys,
+    ];
+
+    if (keys.length > 0) {
+      await this.redis.del(...keys);
+    }
   }
 
   async getTransport(
-    roomId: string,
+    callId: string,
     userId: string,
     direction: string,
-  ): Promise<CallTransport | null> {
+  ): Promise<StoredTransportState | null> {
     const raw = await this.redis.get(
-      this.transportKey(roomId, userId, direction),
+      this.transportKey(callId, userId, direction),
     );
     if (!raw) return null;
-    return new CallTransport(JSON.parse(raw) as Partial<CallTransport>);
+    return JSON.parse(raw) as StoredTransportState;
   }
 
   async saveRoom(room: StoredRoomState): Promise<void> {
     await this.redis.set(
-      this.roomKey(room.roomId),
+      this.roomKey(room.callId),
       JSON.stringify(room),
       'EX',
       60 * 60 * 6,
     );
   }
 
-  async getRoom(roomId: string): Promise<StoredRoomState | null> {
-    const raw = await this.redis.get(this.roomKey(roomId));
+  async getRoom(callId: string): Promise<StoredRoomState | null> {
+    const raw = await this.redis.get(this.roomKey(callId));
     if (!raw) return null;
     return JSON.parse(raw) as StoredRoomState;
   }
 
-  async removeRoom(roomId: string): Promise<void> {
-    await this.redis.del(this.roomKey(roomId));
-    await this.redis.del(this.participantKey(roomId));
-  }
-
   async saveTransportState(state: StoredTransportState): Promise<void> {
-    await this.redis.set(
-      this.transportKey(state.roomId, state.userId, state.direction),
-      JSON.stringify(state),
-      'EX',
-      60 * 60 * 6,
-    );
+    const key = this.transportKey(state.callId, state.userId, state.direction);
+    await this.redis.set(key, JSON.stringify(state), 'EX', 60 * 60 * 6);
+    await this.redis.sadd(this.transportIndexKey(state.callId), key);
+    await this.redis.expire(this.transportIndexKey(state.callId), 60 * 60 * 6);
   }
 
   async saveProducerState(state: StoredProducerState): Promise<void> {
-    await this.redis.set(
-      this.producerKey(state.roomId, state.userId, state.producerId),
-      JSON.stringify(state),
-      'EX',
-      60 * 60 * 6,
-    );
+    const key = this.producerKey(state.callId, state.userId, state.producerId);
+    await this.redis.set(key, JSON.stringify(state), 'EX', 60 * 60 * 6);
+    await this.redis.sadd(this.producerIndexKey(state.callId), key);
+    await this.redis.expire(this.producerIndexKey(state.callId), 60 * 60 * 6);
   }
 
-  private roomKey(roomId: string): string {
-    return `call:${roomId}:room`;
+  private roomKey(callId: string): string {
+    return `call:${callId}:room`;
   }
 
-  private participantKey(roomId: string): string {
-    return `call:${roomId}:participants`;
+  private participantKey(callId: string): string {
+    return `call:${callId}:participants`;
   }
 
   private transportKey(
-    roomId: string,
+    callId: string,
     userId: string,
     direction: string,
   ): string {
-    return `call:${roomId}:transport:${userId}:${direction}`;
+    return `call:${callId}:transport:${userId}:${direction}`;
   }
 
   private producerKey(
-    roomId: string,
+    callId: string,
     userId: string,
     producerId: string,
   ): string {
-    return `call:${roomId}:producer:${userId}:${producerId}`;
+    return `call:${callId}:producer:${userId}:${producerId}`;
+  }
+
+  private transportIndexKey(callId: string): string {
+    return `call:${callId}:transport-index`;
+  }
+
+  private producerIndexKey(callId: string): string {
+    return `call:${callId}:producer-index`;
   }
 }

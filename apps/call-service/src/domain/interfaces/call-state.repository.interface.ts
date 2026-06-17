@@ -1,14 +1,16 @@
 import { CallParticipant } from '../entities/call-participant.entity';
-import { CallTransport } from '../entities/call-transport.entity';
-
 export abstract class ICallStateRepository {
   abstract upsertParticipant(participant: CallParticipant): Promise<void>;
-  abstract removeParticipant(roomId: string, userId: string): Promise<void>;
-  abstract getParticipants(roomId: string): Promise<CallParticipant[]>;
-  abstract saveTransport(transport: CallTransport): Promise<void>;
-  abstract getTransport(
-    roomId: string,
+  abstract removeParticipant(callId: string, userId: string): Promise<void>;
+  abstract removeParticipantSocket(
+    callId: string,
     userId: string,
-    direction: string,
-  ): Promise<CallTransport | null>;
+    socketId: string,
+  ): Promise<CallParticipant | null>;
+  abstract getParticipants(callId: string): Promise<CallParticipant[]>;
+  abstract getParticipant(
+    callId: string,
+    userId: string,
+  ): Promise<CallParticipant | null>;
+  abstract clearCallState(callId: string): Promise<void>;
 }

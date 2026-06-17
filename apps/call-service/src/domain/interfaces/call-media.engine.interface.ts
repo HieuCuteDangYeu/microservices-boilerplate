@@ -25,33 +25,48 @@ export interface ConsumedMediaResult {
   rtpParameters: Record<string, unknown>;
 }
 
+export interface RouterRtpCapabilitiesResult {
+  codecs: unknown[];
+  headerExtensions: unknown[];
+}
+
 export abstract class ICallMediaEngine {
-  abstract createRoom(roomId: string): Promise<void>;
+  abstract createRoom(callId: string): Promise<void>;
+  abstract getRouterRtpCapabilities(
+    callId: string,
+  ): Promise<RouterRtpCapabilitiesResult>;
   abstract createSendTransport(
-    roomId: string,
+    callId: string,
     userId: string,
   ): Promise<CreateSendTransportResult>;
   abstract createRecvTransport(
-    roomId: string,
+    callId: string,
     userId: string,
   ): Promise<CreateRecvTransportResult>;
   abstract connectTransport(
-    roomId: string,
+    callId: string,
     userId: string,
     transportId: string,
     dtlsParameters: Record<string, unknown>,
   ): Promise<void>;
   abstract produce(
-    roomId: string,
+    callId: string,
     userId: string,
     transportId: string,
     kind: 'audio' | 'video',
     rtpParameters: Record<string, unknown>,
   ): Promise<ProducedMediaResult>;
   abstract consume(
-    roomId: string,
+    callId: string,
     userId: string,
+    transportId: string,
     producerId: string,
+    rtpCapabilities: Record<string, unknown>,
   ): Promise<ConsumedMediaResult>;
-  abstract closeRoom(roomId: string): Promise<void>;
+  abstract resumeConsumer(
+    callId: string,
+    userId: string,
+    consumerId: string,
+  ): Promise<void>;
+  abstract closeRoom(callId: string): Promise<void>;
 }

@@ -1,17 +1,34 @@
-import { Inject, Injectable } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
+import { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
 
 @Injectable()
 export class CreateTransportUseCase {
   constructor(
     @Inject('ICallMediaEngine') private readonly mediaEngine: ICallMediaEngine,
+    @Inject('ICallSessionRepository')
+    private readonly sessionRepository: ICallSessionRepository,
   ) {}
 
-  async execute(roomId: string, userId: string, direction: 'send' | 'recv') {
-    if (direction === 'send') {
-      return this.mediaEngine.createSendTransport(roomId, userId);
+  async execute(callId: string, userId: string, direction: 'send' | 'recv') {
+    const session = await this.sessionRepository.findByCallId(callId);
+    if (!session) {
+      throw new NotFoundException('Call not found');
     }
 
-    return this.mediaEngine.createRecvTransport(roomId, userId);
+    if (!session.participantIds.includes(userId)) {
+      throw new ForbiddenException('You are not part of this call');
+    }
+
+    if (direction === 'send') {
+      return this.mediaEngine.createSendTransport(callId, userId);
+    }
+
+    return this.mediaEngine.createRecvTransport(callId, userId);
   }
 }

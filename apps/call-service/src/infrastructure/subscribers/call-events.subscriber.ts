@@ -1,9 +1,7 @@
 import { Controller, Logger } from '@nestjs/common';
 import { EventPattern, Payload } from '@nestjs/microservices';
-import {
-  CallLifecycleEvent,
-  CallLifecyclePayload,
-} from '../../domain/interfaces/call-event.publisher.interface';
+import type { CallLifecyclePayload } from '../../domain/interfaces/call-event.publisher.interface';
+import { CallLifecycleEvent } from '../../domain/interfaces/call-event.publisher.interface';
 
 @Controller()
 export class CallEventsSubscriber {
@@ -30,7 +28,7 @@ export class CallEventsSubscriber {
   }
 
   private handle(event: CallLifecycleEvent, payload: CallLifecyclePayload) {
-    this.logger.log(`${event} room=${payload.roomId} user=${payload.userId}`);
+    this.logger.log(`${event} call=${payload.callId} user=${payload.userId}`);
     return { event, payload };
   }
 }

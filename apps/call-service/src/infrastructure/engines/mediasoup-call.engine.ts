@@ -11,29 +11,35 @@ import type {
   CreateSendTransportResult,
   ICallMediaEngine,
   ProducedMediaResult,
+  RouterRtpCapabilitiesResult,
 } from '../../domain/interfaces/call-media.engine.interface';
 import { RedisCallStateRepository } from '../repositories/redis-call-state.repository';
 
 type MediaType = 'audio' | 'video';
-
+type TransportDirection = 'send' | 'recv';
 type RoomRuntimeState = {
-  roomId: string;
+  callId: string;
   worker: mediasoup.types.Worker;
   router: mediasoup.types.Router;
   transports: Map<string, mediasoup.types.WebRtcTransport>;
   transportMeta: Map<
     string,
-    { roomId: string; userId: string; direction: 'send' | 'recv' }
+    {
+      callId: string;
+      userId: string;
+      direction: TransportDirection;
+      connected: boolean;
+    }
   >;
   producers: Map<string, mediasoup.types.Producer>;
   producerMeta: Map<
     string,
-    { roomId: string; userId: string; transportId: string; kind: MediaType }
+    { callId: string; userId: string; transportId: string; kind: MediaType }
   >;
   consumers: Map<string, mediasoup.types.Consumer>;
   consumerMeta: Map<
     string,
-    { roomId: string; userId: string; transportId: string; producerId: string }
+    { callId: string; userId: string; transportId: string; producerId: string }
   >;
 };
 
@@ -56,12 +62,13 @@ export class MediasoupCallMediaEngine
     await this.bootstrapWorkers(this.workerCount);
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await Promise.allSettled(this.workers.map((worker) => worker.close()));
+  onModuleDestroy(): Promise<void> {
+    this.workers.forEach((worker) => worker.close());
+    return Promise.resolve();
   }
 
-  async createRoom(roomId: string): Promise<void> {
-    if (this.rooms.has(roomId)) return;
+  async createRoom(callId: string): Promise<void> {
+    if (this.rooms.has(callId)) return;
 
     const worker = await this.getNextWorker();
     const router = await worker.createRouter({
@@ -83,8 +90,8 @@ export class MediasoupCallMediaEngine
       ],
     });
 
-    this.rooms.set(roomId, {
-      roomId,
+    this.rooms.set(callId, {
+      callId,
       worker,
       router,
       transports: new Map(),
@@ -96,62 +103,43 @@ export class MediasoupCallMediaEngine
     });
 
     await this.stateRepository.saveRoom({
-      roomId,
+      callId,
       workerId: String(worker.pid),
       routerId: router.id,
     });
   }
 
+  getRouterRtpCapabilities(
+    callId: string,
+  ): Promise<RouterRtpCapabilitiesResult> {
+    const room = this.getRoomOrThrow(callId);
+    return Promise.resolve({
+      codecs: room.router.rtpCapabilities.codecs ?? [],
+      headerExtensions: room.router.rtpCapabilities.headerExtensions ?? [],
+    });
+  }
+
   async createSendTransport(
-    roomId: string,
+    callId: string,
     userId: string,
   ): Promise<CreateSendTransportResult> {
-    return this.createTransport(roomId, userId, 'send');
+    return this.createTransport(callId, userId, 'send');
   }
 
   async createRecvTransport(
-    roomId: string,
+    callId: string,
     userId: string,
   ): Promise<CreateRecvTransportResult> {
-    return this.createTransport(roomId, userId, 'recv');
+    return this.createTransport(callId, userId, 'recv');
   }
 
   async connectTransport(
-    roomId: string,
+    callId: string,
     userId: string,
     transportId: string,
     dtlsParameters: Record<string, unknown>,
   ): Promise<void> {
-    const room = this.getRoomOrThrow(roomId);
-    const transport = room.transports.get(transportId);
-    const meta = room.transportMeta.get(transportId);
-
-    if (!transport || !meta || meta.userId !== userId) {
-      throw new Error('Transport not found');
-    }
-
-    await transport.connect({
-      dtlsParameters: dtlsParameters as mediasoup.types.DtlsParameters,
-    });
-    room.transportMeta.set(transportId, { ...meta });
-
-    await this.stateRepository.saveTransportState({
-      transportId,
-      roomId,
-      userId,
-      direction: meta.direction,
-      connected: true,
-    });
-  }
-
-  async produce(
-    roomId: string,
-    userId: string,
-    transportId: string,
-    kind: MediaType,
-    rtpParameters: Record<string, unknown>,
-  ): Promise<ProducedMediaResult> {
-    const room = this.getRoomOrThrow(roomId);
+    const room = this.getRoomOrThrow(callId);
     const transport = room.transports.get(transportId);
     const meta = room.transportMeta.get(transportId);
 
@@ -159,23 +147,59 @@ export class MediasoupCallMediaEngine
       !transport ||
       !meta ||
       meta.userId !== userId ||
-      meta.roomId !== roomId
+      meta.callId !== callId
     ) {
-      throw new Error('Transport is not connected');
+      throw new Error('Transport not found');
+    }
+
+    await transport.connect({
+      dtlsParameters: dtlsParameters as mediasoup.types.DtlsParameters,
+    });
+
+    room.transportMeta.set(transportId, { ...meta, connected: true });
+    await this.stateRepository.saveTransportState({
+      transportId,
+      callId,
+      userId,
+      direction: meta.direction,
+      connected: true,
+    });
+  }
+
+  async produce(
+    callId: string,
+    userId: string,
+    transportId: string,
+    kind: MediaType,
+    rtpParameters: Record<string, unknown>,
+  ): Promise<ProducedMediaResult> {
+    const room = this.getRoomOrThrow(callId);
+    const transport = room.transports.get(transportId);
+    const meta = room.transportMeta.get(transportId);
+
+    if (
+      !transport ||
+      !meta ||
+      meta.userId !== userId ||
+      meta.callId !== callId ||
+      meta.direction !== 'send' ||
+      !meta.connected
+    ) {
+      throw new Error('Send transport is not connected');
     }
 
     const producer = await transport.produce({
       kind,
       rtpParameters: rtpParameters as mediasoup.types.RtpParameters,
       appData: {
-        roomId,
+        callId,
         userId,
       },
     });
 
     room.producers.set(producer.id, producer);
     room.producerMeta.set(producer.id, {
-      roomId,
+      callId,
       userId,
       transportId,
       kind,
@@ -189,7 +213,7 @@ export class MediasoupCallMediaEngine
     await this.stateRepository.saveProducerState({
       producerId: producer.id,
       transportId,
-      roomId,
+      callId,
       userId,
       kind,
     });
@@ -198,46 +222,55 @@ export class MediasoupCallMediaEngine
   }
 
   async consume(
-    roomId: string,
+    callId: string,
     userId: string,
+    transportId: string,
     producerId: string,
+    rtpCapabilities: Record<string, unknown>,
   ): Promise<ConsumedMediaResult> {
-    const room = this.getRoomOrThrow(roomId);
+    const room = this.getRoomOrThrow(callId);
     const producer = room.producers.get(producerId);
+    const transport = room.transports.get(transportId);
+    const transportMeta = room.transportMeta.get(transportId);
 
     if (!producer) {
       throw new Error('Producer not found');
     }
 
+    if (
+      !transport ||
+      !transportMeta ||
+      transportMeta.userId !== userId ||
+      transportMeta.direction !== 'recv' ||
+      !transportMeta.connected
+    ) {
+      throw new Error('Receive transport is not connected');
+    }
+
     const canConsume = room.router.canConsume({
       producerId,
-      rtpCapabilities: room.router.rtpCapabilities,
+      rtpCapabilities: rtpCapabilities,
     });
 
     if (!canConsume) {
-      throw new Error('Cannot consume producer');
+      throw new Error('Cannot consume producer with provided RTP capabilities');
     }
 
-    const recvTransport = await this.getOrCreateRecvTransport(
-      room,
-      roomId,
-      userId,
-    );
-    const consumer = await recvTransport.consume({
+    const consumer = await transport.consume({
       producerId,
-      rtpCapabilities: room.router.rtpCapabilities,
+      rtpCapabilities: rtpCapabilities,
       paused: true,
       appData: {
-        roomId,
+        callId,
         userId,
       },
     });
 
     room.consumers.set(consumer.id, consumer);
     room.consumerMeta.set(consumer.id, {
-      roomId,
+      callId,
       userId,
-      transportId: recvTransport.id,
+      transportId,
       producerId,
     });
 
@@ -246,24 +279,51 @@ export class MediasoupCallMediaEngine
       room.consumerMeta.delete(consumer.id);
     });
 
+    consumer.on('producerclose', () => {
+      room.consumers.delete(consumer.id);
+      room.consumerMeta.delete(consumer.id);
+      consumer.close();
+    });
+
     return {
       consumerId: consumer.id,
       producerId,
-      kind: producer.kind as MediaType,
-      rtpParameters: consumer.rtpParameters as Record<string, unknown>,
+      kind: producer.kind,
+      rtpParameters: consumer.rtpParameters,
     };
   }
 
-  async closeRoom(roomId: string): Promise<void> {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
+  async resumeConsumer(
+    callId: string,
+    userId: string,
+    consumerId: string,
+  ): Promise<void> {
+    const room = this.getRoomOrThrow(callId);
+    const consumer = room.consumers.get(consumerId);
+    const meta = room.consumerMeta.get(consumerId);
+
+    if (
+      !consumer ||
+      !meta ||
+      meta.userId !== userId ||
+      meta.callId !== callId
+    ) {
+      throw new Error('Consumer not found');
+    }
+
+    await consumer.resume();
+  }
+
+  closeRoom(callId: string): Promise<void> {
+    const room = this.rooms.get(callId);
+    if (!room) return Promise.resolve();
 
     room.consumers.forEach((consumer) => consumer.close());
     room.producers.forEach((producer) => producer.close());
     room.transports.forEach((transport) => transport.close());
     room.router.close();
-    this.rooms.delete(roomId);
-    await this.stateRepository.removeRoom(roomId);
+    this.rooms.delete(callId);
+    return Promise.resolve();
   }
 
   private async bootstrapWorkers(count: number): Promise<void> {
@@ -297,11 +357,21 @@ export class MediasoupCallMediaEngine
   }
 
   private async createTransport(
-    roomId: string,
+    callId: string,
     userId: string,
-    direction: 'send' | 'recv',
-  ): Promise<CreateSendTransportResult & CreateRecvTransportResult> {
-    const room = this.getRoomOrThrow(roomId);
+    direction: 'send',
+  ): Promise<CreateSendTransportResult>;
+  private async createTransport(
+    callId: string,
+    userId: string,
+    direction: 'recv',
+  ): Promise<CreateRecvTransportResult>;
+  private async createTransport(
+    callId: string,
+    userId: string,
+    direction: TransportDirection,
+  ): Promise<CreateSendTransportResult | CreateRecvTransportResult> {
+    const room = this.getRoomOrThrow(callId);
 
     const transport = await room.router.createWebRtcTransport({
       listenIps: [
@@ -315,14 +385,19 @@ export class MediasoupCallMediaEngine
       preferUdp: true,
       initialAvailableOutgoingBitrate: 800000,
       appData: {
-        roomId,
+        callId,
         userId,
         direction,
       },
     });
 
     room.transports.set(transport.id, transport);
-    room.transportMeta.set(transport.id, { roomId, userId, direction });
+    room.transportMeta.set(transport.id, {
+      callId,
+      userId,
+      direction,
+      connected: false,
+    });
 
     transport.on('dtlsstatechange', (state) => {
       if (state === 'closed') {
@@ -330,14 +405,14 @@ export class MediasoupCallMediaEngine
       }
     });
 
-    transport.on('transportclose', () => {
+    transport.observer.on('close', () => {
       room.transports.delete(transport.id);
       room.transportMeta.delete(transport.id);
     });
 
     await this.stateRepository.saveTransportState({
       transportId: transport.id,
-      roomId,
+      callId,
       userId,
       direction,
       connected: false,
@@ -346,38 +421,16 @@ export class MediasoupCallMediaEngine
     return {
       transportId: transport.id,
       direction,
-      iceParameters: transport.iceParameters as Record<string, unknown>,
-      iceCandidates: transport.iceCandidates as unknown[],
-      dtlsParameters: transport.dtlsParameters as Record<string, unknown>,
+      iceParameters: transport.iceParameters,
+      iceCandidates: transport.iceCandidates,
+      dtlsParameters: transport.dtlsParameters,
     };
   }
 
-  private async getOrCreateRecvTransport(
-    room: RoomRuntimeState,
-    roomId: string,
-    userId: string,
-  ): Promise<mediasoup.types.WebRtcTransport> {
-    const existing = [...room.transports.values()].find((transport) => {
-      const meta = room.transportMeta.get(transport.id);
-      return (
-        meta?.roomId === roomId &&
-        meta?.userId === userId &&
-        meta?.direction === 'recv'
-      );
-    });
-
-    if (existing) return existing;
-
-    const result = await this.createTransport(roomId, userId, 'recv');
-    return room.transports.get(
-      result.transportId,
-    ) as mediasoup.types.WebRtcTransport;
-  }
-
-  private getRoomOrThrow(roomId: string): RoomRuntimeState {
-    const room = this.rooms.get(roomId);
+  private getRoomOrThrow(callId: string): RoomRuntimeState {
+    const room = this.rooms.get(callId);
     if (!room) {
-      throw new Error('Room not found');
+      throw new Error('Call room not found');
     }
     return room;
   }

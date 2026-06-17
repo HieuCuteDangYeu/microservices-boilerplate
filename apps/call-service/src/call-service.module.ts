@@ -1,15 +1,18 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
 
-import { JoinRoomUseCase } from './application/use-cases/join-room.use-case';
+import { InitiateCallUseCase } from './application/use-cases/initiate-call.use-case';
+import { JoinCallUseCase } from './application/use-cases/join-call.use-case';
 import { CreateTransportUseCase } from './application/use-cases/create-transport.use-case';
 import { ConnectTransportUseCase } from './application/use-cases/connect-transport.use-case';
 import { ProduceUseCase } from './application/use-cases/produce.use-case';
 import { ConsumeUseCase } from './application/use-cases/consume.use-case';
-import { EndCallUseCase } from './application/use-cases/end-call.use-case';
+import { LeaveCallUseCase } from './application/use-cases/leave-call.use-case';
 import { RejectCallUseCase } from './application/use-cases/reject-call.use-case';
 import { AnswerCallUseCase } from './application/use-cases/answer-call.use-case';
+import { ResumeConsumerUseCase } from './application/use-cases/resume-consumer.use-case';
 import { CallGateway } from './infrastructure/gateways/call.gateway';
 import { RedisCallStateRepository } from './infrastructure/repositories/redis-call-state.repository';
 import { RedisCallSessionRepository } from './infrastructure/repositories/redis-call-session.repository';
@@ -36,34 +39,83 @@ import { CallEventsSubscriber } from './infrastructure/subscribers/call-events.s
         }),
         inject: [ConfigService],
       },
+      {
+        name: 'AUTH_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'auth_queue',
+            queueOptions: { durable: true },
+            heartbeat: 60,
+            retryAttempts: 10,
+            retryDelay: 3000,
+          },
+        }),
+        inject: [ConfigService],
+      },
+      {
+        name: 'CONVERSATION_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'conversation_queue',
+            queueOptions: { durable: true },
+            heartbeat: 60,
+            retryAttempts: 10,
+            retryDelay: 3000,
+          },
+        }),
+        inject: [ConfigService],
+      },
     ]),
   ],
   controllers: [CallEventsSubscriber],
   providers: [
     CallGateway,
-    JoinRoomUseCase,
+    InitiateCallUseCase,
+    JoinCallUseCase,
     CreateTransportUseCase,
     ConnectTransportUseCase,
     ProduceUseCase,
     ConsumeUseCase,
-    EndCallUseCase,
+    LeaveCallUseCase,
     RejectCallUseCase,
     AnswerCallUseCase,
+    ResumeConsumerUseCase,
+    RedisCallSessionRepository,
+    RedisCallStateRepository,
+    RabbitCallEventPublisher,
+    MediasoupCallMediaEngine,
     {
       provide: 'ICallSessionRepository',
-      useClass: RedisCallSessionRepository,
+      useExisting: RedisCallSessionRepository,
     },
     {
       provide: 'ICallStateRepository',
-      useClass: RedisCallStateRepository,
+      useExisting: RedisCallStateRepository,
     },
     {
       provide: 'ICallEventPublisher',
-      useClass: RabbitCallEventPublisher,
+      useExisting: RabbitCallEventPublisher,
     },
     {
       provide: 'ICallMediaEngine',
-      useClass: MediasoupCallMediaEngine,
+      useExisting: MediasoupCallMediaEngine,
+    },
+    {
+      provide: 'REDIS_CLIENT',
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        new Redis({
+          host: config.get<string>('REDIS_HOST'),
+          port: config.get<number>('REDIS_PORT'),
+          password: config.get<string>('REDIS_PASSWORD'),
+          tls: (config.get<string>('REDIS_HOST') ?? '').includes('upstash')
+            ? { servername: config.get<string>('REDIS_HOST') }
+            : undefined,
+        }),
     },
   ],
 })

@@ -145,6 +145,22 @@ services:
     networks:
       - microservices-net
 
+  call-service:
+    image: ${DOCKERHUB_USERNAME}/call-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/call-service/Dockerfile
+    restart: always
+    ports:
+      - '3007:3007'
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
   ai-service:
     image: ${DOCKERHUB_USERNAME}/ai-service:latest
     build:
@@ -172,6 +188,7 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
     ports:
       - '127.0.0.1:15672:15672'
+      - '127.0.0.1:5672:5672'
     expose:
       - '5672'
     healthcheck:
