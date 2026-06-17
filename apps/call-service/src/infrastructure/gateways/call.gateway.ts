@@ -70,7 +70,7 @@ type ResumeConsumerPayload = {
   consumerId: string;
 };
 
-@WebSocketGateway({ cors: { origin: '*' } })
+@WebSocketGateway({ namespace: '/call', cors: { origin: '*' } })
 export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
 
