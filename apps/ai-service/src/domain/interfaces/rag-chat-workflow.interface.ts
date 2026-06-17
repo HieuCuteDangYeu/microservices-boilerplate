@@ -10,12 +10,33 @@ export type RagChatIntent =
   | 'USER_MEMORY_QUESTION'
   | 'TASK_ACTION_REQUEST';
 
+export type RagReelQuestionType =
+  | 'NONE'
+  | 'TRANSCRIPT_CONTENT'
+  | 'VISUAL_CONTENT'
+  | 'GENERAL_REEL_SUMMARY'
+  | 'REEL_METADATA'
+  | 'AMBIGUOUS_REEL_REFERENCE';
+
+export type RagRequiredEvidence =
+  | 'NONE'
+  | 'TRANSCRIPT'
+  | 'VISUAL'
+  | 'AUDIO'
+  | 'METADATA'
+  | 'CONVERSATION_MEMORY'
+  | 'USER_MEMORY';
+
 export interface RagChatRouteDecision {
   intent: RagChatIntent;
   needsRetrieval: boolean;
   needsUserMemory: boolean;
   needsConversationSummary: boolean;
   needsVerification: boolean;
+
+  reelQuestionType: RagReelQuestionType;
+  requiredEvidence: RagRequiredEvidence[];
+
   reason: string;
 }
 
@@ -51,8 +72,13 @@ export interface RagVerificationResult {
 export interface RagContextSufficiencyResult {
   sufficient: boolean;
   confidence: number;
+
+  availableEvidence: RagRequiredEvidence[];
+  missingEvidence: RagRequiredEvidence[];
+
   reason: string;
-  missingInfo?: string;
+  userFacingReason?: string;
+
   recommendedAction: 'ANSWER' | 'REFUSE_NO_CONTEXT' | 'REWRITE_AND_RETRY';
 }
 
