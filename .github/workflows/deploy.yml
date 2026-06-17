@@ -49,6 +49,7 @@ jobs:
             content-service
             processing-service
             ai-service
+            call-service
           )
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
