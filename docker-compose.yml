@@ -153,6 +153,7 @@ services:
     restart: always
     ports:
       - '3007:3007'
+      - '40000-41000:40000-41000/udp'
     env_file:
       - .env
     depends_on:
