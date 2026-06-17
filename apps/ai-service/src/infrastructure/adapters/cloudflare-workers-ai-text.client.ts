@@ -17,10 +17,18 @@ interface CloudflareChatMessage {
 }
 
 interface CloudflareChatCompletionResponse {
+  success?: boolean;
+  result?: {
+    response?: string;
+    text?: string;
+  };
+  response?: string;
+  output?: string;
   choices?: Array<{
     message?: {
       content?: string;
     };
+    text?: string;
   }>;
   error?: {
     message?: string;
@@ -115,59 +123,118 @@ export class CloudflareWorkersAiTextClient {
 
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
 
-    const maxAttempts = 3;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages,
+        max_tokens: input.maxTokens ?? 700,
+        temperature: input.temperature ?? 0.3,
+      }),
+    });
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: input.model,
-            messages: input.messages,
-            max_tokens: input.maxTokens ?? 700,
-            temperature: input.temperature ?? 0.3,
-          }),
-        });
+    const json = (await response.json()) as CloudflareChatCompletionResponse;
 
-        const json =
-          (await response.json()) as CloudflareChatCompletionResponse;
+    if (!response.ok || json.success === false) {
+      const message = this.extractErrorMessage(
+        json,
+        `Cloudflare chat completion failed with status ${response.status}`,
+      );
 
-        if (!response.ok) {
-          const message =
-            json.error?.message ||
-            json.errors
-              ?.map((error) => error.message)
-              .filter(Boolean)
-              .join(', ') ||
-            `Cloudflare chat completion failed with status ${response.status}`;
+      this.logger.warn(message);
+      throw new Error(message);
+    }
 
-          throw new Error(message);
-        }
+    const content = this.extractChatCompletionText(json);
 
-        return json.choices?.[0]?.message?.content?.trim() ?? '';
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
+    if (!content) {
+      this.logger.warn(
+        `[CloudflareChat] empty response shape=${this.describeResponseShape(
+          json,
+        )}`,
+      );
 
-        this.logger.warn(
-          `[CloudflareChat] attempt=${attempt}/${maxAttempts} failed: ${message}`,
-        );
+      throw new Error('Cloudflare chat completion returned empty answer.');
+    }
 
-        if (attempt === maxAttempts) {
-          throw error;
-        }
+    return content;
+  }
 
-        await this.sleep(300 * attempt);
-      }
+  private extractChatCompletionText(
+    json: CloudflareChatCompletionResponse,
+  ): string {
+    const openAiContent = json.choices?.[0]?.message?.content?.trim();
+
+    if (openAiContent) {
+      return openAiContent;
+    }
+
+    const choiceText = json.choices?.[0]?.text?.trim();
+
+    if (choiceText) {
+      return choiceText;
+    }
+
+    const resultResponse = json.result?.response?.trim();
+
+    if (resultResponse) {
+      return resultResponse;
+    }
+
+    const resultText = json.result?.text?.trim();
+
+    if (resultText) {
+      return resultText;
+    }
+
+    const directResponse = json.response?.trim();
+
+    if (directResponse) {
+      return directResponse;
+    }
+
+    const directOutput = json.output?.trim();
+
+    if (directOutput) {
+      return directOutput;
     }
 
     return '';
   }
 
-  private sleep(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  private extractErrorMessage(
+    json: CloudflareChatCompletionResponse,
+    fallback: string,
+  ): string {
+    return (
+      json.error?.message ||
+      json.errors
+        ?.map((error) => error.message)
+        .filter((message): message is string => Boolean(message))
+        .join(', ') ||
+      fallback
+    );
+  }
+
+  private describeResponseShape(
+    json: CloudflareChatCompletionResponse,
+  ): string {
+    return JSON.stringify({
+      success: json.success,
+      hasResult: Boolean(json.result),
+      hasResultResponse: Boolean(json.result?.response),
+      hasResultText: Boolean(json.result?.text),
+      hasChoices: Boolean(json.choices?.length),
+      hasChoiceMessageContent: Boolean(json.choices?.[0]?.message?.content),
+      hasChoiceText: Boolean(json.choices?.[0]?.text),
+      hasDirectResponse: Boolean(json.response),
+      hasDirectOutput: Boolean(json.output),
+      hasError: Boolean(json.error),
+      errorCount: json.errors?.length ?? 0,
+    });
   }
 }

@@ -65,9 +65,7 @@ export class CloudflareLlmAdapter implements ILlmService {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 
-      this.logger.warn(
-        `[CloudflareLlmAdapter] fallback answer used: ${message}`,
-      );
+      this.logger.warn(`fallback answer used: ${message}`);
 
       const fallback =
         'I could not generate the answer right now because the AI provider returned an empty or failed response. Please try again.';
