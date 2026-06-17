@@ -34,7 +34,7 @@ RUN corepack prepare pnpm@9.15.0 --activate
 COPY . .
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
-RUN pnpm rebuild
+RUN pnpm rebuild mediasoup bcrypt
 
 COPY --from=builder /usr/src/app/dist ./dist
 
