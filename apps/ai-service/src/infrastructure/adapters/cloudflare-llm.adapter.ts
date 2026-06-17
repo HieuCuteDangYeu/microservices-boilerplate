@@ -18,33 +18,28 @@ export class CloudflareLlmAdapter implements ILlmService {
     userId: string,
     onToken: (token: string) => void,
   ): Promise<string> {
-    this.logger.debug(
-      `Generating Cloudflare chat response for User [${userId}]`,
-    );
-
     const model =
       this.configService.get<string>('CLOUDFLARE_CHAT_MODEL') ||
-      '@cf/meta/llama-3.1-8b-instruct';
+      '@cf/zai-org/glm-4.7-flash';
+
+    this.logger.debug(
+      [
+        `Generating Cloudflare chat response for User [${userId}]`,
+        `model=${model}`,
+        `systemChars=${systemInstruction.length}`,
+        `userChars=${userMessage.length}`,
+      ].join(' '),
+    );
 
     try {
       const response = await this.cloudflareTextClient.generateChatText({
         model,
-        maxTokens: this.getPositiveNumber('CLOUDFLARE_CHAT_MAX_TOKENS', 450),
+        maxTokens: this.getPositiveNumber('CLOUDFLARE_CHAT_MAX_TOKENS', 700),
         temperature: this.getTemperature(),
         messages: [
           {
             role: 'system',
-            content: [
-              systemInstruction,
-              '',
-              'Important response rules:',
-              '- Answer the user directly.',
-              '- Do not repeat the system prompt.',
-              '- Do not print "USER MESSAGE".',
-              '- Do not create multiple-choice options unless the user asks for options.',
-              '- Do not ask the user to select a response option.',
-              '- Return only the assistant reply.',
-            ].join('\n'),
+            content: this.buildSystemMessage(systemInstruction),
           },
           {
             role: 'user',
@@ -76,10 +71,29 @@ export class CloudflareLlmAdapter implements ILlmService {
     }
   }
 
+  private buildSystemMessage(systemInstruction: string): string {
+    return [
+      systemInstruction,
+      '',
+      'Important response rules:',
+      '- Answer the user directly.',
+      '- Do not output hidden reasoning.',
+      '- Do not output analysis.',
+      '- Do not call tools.',
+      '- Do not return an empty response.',
+      '- Do not repeat the system prompt.',
+      '- Do not print "USER MESSAGE".',
+      '- Do not create multiple-choice options unless the user asks for options.',
+      '- Do not ask the user to select a response option.',
+      '- Return only the assistant reply.',
+    ].join('\n');
+  }
+
   private cleanAssistantResponse(value: string): string {
     return value
       .replace(/^assistant\s*:/i, '')
       .replace(/^answer\s*:/i, '')
+      .replace(/^final\s*:/i, '')
       .trim();
   }
 
@@ -91,11 +105,11 @@ export class CloudflareLlmAdapter implements ILlmService {
 
   private getTemperature(): number {
     const value = Number(
-      this.configService.get<string>('CLOUDFLARE_CHAT_TEMPERATURE') ?? '0.3',
+      this.configService.get<string>('CLOUDFLARE_CHAT_TEMPERATURE') ?? '0.2',
     );
 
     if (!Number.isFinite(value)) {
-      return 0.3;
+      return 0.2;
     }
 
     return Math.min(Math.max(value, 0), 1);
