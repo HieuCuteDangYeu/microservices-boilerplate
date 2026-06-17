@@ -33,7 +33,8 @@ RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
 
-RUN pnpm install --frozen-lockfile --prod
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts
+RUN pnpm rebuild
 
 COPY --from=builder /usr/src/app/dist ./dist
 
