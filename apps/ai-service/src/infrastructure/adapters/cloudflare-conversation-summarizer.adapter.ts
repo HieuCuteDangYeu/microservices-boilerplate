@@ -1,3 +1,4 @@
+import type { CloudflareChatEndpoint } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
@@ -33,8 +34,10 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
 
       const response = await this.cloudflareTextClient.generateChatText({
         model: this.getMemoryModel(),
-        maxTokens: 650,
-        temperature: 0.1,
+        endpoint: this.getMemoryEndpoint(),
+        fallbackToRunStream: this.shouldMemoryFallbackToRunStream(),
+        maxTokens: this.getMemoryMaxTokens(),
+        temperature: this.getMemoryTemperature(),
         messages: [
           {
             role: 'system',
@@ -129,7 +132,53 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
   private getMemoryModel(): string {
     return (
       this.configService.get<string>('CLOUDFLARE_MEMORY_MODEL') ||
-      '@cf/meta/llama-3.1-8b-instruct'
+      '@cf/meta/llama-3.1-8b-instruct-fast'
     );
+  }
+
+  private getMemoryEndpoint(): CloudflareChatEndpoint {
+    const value = this.configService
+      .get<string>('CLOUDFLARE_MEMORY_ENDPOINT')
+      ?.trim()
+      .toLowerCase();
+
+    if (value === 'run') {
+      return 'run';
+    }
+
+    if (value === 'run_stream') {
+      return 'run_stream';
+    }
+
+    return 'chat_completions';
+  }
+
+  private shouldMemoryFallbackToRunStream(): boolean {
+    const value = this.configService
+      .get<string>('CLOUDFLARE_MEMORY_FALLBACK_TO_RUN')
+      ?.trim()
+      .toLowerCase();
+
+    return value === 'true';
+  }
+
+  private getMemoryMaxTokens(): number {
+    const value = Number(
+      this.configService.get<string>('CLOUDFLARE_MEMORY_MAX_TOKENS') ?? '650',
+    );
+
+    return Number.isFinite(value) && value > 0 ? value : 650;
+  }
+
+  private getMemoryTemperature(): number {
+    const value = Number(
+      this.configService.get<string>('CLOUDFLARE_MEMORY_TEMPERATURE') ?? '0.1',
+    );
+
+    if (!Number.isFinite(value)) {
+      return 0.1;
+    }
+
+    return Math.min(Math.max(value, 0), 1);
   }
 }

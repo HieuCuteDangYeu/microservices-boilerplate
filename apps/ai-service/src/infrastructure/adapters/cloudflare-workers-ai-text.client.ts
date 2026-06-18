@@ -61,7 +61,24 @@ interface CloudflareChatCompletionResponse {
   }>;
 }
 
-type CloudflareChatEndpoint = 'chat_completions' | 'run';
+interface CloudflareStreamEvent {
+  response?: string;
+  text?: string;
+  output?: string;
+  result?: {
+    response?: string;
+    text?: string;
+  };
+  choices?: CloudflareChatCompletionChoice[];
+  error?: {
+    message?: string;
+  };
+  errors?: Array<{
+    message?: string;
+  }>;
+}
+
+export type CloudflareChatEndpoint = 'chat_completions' | 'run' | 'run_stream';
 
 @Injectable()
 export class CloudflareWorkersAiTextClient {
@@ -69,87 +86,41 @@ export class CloudflareWorkersAiTextClient {
 
   constructor(private readonly configService: ConfigService) {}
 
-  /**
-   * Use this for simple single-prompt background tasks:
-   * - memory extraction
-   * - conversation summarization
-   */
   async generateText(input: {
     prompt: string;
     model?: string;
     maxTokens?: number;
+    temperature?: number;
+    endpoint?: CloudflareChatEndpoint;
+    fallbackToRunStream?: boolean;
   }): Promise<string> {
-    const accountId = this.configService.getOrThrow<string>(
-      'CLOUDFLARE_ACCOUNT_ID',
-    );
-
-    const apiToken = this.configService.getOrThrow<string>(
-      'CLOUDFLARE_API_TOKEN',
-    );
-
     const model =
       input.model ||
       this.configService.get<string>('CLOUDFLARE_MEMORY_MODEL') ||
-      '@cf/meta/llama-3.2-1b-instruct';
+      '@cf/meta/llama-3.1-8b-instruct-fast';
 
-    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        prompt: input.prompt,
-        max_tokens: input.maxTokens ?? 512,
-      }),
+    return await this.generateChatText({
+      model,
+      endpoint: input.endpoint ?? 'chat_completions',
+      fallbackToRunStream: input.fallbackToRunStream ?? false,
+      maxTokens: input.maxTokens ?? 512,
+      temperature: input.temperature ?? 0.1,
+      messages: [
+        {
+          role: 'user',
+          content: input.prompt,
+        },
+      ],
     });
-
-    const json = (await response.json()) as CloudflareAiRunResponse;
-
-    if (!response.ok || json.success === false) {
-      const message =
-        json.errors
-          ?.map((error) => error.message)
-          .filter((item): item is string => Boolean(item))
-          .join(', ') ||
-        `Cloudflare Workers AI request failed with status ${response.status}`;
-
-      this.logger.warn(message);
-      throw new Error(message);
-    }
-
-    const text = this.extractRunText(json);
-
-    if (!text) {
-      this.logger.warn(
-        `[CloudflareRunText] empty response shape=${this.describeRunResponseShape(
-          json,
-        )}`,
-      );
-
-      throw new Error('Cloudflare Workers AI run returned empty text.');
-    }
-
-    return text;
   }
 
-  /**
-   * Use this for chatbot replies.
-   *
-   * Default behavior:
-   * - Use OpenAI-compatible chat completions first.
-   * - If Cloudflare returns an empty choice, fallback to /ai/run/{model}.
-   *
-   * To skip chat completions for GLM and use /ai/run directly:
-   * CLOUDFLARE_CHAT_ENDPOINT=run
-   */
   async generateChatText(input: {
     model: string;
     messages: CloudflareChatMessage[];
     maxTokens?: number;
     temperature?: number;
+    endpoint?: CloudflareChatEndpoint;
+    fallbackToRunStream?: boolean;
   }): Promise<string> {
     const accountId = this.configService.getOrThrow<string>(
       'CLOUDFLARE_ACCOUNT_ID',
@@ -159,26 +130,43 @@ export class CloudflareWorkersAiTextClient {
       'CLOUDFLARE_API_TOKEN',
     );
 
-    const endpoint = this.getChatEndpoint();
+    const endpoint = input.endpoint ?? this.getChatEndpoint();
+
+    if (endpoint === 'run_stream') {
+      return await this.generateRunChatStreamText(input, accountId, apiToken);
+    }
 
     if (endpoint === 'run') {
-      return await this.generateRunChatText(input, accountId, apiToken);
+      try {
+        return await this.generateRunChatText(input, accountId, apiToken);
+      } catch (error: unknown) {
+        if (
+          !this.isEmptyAnswerError(error) ||
+          !this.shouldFallbackToRun(input)
+        ) {
+          throw error;
+        }
+
+        this.logger.warn(
+          '[CloudflareRunChat] non-streaming run returned empty answer, retrying with stream=true',
+        );
+
+        return await this.generateRunChatStreamText(input, accountId, apiToken);
+      }
     }
 
     try {
       return await this.generateChatCompletionText(input, accountId, apiToken);
     } catch (error: unknown) {
-      if (!this.isEmptyAnswerError(error) || !this.shouldFallbackToRun()) {
+      if (!this.isEmptyAnswerError(error) || !this.shouldFallbackToRun(input)) {
         throw error;
       }
 
-      const message = error instanceof Error ? error.message : String(error);
-
       this.logger.warn(
-        `[CloudflareChat] chat-completions returned empty answer, retrying with /ai/run: ${message}`,
+        '[CloudflareChat] chat-completions returned empty answer, retrying with /ai/run stream=true',
       );
 
-      return await this.generateRunChatText(input, accountId, apiToken);
+      return await this.generateRunChatStreamText(input, accountId, apiToken);
     }
   }
 
@@ -203,8 +191,10 @@ export class CloudflareWorkersAiTextClient {
       body: JSON.stringify({
         model: input.model,
         messages: input.messages,
-        max_tokens: input.maxTokens ?? 700,
+        max_completion_tokens: input.maxTokens ?? 700,
         temperature: input.temperature ?? 0.2,
+        tool_choice: 'none',
+        parallel_tool_calls: false,
         stream: false,
       }),
     });
@@ -256,8 +246,11 @@ export class CloudflareWorkersAiTextClient {
       },
       body: JSON.stringify({
         messages: input.messages,
-        max_tokens: input.maxTokens ?? 700,
+        max_completion_tokens: input.maxTokens ?? 700,
         temperature: input.temperature ?? 0.2,
+        tool_choice: 'none',
+        parallel_tool_calls: false,
+        stream: false,
       }),
     });
 
@@ -290,8 +283,194 @@ export class CloudflareWorkersAiTextClient {
     return text;
   }
 
+  private async generateRunChatStreamText(
+    input: {
+      model: string;
+      messages: CloudflareChatMessage[];
+      maxTokens?: number;
+      temperature?: number;
+    },
+    accountId: string,
+    apiToken: string,
+  ): Promise<string> {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${input.model}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: input.messages,
+        max_completion_tokens: input.maxTokens ?? 700,
+        temperature: input.temperature ?? 0.2,
+        tool_choice: 'none',
+        parallel_tool_calls: false,
+        stream: true,
+      }),
+    });
+
+    return await this.readRunStreamResponse(
+      response,
+      'CloudflareRunChatStream',
+    );
+  }
+
+  private async readRunStreamResponse(
+    response: Response,
+    logPrefix: string,
+  ): Promise<string> {
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      this.logger.warn(
+        `[${logPrefix}] request failed status=${response.status} body=${this.truncate(
+          errorText,
+          500,
+        )}`,
+      );
+
+      throw new Error(
+        `Cloudflare Workers AI stream request failed with status ${response.status}`,
+      );
+    }
+
+    if (!response.body) {
+      throw new Error('Cloudflare Workers AI stream response body is empty.');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    let buffer = '';
+    const outputParts: string[] = [];
+    const shapeSamples: string[] = [];
+
+    while (true) {
+      const result = await reader.read();
+
+      if (result.done) {
+        break;
+      }
+
+      buffer += decoder.decode(result.value, { stream: true });
+
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const text = line.trim();
+
+        if (!text || text.startsWith(':')) {
+          continue;
+        }
+
+        if (!text.startsWith('data:')) {
+          continue;
+        }
+
+        const payload = text.slice('data:'.length).trim();
+
+        if (!payload || payload === '[DONE]') {
+          continue;
+        }
+
+        const parsed = this.parseStreamPayload(payload);
+
+        if (!parsed) {
+          continue;
+        }
+
+        const token = this.extractStreamEventText(parsed);
+
+        if (token.length > 0) {
+          outputParts.push(token);
+          continue;
+        }
+
+        if (shapeSamples.length < 3) {
+          shapeSamples.push(this.describeStreamEventShape(parsed));
+        }
+
+        const errorMessage = this.extractStreamErrorMessage(parsed);
+
+        if (errorMessage) {
+          throw new Error(errorMessage);
+        }
+      }
+    }
+
+    const finalText = outputParts.join('').trim();
+
+    if (!finalText) {
+      this.logger.warn(
+        `[${logPrefix}] empty stream response shapes=${JSON.stringify(
+          shapeSamples,
+        )}`,
+      );
+
+      throw new Error('Cloudflare Workers AI stream returned empty answer.');
+    }
+
+    return finalText;
+  }
+
+  private parseStreamPayload(payload: string): CloudflareStreamEvent | null {
+    try {
+      return JSON.parse(payload) as CloudflareStreamEvent;
+    } catch {
+      return null;
+    }
+  }
+
+  private extractStreamEventText(event: CloudflareStreamEvent): string {
+    const response = this.streamText(event.response);
+
+    if (response.length > 0) {
+      return response;
+    }
+
+    const resultResponse = this.streamText(event.result?.response);
+
+    if (resultResponse.length > 0) {
+      return resultResponse;
+    }
+
+    const resultText = this.streamText(event.result?.text);
+
+    if (resultText.length > 0) {
+      return resultText;
+    }
+
+    const directText = this.streamText(event.text);
+
+    if (directText.length > 0) {
+      return directText;
+    }
+
+    const directOutput = this.streamText(event.output);
+
+    if (directOutput.length > 0) {
+      return directOutput;
+    }
+
+    return this.extractChatCompletionText(event);
+  }
+
+  private extractStreamErrorMessage(event: CloudflareStreamEvent): string {
+    return (
+      event.error?.message ||
+      event.errors
+        ?.map((error) => error.message)
+        .filter((message): message is string => Boolean(message))
+        .join(', ') ||
+      ''
+    );
+  }
+
   private extractChatCompletionText(
-    json: CloudflareChatCompletionResponse,
+    json: CloudflareChatCompletionResponse | CloudflareStreamEvent,
   ): string {
     const choice = json.choices?.[0];
 
@@ -402,16 +581,34 @@ export class CloudflareWorkersAiTextClient {
     return typeof value === 'string' ? value.trim() : '';
   }
 
+  private streamText(value: string | null | undefined): string {
+    return typeof value === 'string' ? value : '';
+  }
+
   private getChatEndpoint(): CloudflareChatEndpoint {
     const value = this.configService
       .get<string>('CLOUDFLARE_CHAT_ENDPOINT')
       ?.trim()
       .toLowerCase();
 
-    return value === 'run' ? 'run' : 'chat_completions';
+    if (value === 'run') {
+      return 'run';
+    }
+
+    if (value === 'run_stream') {
+      return 'run_stream';
+    }
+
+    return 'chat_completions';
   }
 
-  private shouldFallbackToRun(): boolean {
+  private shouldFallbackToRun(input?: {
+    fallbackToRunStream?: boolean;
+  }): boolean {
+    if (typeof input?.fallbackToRunStream === 'boolean') {
+      return input.fallbackToRunStream;
+    }
+
     const value = this.configService
       .get<string>('CLOUDFLARE_CHAT_FALLBACK_TO_RUN')
       ?.trim()
@@ -499,5 +696,36 @@ export class CloudflareWorkersAiTextClient {
       directOutputLength: json.output?.length ?? 0,
       errorCount: json.errors?.length ?? 0,
     });
+  }
+
+  private describeStreamEventShape(event: CloudflareStreamEvent): string {
+    const choice = event.choices?.[0];
+
+    return JSON.stringify({
+      hasResponse: Boolean(event.response),
+      responseLength: event.response?.length ?? 0,
+      hasText: Boolean(event.text),
+      textLength: event.text?.length ?? 0,
+      hasOutput: Boolean(event.output),
+      outputLength: event.output?.length ?? 0,
+      hasResult: Boolean(event.result),
+      hasResultResponse: Boolean(event.result?.response),
+      resultResponseLength: event.result?.response?.length ?? 0,
+      hasChoices: Boolean(event.choices?.length),
+      choiceKeys: choice ? Object.keys(choice) : [],
+      hasDeltaContent: Boolean(choice?.delta?.content),
+      deltaContentLength: choice?.delta?.content?.length ?? 0,
+      hasMessageContent: Boolean(choice?.message?.content),
+      hasError: Boolean(event.error),
+      errorCount: event.errors?.length ?? 0,
+    });
+  }
+
+  private truncate(value: string, maxLength: number): string {
+    if (value.length <= maxLength) {
+      return value;
+    }
+
+    return `${value.slice(0, maxLength).trim()}...`;
   }
 }
