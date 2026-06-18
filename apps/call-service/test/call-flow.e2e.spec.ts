@@ -458,9 +458,11 @@ describe('Call Service P0 flow (e2e)', () => {
   let baseUrl: string;
   const sockets: Socket[] = [];
   const originalReconnectGraceMs = process.env.CALL_RECONNECT_GRACE_MS;
+  const originalNoAnswerTimeoutMs = process.env.CALL_NO_ANSWER_TIMEOUT_MS;
 
   beforeEach(async () => {
     process.env.CALL_RECONNECT_GRACE_MS = '50';
+    process.env.CALL_NO_ANSWER_TIMEOUT_MS = '50';
     redis = new FakeRedisClient();
     eventPublisher = new FakeCallEventPublisher();
     mediaEngine = new FakeCallMediaEngine();
@@ -538,6 +540,7 @@ describe('Call Service P0 flow (e2e)', () => {
     eventPublisher.reset();
     mediaEngine.reset();
     process.env.CALL_RECONNECT_GRACE_MS = originalReconnectGraceMs;
+    process.env.CALL_NO_ANSWER_TIMEOUT_MS = originalNoAnswerTimeoutMs;
   });
 
   it('disconnects clients with missing or invalid tokens and joins valid clients to private rooms', async () => {
@@ -780,6 +783,54 @@ describe('Call Service P0 flow (e2e)', () => {
           entry.event === 'call.ended' &&
           entry.payload.callId === callId &&
           entry.payload.reason === 'cancelled',
+      ),
+    ).toBeDefined();
+  });
+
+  it('auto-ends unanswered voice calls after the backend no-answer timeout', async () => {
+    const caller = await connectClient('caller-token');
+    const callee = await connectClient('callee-token');
+
+    const callerJoined = onceEvent<{ callId: string }>(caller, 'call_joined');
+    const incomingCall = onceEvent<{ callId: string }>(callee, 'incoming_call');
+
+    caller.emit('initiate_call', {
+      conversationId: 'conv-cancel',
+      targetUserId: calleeUser.id,
+      callType: 'VOICE',
+    });
+
+    const [{ callId }, incoming] = await Promise.all([
+      callerJoined,
+      incomingCall,
+    ]);
+    expect(incoming.callId).toBe(callId);
+
+    const callerEnded = onceEvent<{ callId: string; reason: string }>(
+      caller,
+      'call_ended',
+    );
+    const calleeEnded = onceEvent<{ callId: string; reason: string }>(
+      callee,
+      'call_ended',
+    );
+
+    await expect(callerEnded).resolves.toEqual({
+      callId,
+      reason: 'no_answer',
+    });
+    await expect(calleeEnded).resolves.toEqual({
+      callId,
+      reason: 'no_answer',
+    });
+
+    await expectCallStateCleared(callId);
+    expect(
+      eventPublisher.events.find(
+        (entry) =>
+          entry.event === 'call.ended' &&
+          entry.payload.callId === callId &&
+          entry.payload.reason === 'no_answer',
       ),
     ).toBeDefined();
   });

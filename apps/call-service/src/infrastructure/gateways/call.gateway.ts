@@ -95,7 +95,14 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly reconnectGraceMs = Number(
     process.env.CALL_RECONNECT_GRACE_MS || 15000,
   );
+  private readonly noAnswerTimeoutMs = Number(
+    process.env.CALL_NO_ANSWER_TIMEOUT_MS || 30000,
+  );
   private readonly pendingDisconnects = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private readonly pendingUnansweredCalls = new Map<
     string,
     ReturnType<typeof setTimeout>
   >();
@@ -250,6 +257,10 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       targetUserId: result.session.targetUserId,
       callType: result.session.callType,
     });
+
+    if (result.session.callType === 'VOICE') {
+      this.scheduleUnansweredCallTimeout(result.session.callId);
+    }
   }
 
   @SubscribeMessage('join_call')
@@ -477,6 +488,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!userId) return;
 
     await this.answerCallUseCase.execute(payload.callId, userId);
+    this.clearPendingUnansweredCall(payload.callId);
     this.server.to(payload.callId).emit('call_answered', {
       callId: payload.callId,
       userId,
@@ -497,6 +509,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       payload.reason,
     );
 
+    this.clearPendingUnansweredCall(payload.callId);
     this.clearPendingDisconnect(payload.callId, userId);
     this.untrackCallId(client, payload.callId);
     if (result.shouldEmitPeerLeft) {
@@ -522,6 +535,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId,
       payload.reason,
     );
+    this.clearPendingUnansweredCall(payload.callId);
     this.clearPendingDisconnect(payload.callId, userId);
     this.untrackCallId(client, payload.callId);
 
@@ -533,6 +547,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private emitCallEnded(session: CallSession, reason: string): void {
+    this.clearPendingUnansweredCall(session.callId);
     this.clearPendingDisconnect(session.callId, session.initiatorId);
     this.clearPendingDisconnect(session.callId, session.targetUserId);
     this.server.to(session.callId).emit('call_ended', {
@@ -597,6 +612,42 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.pendingDisconnects.set(this.disconnectKey(callId, userId), timeoutId);
   }
 
+  private scheduleUnansweredCallTimeout(callId: string): void {
+    this.clearPendingUnansweredCall(callId);
+
+    const timeoutId = setTimeout(() => {
+      void (async () => {
+        try {
+          const session = await this.sessionRepository.findByCallId(callId);
+          if (
+            !session ||
+            session.callType !== 'VOICE' ||
+            (session.status !== 'initiated' && session.status !== 'ringing')
+          ) {
+            return;
+          }
+
+          const result = await this.leaveCallUseCase.execute(
+            callId,
+            session.initiatorId,
+            'no_answer',
+          );
+          this.emitCallEnded(result.session, result.endedReason);
+        } catch (error) {
+          this.logger.warn(
+            `Unanswered call timeout cleanup failed for call ${callId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        } finally {
+          this.clearPendingUnansweredCall(callId);
+        }
+      })();
+    }, this.noAnswerTimeoutMs);
+
+    this.pendingUnansweredCalls.set(callId, timeoutId);
+  }
+
   private clearPendingDisconnect(callId: string, userId: string): void {
     const key = this.disconnectKey(callId, userId);
     const timeoutId = this.pendingDisconnects.get(key);
@@ -606,6 +657,16 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     clearTimeout(timeoutId);
     this.pendingDisconnects.delete(key);
+  }
+
+  private clearPendingUnansweredCall(callId: string): void {
+    const timeoutId = this.pendingUnansweredCalls.get(callId);
+    if (!timeoutId) {
+      return;
+    }
+
+    clearTimeout(timeoutId);
+    this.pendingUnansweredCalls.delete(callId);
   }
 
   private disconnectKey(callId: string, userId: string): string {
