@@ -37,12 +37,18 @@ export class CloudflareLlmAdapter implements ILlmService {
     );
 
     try {
+      let emittedStreamToken = false;
+
       const response = await this.cloudflareTextClient.generateChatText({
         model,
         endpoint,
         fallbackToRunStream: this.shouldFallbackToRunStream(),
         maxTokens: this.getPositiveNumber('CLOUDFLARE_CHAT_MAX_TOKENS', 900),
         temperature: this.getTemperature(),
+        onToken: (token: string) => {
+          emittedStreamToken = true;
+          onToken(token);
+        },
         messages: [
           {
             role: 'system',
@@ -61,7 +67,9 @@ export class CloudflareLlmAdapter implements ILlmService {
         throw new Error('Cloudflare chat completion returned empty answer.');
       }
 
-      onToken(finalAnswer);
+      if (!emittedStreamToken) {
+        onToken(finalAnswer);
+      }
 
       return finalAnswer;
     } catch (error: unknown) {

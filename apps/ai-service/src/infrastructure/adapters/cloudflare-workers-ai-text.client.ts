@@ -121,6 +121,7 @@ export class CloudflareWorkersAiTextClient {
     temperature?: number;
     endpoint?: CloudflareChatEndpoint;
     fallbackToRunStream?: boolean;
+    onToken?: (token: string) => void;
   }): Promise<string> {
     const accountId = this.configService.getOrThrow<string>(
       'CLOUDFLARE_ACCOUNT_ID',
@@ -289,6 +290,7 @@ export class CloudflareWorkersAiTextClient {
       messages: CloudflareChatMessage[];
       maxTokens?: number;
       temperature?: number;
+      onToken?: (token: string) => void;
     },
     accountId: string,
     apiToken: string,
@@ -305,8 +307,6 @@ export class CloudflareWorkersAiTextClient {
         messages: input.messages,
         max_completion_tokens: input.maxTokens ?? 700,
         temperature: input.temperature ?? 0.2,
-        tool_choice: 'none',
-        parallel_tool_calls: false,
         stream: true,
       }),
     });
@@ -314,12 +314,14 @@ export class CloudflareWorkersAiTextClient {
     return await this.readRunStreamResponse(
       response,
       'CloudflareRunChatStream',
+      input.onToken,
     );
   }
 
   private async readRunStreamResponse(
     response: Response,
     logPrefix: string,
+    onToken?: (token: string) => void,
   ): Promise<string> {
     if (!response.ok) {
       const errorText = await response.text();
@@ -359,18 +361,14 @@ export class CloudflareWorkersAiTextClient {
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? '';
 
-      for (const line of lines) {
-        const text = line.trim();
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
 
-        if (!text || text.startsWith(':')) {
+        if (!line || line.startsWith(':') || !line.startsWith('data:')) {
           continue;
         }
 
-        if (!text.startsWith('data:')) {
-          continue;
-        }
-
-        const payload = text.slice('data:'.length).trim();
+        const payload = line.slice('data:'.length).trim();
 
         if (!payload || payload === '[DONE]') {
           continue;
@@ -382,21 +380,22 @@ export class CloudflareWorkersAiTextClient {
           continue;
         }
 
-        const token = this.extractStreamEventText(parsed);
+        const errorMessage = this.extractStreamErrorMessage(parsed);
+
+        if (errorMessage) {
+          throw new Error(errorMessage);
+        }
+
+        const token = this.extractStreamEventToken(parsed);
 
         if (token.length > 0) {
           outputParts.push(token);
+          onToken?.(token);
           continue;
         }
 
         if (shapeSamples.length < 3) {
           shapeSamples.push(this.describeStreamEventShape(parsed));
-        }
-
-        const errorMessage = this.extractStreamErrorMessage(parsed);
-
-        if (errorMessage) {
-          throw new Error(errorMessage);
         }
       }
     }
@@ -414,6 +413,64 @@ export class CloudflareWorkersAiTextClient {
     }
 
     return finalText;
+  }
+
+  private extractStreamEventToken(event: CloudflareStreamEvent): string {
+    const response = this.readRawText(event.response);
+
+    if (response.length > 0) {
+      return response;
+    }
+
+    const resultResponse = this.readRawText(event.result?.response);
+
+    if (resultResponse.length > 0) {
+      return resultResponse;
+    }
+
+    const resultText = this.readRawText(event.result?.text);
+
+    if (resultText.length > 0) {
+      return resultText;
+    }
+
+    const directText = this.readRawText(event.text);
+
+    if (directText.length > 0) {
+      return directText;
+    }
+
+    const directOutput = this.readRawText(event.output);
+
+    if (directOutput.length > 0) {
+      return directOutput;
+    }
+
+    const choice = event.choices?.[0];
+
+    const deltaContent = this.readRawText(choice?.delta?.content);
+
+    if (deltaContent.length > 0) {
+      return deltaContent;
+    }
+
+    const messageContent = choice?.message?.content;
+
+    if (typeof messageContent === 'string') {
+      return messageContent;
+    }
+
+    const choiceText = this.readRawText(choice?.text);
+
+    if (choiceText.length > 0) {
+      return choiceText;
+    }
+
+    return '';
+  }
+
+  private readRawText(value: string | null | undefined): string {
+    return typeof value === 'string' ? value : '';
   }
 
   private parseStreamPayload(payload: string): CloudflareStreamEvent | null {
