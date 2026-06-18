@@ -7,6 +7,7 @@ export class CallParticipant {
   socketId?: string;
   socketIds!: string[];
   isConnected!: boolean;
+  reconnectDeadlineAt?: Date;
   joinedAt!: Date;
 
   constructor(partial: Partial<CallParticipant>) {
@@ -14,6 +15,12 @@ export class CallParticipant {
     this.socketIds = this.normalizeSocketIds(partial);
     this.socketId = partial.socketId ?? this.socketIds[0];
     this.isConnected = partial.isConnected ?? false;
+    this.reconnectDeadlineAt =
+      partial.reconnectDeadlineAt instanceof Date
+        ? partial.reconnectDeadlineAt
+        : partial.reconnectDeadlineAt
+          ? new Date(partial.reconnectDeadlineAt)
+          : undefined;
     this.joinedAt =
       partial.joinedAt instanceof Date
         ? partial.joinedAt

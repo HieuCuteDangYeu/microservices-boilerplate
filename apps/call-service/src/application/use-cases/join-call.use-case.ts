@@ -66,13 +66,23 @@ export class JoinCallUseCase {
     session.updatedAt = now;
     await this.sessionRepository.save(session);
 
+    const existingParticipant = await this.stateRepository.getParticipant(
+      callId,
+      userId,
+    );
+    const socketIds = [
+      ...new Set([...(existingParticipant?.socketIds ?? []), socketId]),
+    ];
+
     await this.stateRepository.upsertParticipant(
       new CallParticipant({
         userId,
         callId,
         role,
         socketId,
+        socketIds,
         isConnected: true,
+        reconnectDeadlineAt: undefined,
         joinedAt: now,
       }),
     );

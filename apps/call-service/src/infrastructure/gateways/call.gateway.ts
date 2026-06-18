@@ -1,5 +1,5 @@
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
-import { Inject, Logger } from '@nestjs/common';
+import { ForbiddenException, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import {
   ConnectedSocket,
@@ -22,7 +22,9 @@ import { LeaveCallUseCase } from '../../application/use-cases/leave-call.use-cas
 import { ProduceUseCase } from '../../application/use-cases/produce.use-case';
 import { RejectCallUseCase } from '../../application/use-cases/reject-call.use-case';
 import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
+import { CallParticipant } from '../../domain/entities/call-participant.entity';
 import type { CallSession } from '../../domain/entities/call-session.entity';
+import type { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
 import type { ICallStateRepository } from '../../domain/interfaces/call-state.repository.interface';
 
 type InitiateCallPayload = {
@@ -32,6 +34,10 @@ type InitiateCallPayload = {
 };
 
 type JoinCallPayload = {
+  callId: string;
+};
+
+type RejoinCallPayload = {
   callId: string;
 };
 
@@ -75,6 +81,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
 
   private readonly logger = new Logger(CallGateway.name);
+  private readonly reconnectGraceMs = Number(
+    process.env.CALL_RECONNECT_GRACE_MS || 15000,
+  );
+  private readonly pendingDisconnects = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
   constructor(
     private readonly initiateCallUseCase: InitiateCallUseCase,
@@ -87,6 +100,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly rejectCallUseCase: RejectCallUseCase,
     private readonly answerCallUseCase: AnswerCallUseCase,
     private readonly resumeConsumerUseCase: ResumeConsumerUseCase,
+    @Inject('ICallSessionRepository')
+    private readonly sessionRepository: ICallSessionRepository,
     @Inject('ICallStateRepository')
     private readonly stateRepository: ICallStateRepository,
     @Inject('AUTH_SERVICE_RMQ') private readonly authClient: ClientProxy,
@@ -112,27 +127,62 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const callIds = this.getTrackedCallIds(client);
     for (const callId of callIds) {
       try {
-        const participant = await this.stateRepository.removeParticipantSocket(
+        const session = await this.sessionRepository.findByCallId(callId);
+        if (!session) {
+          continue;
+        }
+
+        const participant = await this.stateRepository.getParticipant(
           callId,
           userId,
-          client.id,
         );
 
         if (!participant) {
           continue;
         }
 
-        if (participant.isConnected) {
+        const remainingSocketIds = participant.socketIds.filter(
+          (socketId) => socketId !== client.id,
+        );
+
+        if (remainingSocketIds.length > 0) {
+          await this.stateRepository.upsertParticipant(
+            new CallParticipant({
+              ...participant,
+              socketId: remainingSocketIds[0],
+              socketIds: remainingSocketIds,
+              isConnected: true,
+              reconnectDeadlineAt: undefined,
+            }),
+          );
           continue;
         }
 
+        if (session.status === 'active') {
+          const reconnectDeadlineAt = new Date(
+            Date.now() + this.reconnectGraceMs,
+          );
+          await this.stateRepository.upsertParticipant(
+            new CallParticipant({
+              ...participant,
+              socketIds: [],
+              socketId: undefined,
+              isConnected: false,
+              reconnectDeadlineAt,
+            }),
+          );
+          this.scheduleDisconnectFinalization(callId, userId);
+          continue;
+        }
+
+        await this.stateRepository.removeParticipant(callId, userId);
         const result = await this.leaveCallUseCase.execute(
           callId,
           userId,
           'disconnected',
         );
         if (result.shouldEmitPeerLeft) {
-          client.to(callId).emit('peer_left', {
+          this.server.to(callId).emit('peer_left', {
             callId,
             userId,
             reason: 'disconnected',
@@ -214,6 +264,49 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId,
       });
     }
+  }
+
+  @SubscribeMessage('rejoin_call')
+  async handleRejoinCall(
+    @MessageBody() payload: RejoinCallPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = await this.resolveUserId(client);
+    if (!userId) return;
+
+    const session = await this.sessionRepository.findByCallId(payload.callId);
+    if (!session) {
+      throw new NotFoundException('Call not found');
+    }
+
+    if (session.status !== 'active') {
+      throw new ForbiddenException('Call is not recoverable');
+    }
+
+    const participant = await this.stateRepository.getParticipant(
+      payload.callId,
+      userId,
+    );
+    if (!participant) {
+      throw new ForbiddenException('You are not part of this call');
+    }
+
+    const result = await this.joinCallUseCase.execute(
+      payload.callId,
+      userId,
+      client.id,
+    );
+
+    await client.join(payload.callId);
+    this.trackCallId(client, payload.callId);
+    this.clearPendingDisconnect(payload.callId, userId);
+
+    client.emit('call_rejoined', {
+      callId: payload.callId,
+      role: result.role,
+      session: result.session,
+      rtpCapabilities: result.rtpCapabilities,
+    });
   }
 
   @SubscribeMessage('create_transport')
@@ -359,6 +452,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       payload.reason,
     );
 
+    this.clearPendingDisconnect(payload.callId, userId);
     this.untrackCallId(client, payload.callId);
     if (result.shouldEmitPeerLeft) {
       client.to(payload.callId).emit('peer_left', {
@@ -383,6 +477,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId,
       payload.reason,
     );
+    this.clearPendingDisconnect(payload.callId, userId);
     this.untrackCallId(client, payload.callId);
 
     client.to(payload.callId).emit('call_rejected', {
@@ -393,6 +488,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private emitCallEnded(session: CallSession, reason: string): void {
+    this.clearPendingDisconnect(session.callId, session.initiatorId);
+    this.clearPendingDisconnect(session.callId, session.targetUserId);
     this.server.to(session.callId).emit('call_ended', {
       callId: session.callId,
       reason,
@@ -404,6 +501,70 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         reason,
       });
     }
+  }
+
+  private scheduleDisconnectFinalization(callId: string, userId: string): void {
+    this.clearPendingDisconnect(callId, userId);
+
+    const timeoutId = setTimeout(() => {
+      void (async () => {
+        try {
+          const participant = await this.stateRepository.getParticipant(
+            callId,
+            userId,
+          );
+
+          if (
+            !participant ||
+            participant.isConnected ||
+            !participant.reconnectDeadlineAt ||
+            participant.reconnectDeadlineAt.getTime() > Date.now()
+          ) {
+            return;
+          }
+
+          await this.stateRepository.removeParticipant(callId, userId);
+          const result = await this.leaveCallUseCase.execute(
+            callId,
+            userId,
+            'disconnected',
+          );
+          if (result.shouldEmitPeerLeft) {
+            this.server.to(callId).emit('peer_left', {
+              callId,
+              userId,
+              reason: 'disconnected',
+            });
+          }
+          this.emitCallEnded(result.session, result.endedReason);
+        } catch (error) {
+          this.logger.warn(
+            `Deferred disconnect cleanup failed for call ${callId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        } finally {
+          this.clearPendingDisconnect(callId, userId);
+        }
+      })();
+    }, this.reconnectGraceMs);
+
+    this.pendingDisconnects.set(this.disconnectKey(callId, userId), timeoutId);
+  }
+
+  private clearPendingDisconnect(callId: string, userId: string): void {
+    const key = this.disconnectKey(callId, userId);
+    const timeoutId = this.pendingDisconnects.get(key);
+    if (!timeoutId) {
+      return;
+    }
+
+    clearTimeout(timeoutId);
+    this.pendingDisconnects.delete(key);
+  }
+
+  private disconnectKey(callId: string, userId: string): string {
+    return `${callId}:${userId}`;
   }
 
   private trackCallId(client: Socket, callId: string): void {

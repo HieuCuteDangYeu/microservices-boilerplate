@@ -418,6 +418,11 @@ describe('Call Service P0 flow (e2e)', () => {
     email: 'callee@example.com',
     roles: ['USER'],
   };
+  const outsiderUser: AuthUser = {
+    id: 'outsider-user',
+    email: 'outsider@example.com',
+    roles: ['USER'],
+  };
   const validRtpCapabilities = {
     codecs: [{ mimeType: 'audio/opus' }, { mimeType: 'video/VP8' }],
     headerExtensions: [{ uri: 'urn:ietf:params:rtp-hdrext:sdes:mid' }],
@@ -431,8 +436,10 @@ describe('Call Service P0 flow (e2e)', () => {
   let mediaEngine: FakeCallMediaEngine;
   let baseUrl: string;
   const sockets: Socket[] = [];
+  const originalReconnectGraceMs = process.env.CALL_RECONNECT_GRACE_MS;
 
   beforeEach(async () => {
+    process.env.CALL_RECONNECT_GRACE_MS = '50';
     redis = new FakeRedisClient();
     eventPublisher = new FakeCallEventPublisher();
     mediaEngine = new FakeCallMediaEngine();
@@ -447,6 +454,7 @@ describe('Call Service P0 flow (e2e)', () => {
         new FakeAuthClient({
           'caller-token': callerUser,
           'callee-token': calleeUser,
+          'outsider-token': outsiderUser,
         }),
       )
       .overrideProvider('CONVERSATION_SERVICE_RMQ')
@@ -508,6 +516,7 @@ describe('Call Service P0 flow (e2e)', () => {
     redis.reset();
     eventPublisher.reset();
     mediaEngine.reset();
+    process.env.CALL_RECONNECT_GRACE_MS = originalReconnectGraceMs;
   });
 
   it('disconnects clients with missing or invalid tokens and joins valid clients to private rooms', async () => {
@@ -754,7 +763,42 @@ describe('Call Service P0 flow (e2e)', () => {
     ).toBeDefined();
   });
 
-  it('ends an active call when one side disconnects and clears redis/media state', async () => {
+  it('fails fast when a ringing call disconnects before answer', async () => {
+    const { caller, callee, callId } = await establishRingingCall();
+
+    const callEnded = onceEvent<{ callId: string; reason: string }>(
+      callee,
+      'call_ended',
+    );
+
+    const callerDisconnected = waitForDisconnect(caller);
+    caller.disconnect();
+    await callerDisconnected;
+
+    await expect(callEnded).resolves.toEqual({
+      callId,
+      reason: 'disconnected',
+    });
+    await expectCallStateCleared(callId);
+  });
+
+  it('rejects rejoin attempts for calls that are not active', async () => {
+    const { caller, callId } = await establishRingingCall();
+
+    const exception = onceEvent<{ status: string; message: string }>(
+      caller,
+      'exception',
+    );
+    caller.emit('rejoin_call', { callId });
+
+    await expect(exception).resolves.toEqual(
+      expect.objectContaining({
+        status: 'error',
+      }),
+    );
+  });
+
+  it('ends an active call after the reconnect grace window expires', async () => {
     const { caller, callee, callId } = await establishActiveCall();
 
     const callEnded = onceEvent<{ callId: string; reason: string }>(
@@ -762,7 +806,20 @@ describe('Call Service P0 flow (e2e)', () => {
       'call_ended',
     );
 
+    const callerDisconnected = waitForDisconnect(caller);
     caller.disconnect();
+    await callerDisconnected;
+
+    expect(await redis.get(`call:${callId}:session`)).not.toBeNull();
+    const disconnectedParticipant = await waitForStoredParticipant(
+      callId,
+      callerUser.id,
+      (participant) =>
+        participant?.isConnected === false &&
+        typeof participant.reconnectDeadlineAt === 'string',
+    );
+    expect(disconnectedParticipant?.isConnected).toBe(false);
+    expect(disconnectedParticipant?.reconnectDeadlineAt).toBeDefined();
 
     await expect(callEnded).resolves.toEqual({
       callId,
@@ -780,6 +837,96 @@ describe('Call Service P0 flow (e2e)', () => {
     ).toBeDefined();
   });
 
+  it('rejoins an active call within the reconnect grace window', async () => {
+    const { caller, callee, callId } = await establishActiveCall();
+
+    const unexpectedCallEnded = waitForOptionalEvent(callee, 'call_ended', 120);
+    const callerDisconnected = waitForDisconnect(caller);
+    caller.disconnect();
+    await callerDisconnected;
+
+    await waitForStoredParticipant(
+      callId,
+      callerUser.id,
+      (participant) =>
+        participant?.isConnected === false &&
+        typeof participant.reconnectDeadlineAt === 'string',
+    );
+
+    const callerReconnected = await connectClient('caller-token');
+    const callRejoined = onceEvent<{
+      callId: string;
+      session: { status: string };
+    }>(callerReconnected, 'call_rejoined');
+    callerReconnected.emit('rejoin_call', { callId });
+
+    await expect(callRejoined).resolves.toEqual(
+      expect.objectContaining({
+        callId,
+        session: expect.objectContaining({
+          status: 'active',
+        }),
+      }),
+    );
+    await expect(unexpectedCallEnded).resolves.toBeNull();
+
+    const participantAfterRejoin = await waitForStoredParticipant(
+      callId,
+      callerUser.id,
+      (participant) =>
+        participant?.isConnected === true &&
+        participant.socketIds?.length === 1 &&
+        participant.reconnectDeadlineAt === undefined,
+    );
+    expect(participantAfterRejoin?.isConnected).toBe(true);
+    expect(participantAfterRejoin?.socketIds).toHaveLength(1);
+    expect(participantAfterRejoin?.reconnectDeadlineAt).toBeUndefined();
+    expect(await redis.get(`call:${callId}:session`)).not.toBeNull();
+  });
+
+  it('rejects rejoin attempts after the reconnect grace window has already expired', async () => {
+    const { caller, callee, callId } = await establishActiveCall();
+
+    const callEnded = onceEvent<{ callId: string; reason: string }>(
+      callee,
+      'call_ended',
+    );
+    const callerDisconnected = waitForDisconnect(caller);
+    caller.disconnect();
+    await callerDisconnected;
+    await callEnded;
+
+    const callerReconnected = await connectClient('caller-token');
+    const exception = onceEvent<{ status: string; message: string }>(
+      callerReconnected,
+      'exception',
+    );
+    callerReconnected.emit('rejoin_call', { callId });
+
+    await expect(exception).resolves.toEqual(
+      expect.objectContaining({
+        status: 'error',
+      }),
+    );
+  });
+
+  it('rejects rejoin attempts from users outside the active call', async () => {
+    const { callId } = await establishActiveCall();
+    const outsider = await connectClient('outsider-token');
+
+    const exception = onceEvent<{ status: string; message: string }>(
+      outsider,
+      'exception',
+    );
+    outsider.emit('rejoin_call', { callId });
+
+    await expect(exception).resolves.toEqual(
+      expect.objectContaining({
+        status: 'error',
+      }),
+    );
+  });
+
   it('keeps the call active when one socket disconnects but the same user still has another socket in the call', async () => {
     const { caller, callee, callId } = await establishActiveCall();
     const callerSecondSocket = await connectClient('caller-token');
@@ -795,14 +942,18 @@ describe('Call Service P0 flow (e2e)', () => {
     expect(participantBeforeDisconnect?.socketIds).toHaveLength(2);
 
     const unexpectedCallEnded = waitForOptionalEvent(callee, 'call_ended', 300);
+    const callerDisconnected = waitForDisconnect(caller);
     caller.disconnect();
+    await callerDisconnected;
 
     await expect(unexpectedCallEnded).resolves.toBeNull();
     expect(await redis.get(`call:${callId}:session`)).not.toBeNull();
 
-    const participantAfterDisconnect = await getStoredParticipant(
+    const participantAfterDisconnect = await waitForStoredParticipant(
       callId,
       callerUser.id,
+      (participant) =>
+        participant?.socketIds?.length === 1 && participant.isConnected === true,
     );
     expect(participantAfterDisconnect?.socketIds).toHaveLength(1);
     expect(participantAfterDisconnect?.isConnected).toBe(true);
@@ -835,6 +986,30 @@ describe('Call Service P0 flow (e2e)', () => {
     );
     callee.emit('answer_call', { callId });
     await callAnswered;
+
+    return { caller, callee, callId };
+  }
+
+  async function establishRingingCall() {
+    const caller = await connectClient('caller-token');
+    const callee = await connectClient('callee-token');
+
+    const callerJoined = onceEvent<{ callId: string }>(caller, 'call_joined');
+    const incomingCall = onceEvent<{ callId: string }>(callee, 'incoming_call');
+
+    caller.emit('initiate_call', {
+      conversationId: 'conv-active',
+      targetUserId: calleeUser.id,
+      callType: 'VIDEO',
+    });
+
+    const [{ callId }] = await Promise.all([callerJoined, incomingCall]);
+
+    const callerRejoin = onceEvent(caller, 'call_joined');
+    const calleeJoin = onceEvent(callee, 'call_joined');
+    caller.emit('join_call', { callId });
+    callee.emit('join_call', { callId });
+    await Promise.all([callerRejoin, calleeJoin]);
 
     return { caller, callee, callId };
   }
@@ -889,11 +1064,32 @@ describe('Call Service P0 flow (e2e)', () => {
       userId: string;
       socketIds?: string[];
       isConnected?: boolean;
+      reconnectDeadlineAt?: string;
     };
   }
 
+  async function waitForStoredParticipant(
+    callId: string,
+    userId: string,
+    predicate: (participant: Awaited<ReturnType<typeof getStoredParticipant>>) => boolean,
+    timeoutMs = 500,
+  ) {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() <= deadline) {
+      const participant = await getStoredParticipant(callId, userId);
+      if (predicate(participant)) {
+        return participant;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    return getStoredParticipant(callId, userId);
+  }
+
   function createClient(token?: string): Socket {
-    const socket = io(baseUrl, {
+    const socket = io(`${baseUrl}/call`, {
       autoConnect: false,
       transports: ['websocket'],
       reconnection: false,

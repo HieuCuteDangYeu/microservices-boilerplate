@@ -116,6 +116,7 @@ export class InitiateCallUseCase {
         role: 'host',
         socketId,
         isConnected: true,
+        reconnectDeadlineAt: undefined,
         joinedAt: now,
       }),
     );

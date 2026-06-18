@@ -5,6 +5,7 @@ import { CreateTransportUseCase } from './create-transport.use-case';
 import { InitiateCallUseCase } from './initiate-call.use-case';
 import { JoinCallUseCase } from './join-call.use-case';
 import { LeaveCallUseCase } from './leave-call.use-case';
+import { CallParticipant } from '../../domain/entities/call-participant.entity';
 import { CallSession } from '../../domain/entities/call-session.entity';
 
 describe('Call lifecycle use cases', () => {
@@ -25,6 +26,7 @@ describe('Call lifecycle use cases', () => {
       save: jest.fn((session: CallSession) => Promise.resolve(session)),
     };
     const stateRepository = {
+      getParticipant: jest.fn().mockResolvedValue(null),
       upsertParticipant: jest.fn(),
     };
     const eventPublisher = {
@@ -176,6 +178,7 @@ describe('Call lifecycle use cases', () => {
       save: jest.fn((session: CallSession) => Promise.resolve(session)),
     };
     const stateRepository = {
+      getParticipant: jest.fn().mockResolvedValue(null),
       upsertParticipant: jest.fn(),
     };
     const mediaEngine = {
@@ -201,6 +204,61 @@ describe('Call lifecycle use cases', () => {
       expect.objectContaining({
         status: 'ringing',
         participantIds: ['user-a', 'user-b'],
+      }),
+    );
+  });
+
+  it('merges socket ids and clears reconnect state when an existing participant rejoins', async () => {
+    const sessionRepository = {
+      findByCallId: jest.fn().mockResolvedValue(
+        new CallSession({
+          ...baseSession,
+          status: 'active',
+          participantIds: ['user-a', 'user-b'],
+        }),
+      ),
+      save: jest.fn((session: CallSession) => Promise.resolve(session)),
+    };
+    const stateRepository = {
+      getParticipant: jest.fn().mockResolvedValue(
+        new CallParticipant({
+          userId: 'user-a',
+          callId: 'call-1',
+          role: 'host',
+          socketId: 'socket-1',
+          socketIds: ['socket-1'],
+          isConnected: false,
+          reconnectDeadlineAt: new Date('2026-01-01T00:00:10.000Z'),
+          joinedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+      ),
+      upsertParticipant: jest.fn(),
+    };
+    const mediaEngine = {
+      getRouterRtpCapabilities: jest.fn().mockResolvedValue({
+        codecs: [],
+        headerExtensions: [],
+      }),
+    };
+
+    const useCase = new JoinCallUseCase(
+      sessionRepository as never,
+      stateRepository as never,
+      mediaEngine as never,
+    );
+
+    const result = await useCase.execute('call-1', 'user-a', 'socket-2');
+
+    expect(result.role).toBe('host');
+    expect(result.shouldEmitNewPeer).toBe(false);
+    expect(stateRepository.upsertParticipant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-a',
+        callId: 'call-1',
+        socketId: 'socket-2',
+        socketIds: ['socket-1', 'socket-2'],
+        isConnected: true,
+        reconnectDeadlineAt: undefined,
       }),
     );
   });

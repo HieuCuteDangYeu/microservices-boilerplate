@@ -34,15 +34,14 @@ export class RedisCallStateRepository implements ICallStateRepository {
       participant.callId,
       participant.userId,
     );
-    const mergedSocketIds = [
-      ...(existing?.socketIds ?? []),
-      ...participant.socketIds,
-    ];
     const nextParticipant = new CallParticipant({
       ...existing,
       ...participant,
-      socketIds: [...new Set(mergedSocketIds)],
-      isConnected: true,
+      socketIds: participant.socketIds,
+      isConnected:
+        participant.isConnected ??
+        existing?.isConnected ??
+        participant.socketIds.length > 0,
     });
     const key = this.participantKey(participant.callId);
     await this.redis.hset(
