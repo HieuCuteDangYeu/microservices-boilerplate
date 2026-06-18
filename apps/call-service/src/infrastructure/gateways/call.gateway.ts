@@ -77,7 +77,13 @@ type ResumeConsumerPayload = {
   consumerId: string;
 };
 
-@WebSocketGateway({ namespace: '/call', cors: { origin: '*' } })
+@WebSocketGateway({
+  namespace: '/call',
+  cors: { origin: '*' },
+  // Keep disconnect detection tight so the connected peer enters reconnecting quickly.
+  pingInterval: 5000,
+  pingTimeout: 5000,
+})
 export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
 
