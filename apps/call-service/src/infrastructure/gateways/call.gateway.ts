@@ -23,6 +23,7 @@ import { ProduceUseCase } from '../../application/use-cases/produce.use-case';
 import { RejectCallUseCase } from '../../application/use-cases/reject-call.use-case';
 import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
+import type { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
 import type { CallSession } from '../../domain/entities/call-session.entity';
 import type { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
 import type { ICallStateRepository } from '../../domain/interfaces/call-state.repository.interface';
@@ -100,6 +101,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly rejectCallUseCase: RejectCallUseCase,
     private readonly answerCallUseCase: AnswerCallUseCase,
     private readonly resumeConsumerUseCase: ResumeConsumerUseCase,
+    @Inject('ICallMediaEngine')
+    private readonly mediaEngine: ICallMediaEngine,
     @Inject('ICallSessionRepository')
     private readonly sessionRepository: ICallSessionRepository,
     @Inject('ICallStateRepository')
@@ -171,6 +174,11 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
               reconnectDeadlineAt,
             }),
           );
+          client.to(callId).emit('peer_reconnecting', {
+            callId,
+            userId,
+            reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
+          });
           this.scheduleDisconnectFinalization(callId, userId);
           continue;
         }
@@ -306,6 +314,25 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: result.role,
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
+    });
+
+    client.to(payload.callId).emit('peer_reconnected', {
+      callId: payload.callId,
+      userId,
+    });
+
+    const activePeerProducers = await this.mediaEngine.listActiveProducers(
+      payload.callId,
+      userId,
+    );
+
+    activePeerProducers.forEach((producer) => {
+      client.emit('new_producer', {
+        callId: payload.callId,
+        userId: producer.userId,
+        producerId: producer.producerId,
+        kind: producer.kind,
+      });
     });
   }
 

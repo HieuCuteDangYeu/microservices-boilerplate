@@ -18,6 +18,12 @@ export interface ProducedMediaResult {
   producerId: string;
 }
 
+export interface ActiveProducerResult {
+  producerId: string;
+  userId: string;
+  kind: 'audio' | 'video';
+}
+
 export interface ConsumedMediaResult {
   consumerId: string;
   producerId: string;
@@ -68,5 +74,9 @@ export abstract class ICallMediaEngine {
     userId: string,
     consumerId: string,
   ): Promise<void>;
+  abstract listActiveProducers(
+    callId: string,
+    excludingUserId?: string,
+  ): Promise<ActiveProducerResult[]>;
   abstract closeRoom(callId: string): Promise<void>;
 }

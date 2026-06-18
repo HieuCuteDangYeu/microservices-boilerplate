@@ -70,6 +70,7 @@ describe('CallGateway reconnect recovery', () => {
       },
       stateRepository,
     });
+    const peerEmitter = { emit: jest.fn() };
     const roomEmitter = { emit: jest.fn() };
     gateway.server = {
       to: jest.fn().mockReturnValue(roomEmitter),
@@ -80,6 +81,7 @@ describe('CallGateway reconnect recovery', () => {
         id: 'socket-1',
         userId: 'user-a',
         callIds: ['call-1'],
+        to: jest.fn().mockReturnValue(peerEmitter),
       }),
     );
 
@@ -91,6 +93,11 @@ describe('CallGateway reconnect recovery', () => {
         isConnected: false,
       }),
     );
+    expect(peerEmitter.emit).toHaveBeenNthCalledWith(1, 'peer_reconnecting', {
+      callId: 'call-1',
+      userId: 'user-a',
+      reconnectDeadlineAt: '2026-01-01T00:00:15.000Z',
+    });
     expect(leaveCallUseCase.execute).not.toHaveBeenCalled();
 
     await jest.advanceTimersByTimeAsync(15000);
@@ -115,7 +122,7 @@ describe('CallGateway reconnect recovery', () => {
     });
   });
 
-  it('clears the pending disconnect timeout after a successful rejoin', async () => {
+  it('clears the pending disconnect timeout, notifies the peer, and replays active producers after a successful rejoin', async () => {
     const joinCallUseCase = {
       execute: jest.fn().mockResolvedValue({
         role: 'host',
@@ -157,14 +164,25 @@ describe('CallGateway reconnect recovery', () => {
     const sessionRepository = {
       findByCallId: jest.fn().mockResolvedValue(activeSession),
     };
+    const mediaEngine = {
+      listActiveProducers: jest.fn().mockResolvedValue([
+        {
+          producerId: 'producer-1',
+          userId: 'user-b',
+          kind: 'audio',
+        },
+      ]),
+    };
+    const peerEmitter = { emit: jest.fn() };
     const gateway = createGateway({
       joinCallUseCase,
       leaveCallUseCase,
+      mediaEngine,
       sessionRepository,
       stateRepository,
     });
     gateway.server = {
-      to: jest.fn().mockReturnValue({ emit: jest.fn() }),
+      to: jest.fn().mockReturnValue(peerEmitter),
     } as never;
 
     await gateway.handleDisconnect(
@@ -172,6 +190,7 @@ describe('CallGateway reconnect recovery', () => {
         id: 'socket-1',
         userId: 'user-a',
         callIds: ['call-1'],
+        to: jest.fn().mockReturnValue(peerEmitter),
       }),
     );
 
@@ -180,6 +199,7 @@ describe('CallGateway reconnect recovery', () => {
       userId: 'user-a',
       emit: jest.fn(),
       join: jest.fn().mockResolvedValue(undefined),
+      to: jest.fn().mockReturnValue(peerEmitter),
     });
 
     await gateway.handleRejoinCall({ callId: 'call-1' }, rejoiningSocket);
@@ -199,6 +219,20 @@ describe('CallGateway reconnect recovery', () => {
         }),
       }),
     );
+    expect(peerEmitter.emit).toHaveBeenCalledWith('peer_reconnected', {
+      callId: 'call-1',
+      userId: 'user-a',
+    });
+    expect(mediaEngine.listActiveProducers).toHaveBeenCalledWith(
+      'call-1',
+      'user-a',
+    );
+    expect(rejoiningSocket.emit).toHaveBeenCalledWith('new_producer', {
+      callId: 'call-1',
+      userId: 'user-b',
+      producerId: 'producer-1',
+      kind: 'audio',
+    });
     expect(leaveCallUseCase.execute).not.toHaveBeenCalled();
     expect(stateRepository.removeParticipant).not.toHaveBeenCalled();
   });
@@ -207,6 +241,7 @@ describe('CallGateway reconnect recovery', () => {
 function createGateway(overrides?: {
   joinCallUseCase?: { execute: jest.Mock };
   leaveCallUseCase?: { execute: jest.Mock };
+  mediaEngine?: { listActiveProducers: jest.Mock };
   sessionRepository?: { findByCallId: jest.Mock };
   stateRepository?: {
     getParticipant: jest.Mock;
@@ -225,6 +260,9 @@ function createGateway(overrides?: {
     {} as never,
     {} as never,
     {} as never,
+    (overrides?.mediaEngine ?? {
+      listActiveProducers: jest.fn().mockResolvedValue([]),
+    }) as never,
     (overrides?.sessionRepository ?? {
       findByCallId: jest.fn(),
     }) as never,
@@ -243,6 +281,7 @@ function createSocket(input: {
   callIds: string[];
   emit?: jest.Mock;
   join?: jest.Mock;
+  to?: jest.Mock;
 }) {
   return {
     id: input.id,
@@ -252,5 +291,6 @@ function createSocket(input: {
     },
     emit: input.emit ?? jest.fn(),
     join: input.join ?? jest.fn().mockResolvedValue(undefined),
+    to: input.to ?? jest.fn().mockReturnValue({ emit: jest.fn() }),
   } as unknown as Socket;
 }

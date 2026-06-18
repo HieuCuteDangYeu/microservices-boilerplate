@@ -7,6 +7,7 @@ import { CallGateway } from '../src/infrastructure/gateways/call.gateway';
 import { CallServiceModule } from '../src/call-service.module';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import type {
+  ActiveProducerResult,
   ConsumedMediaResult,
   CreateRecvTransportResult,
   CreateSendTransportResult,
@@ -327,6 +328,26 @@ class FakeCallMediaEngine {
     }
     consumer.paused = false;
     return Promise.resolve();
+  }
+
+  listActiveProducers(
+    callId: string,
+    excludingUserId?: string,
+  ): Promise<ActiveProducerResult[]> {
+    const room = this.getRoom(callId);
+
+    return Promise.resolve(
+      [...room.producers.entries()]
+        .filter(([, producer]) => !producer.closed)
+        .map(([producerId, producer]) => ({
+          producerId,
+          userId: producer.userId,
+          kind: producer.kind,
+        }))
+        .filter((producer) =>
+          excludingUserId ? producer.userId !== excludingUserId : true,
+        ),
+    );
   }
 
   closeRoom(callId: string): Promise<void> {
@@ -839,11 +860,41 @@ describe('Call Service P0 flow (e2e)', () => {
 
   it('rejoins an active call within the reconnect grace window', async () => {
     const { caller, callee, callId } = await establishActiveCall();
+    const calleeSendTransport = await createAndConnectTransport(
+      callee,
+      callId,
+      'send',
+    );
 
+    const initialProducerNotice = onceEvent<{
+      callId: string;
+      userId: string;
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(caller, 'new_producer');
+    callee.emit('produce', {
+      callId,
+      transportId: calleeSendTransport.transportId,
+      kind: 'audio',
+      rtpParameters: { codecs: validRtpCapabilities.codecs },
+    });
+    const producedByCallee = await initialProducerNotice;
+
+    const peerReconnecting = onceEvent<{
+      callId: string;
+      userId: string;
+      reconnectDeadlineAt: string;
+    }>(callee, 'peer_reconnecting');
     const unexpectedCallEnded = waitForOptionalEvent(callee, 'call_ended', 120);
     const callerDisconnected = waitForDisconnect(caller);
     caller.disconnect();
     await callerDisconnected;
+
+    await expect(peerReconnecting).resolves.toEqual({
+      callId,
+      userId: callerUser.id,
+      reconnectDeadlineAt: expect.any(String),
+    });
 
     await waitForStoredParticipant(
       callId,
@@ -858,6 +909,16 @@ describe('Call Service P0 flow (e2e)', () => {
       callId: string;
       session: { status: string };
     }>(callerReconnected, 'call_rejoined');
+    const replayedProducer = onceEvent<{
+      callId: string;
+      userId: string;
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(callerReconnected, 'new_producer');
+    const peerReconnected = onceEvent<{ callId: string; userId: string }>(
+      callee,
+      'peer_reconnected',
+    );
     callerReconnected.emit('rejoin_call', { callId });
 
     await expect(callRejoined).resolves.toEqual(
@@ -868,6 +929,16 @@ describe('Call Service P0 flow (e2e)', () => {
         }),
       }),
     );
+    await expect(replayedProducer).resolves.toEqual({
+      callId,
+      userId: calleeUser.id,
+      producerId: producedByCallee.producerId,
+      kind: 'audio',
+    });
+    await expect(peerReconnected).resolves.toEqual({
+      callId,
+      userId: callerUser.id,
+    });
     await expect(unexpectedCallEnded).resolves.toBeNull();
 
     const participantAfterRejoin = await waitForStoredParticipant(

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import * as mediasoup from 'mediasoup';
 import type {
+  ActiveProducerResult,
   ConsumedMediaResult,
   CreateRecvTransportResult,
   CreateSendTransportResult,
@@ -312,6 +313,29 @@ export class MediasoupCallMediaEngine
     }
 
     await consumer.resume();
+  }
+
+  listActiveProducers(
+    callId: string,
+    excludingUserId?: string,
+  ): Promise<ActiveProducerResult[]> {
+    const room = this.getRoomOrThrow(callId);
+
+    return Promise.resolve(
+      [...room.producerMeta.entries()]
+        .filter(([producerId, meta]) => {
+          if (excludingUserId && meta.userId === excludingUserId) {
+            return false;
+          }
+
+          return room.producers.has(producerId);
+        })
+        .map(([producerId, meta]) => ({
+          producerId,
+          userId: meta.userId,
+          kind: meta.kind,
+        })),
+    );
   }
 
   closeRoom(callId: string): Promise<void> {
