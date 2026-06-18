@@ -93,7 +93,7 @@ describe('CallGateway reconnect recovery', () => {
         isConnected: false,
       }),
     );
-    expect(peerEmitter.emit).toHaveBeenNthCalledWith(1, 'peer_reconnecting', {
+    expect(roomEmitter.emit).toHaveBeenNthCalledWith(1, 'peer_reconnecting', {
       callId: 'call-1',
       userId: 'user-a',
       reconnectDeadlineAt: '2026-01-01T00:00:15.000Z',
@@ -111,12 +111,12 @@ describe('CallGateway reconnect recovery', () => {
       'user-a',
       'disconnected',
     );
-    expect(roomEmitter.emit).toHaveBeenNthCalledWith(1, 'peer_left', {
+    expect(roomEmitter.emit).toHaveBeenNthCalledWith(2, 'peer_left', {
       callId: 'call-1',
       userId: 'user-a',
       reason: 'disconnected',
     });
-    expect(roomEmitter.emit).toHaveBeenNthCalledWith(2, 'call_ended', {
+    expect(roomEmitter.emit).toHaveBeenNthCalledWith(3, 'call_ended', {
       callId: 'call-1',
       reason: 'disconnected',
     });
@@ -235,6 +235,47 @@ describe('CallGateway reconnect recovery', () => {
     });
     expect(leaveCallUseCase.execute).not.toHaveBeenCalled();
     expect(stateRepository.removeParticipant).not.toHaveBeenCalled();
+  });
+
+  it('rejects rejoin when the reconnect deadline has already expired', async () => {
+    const joinCallUseCase = {
+      execute: jest.fn(),
+    };
+    const stateRepository = {
+      getParticipant: jest.fn().mockResolvedValue(
+        new CallParticipant({
+          userId: 'user-a',
+          callId: 'call-1',
+          role: 'host',
+          socketIds: [],
+          isConnected: false,
+          reconnectDeadlineAt: new Date('2025-12-31T23:59:59.000Z'),
+          joinedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+      ),
+      upsertParticipant: jest.fn(),
+      removeParticipant: jest.fn(),
+    };
+    const gateway = createGateway({
+      joinCallUseCase,
+      sessionRepository: {
+        findByCallId: jest.fn().mockResolvedValue(activeSession),
+      },
+      stateRepository,
+    });
+
+    await expect(
+      gateway.handleRejoinCall(
+        { callId: 'call-1' },
+        createSocket({
+          id: 'socket-2',
+          userId: 'user-a',
+          emit: jest.fn(),
+          join: jest.fn().mockResolvedValue(undefined),
+        }),
+      ),
+    ).rejects.toThrow('Reconnect window expired');
+    expect(joinCallUseCase.execute).not.toHaveBeenCalled();
   });
 });
 

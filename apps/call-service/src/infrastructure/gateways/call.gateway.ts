@@ -174,7 +174,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
               reconnectDeadlineAt,
             }),
           );
-          client.to(callId).emit('peer_reconnecting', {
+          this.server.to(callId).emit('peer_reconnecting', {
             callId,
             userId,
             reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
@@ -297,6 +297,14 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
     if (!participant) {
       throw new ForbiddenException('You are not part of this call');
+    }
+
+    if (
+      !participant.isConnected &&
+      (!participant.reconnectDeadlineAt ||
+        participant.reconnectDeadlineAt.getTime() <= Date.now())
+    ) {
+      throw new ForbiddenException('Reconnect window expired');
     }
 
     const result = await this.joinCallUseCase.execute(
@@ -482,7 +490,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.clearPendingDisconnect(payload.callId, userId);
     this.untrackCallId(client, payload.callId);
     if (result.shouldEmitPeerLeft) {
-      client.to(payload.callId).emit('peer_left', {
+      this.server.to(payload.callId).emit('peer_left', {
         callId: payload.callId,
         userId,
         reason: result.endedReason,
