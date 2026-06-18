@@ -1,5 +1,10 @@
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
-import { ForbiddenException, Inject, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import {
   ConnectedSocket,
@@ -23,8 +28,8 @@ import { ProduceUseCase } from '../../application/use-cases/produce.use-case';
 import { RejectCallUseCase } from '../../application/use-cases/reject-call.use-case';
 import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
-import type { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
 import type { CallSession } from '../../domain/entities/call-session.entity';
+import type { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
 import type { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
 import type { ICallStateRepository } from '../../domain/interfaces/call-state.repository.interface';
 
@@ -80,7 +85,6 @@ type ResumeConsumerPayload = {
 @WebSocketGateway({
   namespace: '/call',
   cors: { origin: '*' },
-  // Keep disconnect detection tight so the connected peer enters reconnecting quickly.
   pingInterval: 5000,
   pingTimeout: 5000,
 })

@@ -1,7 +1,8 @@
+import { GATEWAY_OPTIONS } from '@nestjs/websockets/constants';
 import type { Socket } from 'socket.io';
-import { CallGateway } from './call.gateway';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
 import { CallSession } from '../../domain/entities/call-session.entity';
+import { CallGateway } from './call.gateway';
 
 describe('CallGateway reconnect recovery', () => {
   const activeSession = new CallSession({
@@ -25,6 +26,14 @@ describe('CallGateway reconnect recovery', () => {
   afterEach(() => {
     jest.useRealTimers();
     delete process.env.CALL_RECONNECT_GRACE_MS;
+  });
+
+  it('uses strict heartbeat settings for the call namespace', () => {
+    expect(Reflect.getMetadata(GATEWAY_OPTIONS, CallGateway)).toMatchObject({
+      namespace: '/call',
+      pingInterval: 5000,
+      pingTimeout: 5000,
+    });
   });
 
   it('defers active-call teardown until the reconnect grace window expires', async () => {
