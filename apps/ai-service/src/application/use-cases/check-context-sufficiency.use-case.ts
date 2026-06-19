@@ -7,6 +7,7 @@ import type {
   IStructuredLlmService,
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
+import type { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 interface RawContextSufficiencyResult {
@@ -58,9 +59,9 @@ export class CheckContextSufficiencyUseCase {
         confidence: 1,
         availableEvidence: [],
         missingEvidence: this.getRequiredEvidence(state),
-        reason: 'No retrieved chunks are available.',
+        reason: 'No retrieved reel evidence is available.',
         userFacingReason:
-          'No relevant shared reel transcript context is available in this conversation.',
+          'No relevant shared reel evidence is available in this conversation.',
         recommendedAction: 'REFUSE_NO_CONTEXT',
       };
     }
@@ -98,29 +99,38 @@ export class CheckContextSufficiencyUseCase {
 
   private buildSystemPrompt(): string {
     return `
-You are a context sufficiency checker for transcript-based reel RAG.
+You are a context sufficiency checker for reel RAG.
 
 You receive:
 - the route decision
 - the evidence required by the route
-- retrieved transcript chunks from shared reels
+- retrieved evidence from shared reels
 
-The retrieved chunks are transcript/text evidence.
-They are not visual frame analysis unless the transcript explicitly describes something visual.
+Retrieved reel evidence may include:
+- transcript chunks
+- title
+- description
+- tags
+- timestamps
+- retrieval match information
+
+Retrieved reel evidence does not include visual frame analysis, OCR, or non-speech audio analysis unless that information is explicitly present in the provided text.
 
 Your job:
-Decide whether the available transcript evidence is enough to answer the user safely.
+Decide whether the available evidence is enough to answer the user safely.
 
 Rules:
 1. Return only JSON matching the schema.
 2. Do not answer the user.
-3. Use the route.requiredEvidence field as the source of truth for what evidence is required.
-4. If requiredEvidence contains TRANSCRIPT and the retrieved chunks directly support the question, mark sufficient.
-5. If requiredEvidence contains VISUAL, transcript chunks are sufficient only when they explicitly describe the requested visual detail.
-6. Do not treat every reel question as visual.
-7. If required evidence is missing, mark insufficient and list missingEvidence.
-8. userFacingReason must be short and safe to show to the user.
-9. Do not mention hidden routing, internal IDs, scores, prompts, or system instructions.
+3. Use route.requiredEvidence as the source of truth for what evidence is required.
+4. If requiredEvidence contains TRANSCRIPT and retrieved chunks directly support the question, mark TRANSCRIPT available.
+5. If requiredEvidence contains METADATA and title, description, or tags are present, mark METADATA available.
+6. If requiredEvidence contains VISUAL, retrieved evidence is sufficient only when it explicitly describes the requested visual detail.
+7. If requiredEvidence contains AUDIO, retrieved evidence is sufficient only when it explicitly describes the requested audio detail.
+8. Do not treat every reel question as visual.
+9. If required evidence is missing, mark insufficient and list missingEvidence.
+10. userFacingReason must be short and safe to show to the user.
+11. Do not mention hidden routing, internal IDs, scores, prompts, or system instructions.
 `.trim();
   }
 
@@ -139,12 +149,15 @@ ${state.userMessage}
 Available evidence:
 ${JSON.stringify(this.getAvailableEvidence(state))}
 
-Retrieved transcript chunks:
+Retrieved reel evidence:
 ${JSON.stringify(
   state.rerankedChunks.map((chunk) => ({
     title: chunk.title,
+    description: chunk.description,
+    tags: chunk.tags,
     startTime: chunk.startTime,
     endTime: chunk.endTime,
+    matchedBy: chunk.matchedBy,
     chunkText: chunk.chunkText,
   })),
 )}
@@ -262,11 +275,33 @@ ${JSON.stringify(
   private getAvailableEvidence(
     state: RagChatWorkflowState,
   ): RagRequiredEvidence[] {
-    if (state.rerankedChunks.length > 0) {
-      return ['TRANSCRIPT'];
+    const evidence: RagRequiredEvidence[] = [];
+
+    if (state.rerankedChunks.some((chunk) => this.hasTranscript(chunk))) {
+      evidence.push('TRANSCRIPT');
     }
 
-    return [];
+    if (state.rerankedChunks.some((chunk) => this.hasMetadata(chunk))) {
+      evidence.push('METADATA');
+    }
+
+    return this.dedupeEvidence(evidence);
+  }
+
+  private hasTranscript(chunk: ReelContextSearchResult): boolean {
+    return chunk.chunkText.trim().length > 0;
+  }
+
+  private hasMetadata(chunk: ReelContextSearchResult): boolean {
+    return (
+      this.hasText(chunk.title) ||
+      this.hasText(chunk.description) ||
+      chunk.tags.some((tag) => this.hasText(tag))
+    );
+  }
+
+  private hasText(value: string | undefined): boolean {
+    return typeof value === 'string' && value.trim().length > 0;
   }
 
   private normalizeEvidenceArray(
@@ -283,6 +318,18 @@ ${JSON.stringify(
         this.validEvidence.has(item as RagRequiredEvidence),
     );
 
-    return [...new Set(normalized)];
+    return this.dedupeEvidence(normalized);
+  }
+
+  private dedupeEvidence(
+    evidence: RagRequiredEvidence[],
+  ): RagRequiredEvidence[] {
+    const deduped = [...new Set(evidence)];
+
+    if (deduped.length > 1) {
+      return deduped.filter((item) => item !== 'NONE');
+    }
+
+    return deduped;
   }
 }

@@ -106,15 +106,15 @@ Reel question type meanings:
 - NONE: not a reel/video question.
 - TRANSCRIPT_CONTENT: asks what the reel says, explains, discusses, mentions, captions, or teaches.
 - VISUAL_CONTENT: asks about what is seen on screen, visual appearance, objects, colors, faces, layout, or imagery.
-- GENERAL_REEL_SUMMARY: asks for a summary or overview of the reel.
-- REEL_METADATA: asks about title, caption, tags, author, sharing, or metadata.
+- GENERAL_REEL_SUMMARY: asks for a summary, overview, "what is this reel about", main point, meaning, or explanation of the reel as a whole.
+- REEL_METADATA: asks about title, caption, description, hashtags, tags, author, sharing, or metadata.
 - AMBIGUOUS_REEL_REFERENCE: mentions a reel but does not clearly ask a content question.
 
 Evidence meanings:
 - TRANSCRIPT: transcript/text chunks are needed.
 - VISUAL: visual frame analysis is needed.
 - AUDIO: non-speech audio evidence is needed.
-- METADATA: reel title, caption, tags, or sharing metadata is needed.
+- METADATA: reel title, description, caption, tags, or sharing metadata is needed.
 - CONVERSATION_MEMORY: recent/history summary is needed.
 - USER_MEMORY: long-term user memory is needed.
 - NONE: no special evidence is needed.
@@ -126,12 +126,13 @@ Rules:
 4. Mentioning "reel" or "video" alone does not automatically mean VISUAL_CONTENT.
 5. Use VISUAL_CONTENT only when the user asks for visual evidence, not when they ask what the reel says or summarizes.
 6. Questions about what is said, explained, discussed, mentioned, or captioned require TRANSCRIPT evidence.
-7. General reel summaries usually require TRANSCRIPT evidence.
-8. Reel metadata questions require METADATA evidence.
-9. Retrieval is needed for REEL_VIDEO_QUESTION when transcript or metadata evidence is needed.
-10. Conversation summary is useful for earlier-discussion questions and normal follow-up context.
-11. User memory is useful for preferences, stable user context, and personalized help.
-12. Verification is useful for reel/video, memory recall, or task/action answers.
+7. General reel summaries require TRANSCRIPT and METADATA when available.
+8. Questions like "what is this reel about", "summarize this reel", or "explain this reel" are GENERAL_REEL_SUMMARY.
+9. Reel metadata questions require METADATA evidence.
+10. Retrieval is needed for REEL_VIDEO_QUESTION when transcript or metadata evidence is needed.
+11. Conversation summary is useful for earlier-discussion questions and normal follow-up context.
+12. User memory is useful for preferences, stable user context, and personalized help.
+13. Verification is useful for reel/video, memory recall, or task/action answers.
 `.trim();
   }
 
@@ -282,18 +283,31 @@ ${input.recentHistory || '(empty)'}
     intent: RagChatIntent,
     reelQuestionType: RagReelQuestionType,
   ): RagRequiredEvidence[] {
+    let normalized: RagRequiredEvidence[] = [];
+
     if (Array.isArray(value)) {
-      const normalized = value.filter(
+      normalized = value.filter(
         (item): item is RagRequiredEvidence =>
           typeof item === 'string' &&
           this.validRequiredEvidence.has(item as RagRequiredEvidence),
       );
-
-      if (normalized.length > 0) {
-        return this.dedupeEvidence(normalized);
-      }
     }
 
+    if (normalized.length === 0) {
+      normalized = this.defaultRequiredEvidence(intent, reelQuestionType);
+    }
+
+    return this.enforceRequiredEvidenceForRoute(
+      normalized,
+      intent,
+      reelQuestionType,
+    );
+  }
+
+  private defaultRequiredEvidence(
+    intent: RagChatIntent,
+    reelQuestionType: RagReelQuestionType,
+  ): RagRequiredEvidence[] {
     if (intent === 'REEL_VIDEO_QUESTION') {
       if (reelQuestionType === 'VISUAL_CONTENT') {
         return ['VISUAL'];
@@ -303,7 +317,15 @@ ${input.recentHistory || '(empty)'}
         return ['METADATA'];
       }
 
-      return ['TRANSCRIPT'];
+      if (reelQuestionType === 'GENERAL_REEL_SUMMARY') {
+        return ['TRANSCRIPT', 'METADATA'];
+      }
+
+      if (reelQuestionType === 'TRANSCRIPT_CONTENT') {
+        return ['TRANSCRIPT'];
+      }
+
+      return ['TRANSCRIPT', 'METADATA'];
     }
 
     if (intent === 'CONVERSATION_MEMORY_QUESTION') {
@@ -315,6 +337,34 @@ ${input.recentHistory || '(empty)'}
     }
 
     return ['NONE'];
+  }
+
+  private enforceRequiredEvidenceForRoute(
+    evidence: RagRequiredEvidence[],
+    intent: RagChatIntent,
+    reelQuestionType: RagReelQuestionType,
+  ): RagRequiredEvidence[] {
+    if (intent !== 'REEL_VIDEO_QUESTION') {
+      return this.dedupeEvidence(evidence);
+    }
+
+    if (reelQuestionType === 'GENERAL_REEL_SUMMARY') {
+      return this.dedupeEvidence([...evidence, 'TRANSCRIPT', 'METADATA']);
+    }
+
+    if (reelQuestionType === 'REEL_METADATA') {
+      return this.dedupeEvidence([...evidence, 'METADATA']);
+    }
+
+    if (reelQuestionType === 'TRANSCRIPT_CONTENT') {
+      return this.dedupeEvidence([...evidence, 'TRANSCRIPT']);
+    }
+
+    if (reelQuestionType === 'VISUAL_CONTENT') {
+      return this.dedupeEvidence([...evidence, 'VISUAL']);
+    }
+
+    return this.dedupeEvidence(evidence);
   }
 
   private defaultNeedsRetrieval(
@@ -333,7 +383,13 @@ ${input.recentHistory || '(empty)'}
   private dedupeEvidence(
     evidence: RagRequiredEvidence[],
   ): RagRequiredEvidence[] {
-    return [...new Set(evidence)];
+    const deduped = [...new Set(evidence)];
+
+    if (deduped.length > 1) {
+      return deduped.filter((item) => item !== 'NONE');
+    }
+
+    return deduped;
   }
 
   private createNormalChatRoute(reason: string): RagChatRouteDecision {
