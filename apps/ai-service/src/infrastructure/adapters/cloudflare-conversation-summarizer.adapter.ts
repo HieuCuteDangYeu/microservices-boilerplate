@@ -35,7 +35,6 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
       const response = await this.cloudflareTextClient.generateChatText({
         model: this.getMemoryModel(),
         endpoint: this.getMemoryEndpoint(),
-        fallbackToRunStream: this.shouldMemoryFallbackToRunStream(),
         maxTokens: this.getMemoryMaxTokens(),
         temperature: this.getMemoryTemperature(),
         messages: [
@@ -151,15 +150,6 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
     }
 
     return 'chat_completions';
-  }
-
-  private shouldMemoryFallbackToRunStream(): boolean {
-    const value = this.configService
-      .get<string>('CLOUDFLARE_MEMORY_FALLBACK_TO_RUN')
-      ?.trim()
-      .toLowerCase();
-
-    return value === 'true';
   }
 
   private getMemoryMaxTokens(): number {
