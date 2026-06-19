@@ -1,13 +1,11 @@
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
 import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-context-sufficiency.use-case';
 import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
-import { GenerateDraftAnswerUseCase } from '@ai/application/use-cases/generate-draft-answer.use-case';
 import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-case';
 import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
 import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
-import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.use-case';
 import type {
   IRagChatWorkflow,
   RagChatWorkflowInput,
@@ -53,9 +51,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     private readonly retrievalAgentUseCase: RetrievalAgentUseCase,
     private readonly checkContextSufficiencyUseCase: CheckContextSufficiencyUseCase,
     private readonly memoryAgentUseCase: MemoryAgentUseCase,
-    private readonly generateDraftAnswerUseCase: GenerateDraftAnswerUseCase,
     private readonly streamFinalAnswerUseCase: StreamFinalAnswerUseCase,
-    private readonly verifierAgentUseCase: VerifierAgentUseCase,
     private readonly createNoContextAnswerUseCase: CreateNoContextAnswerUseCase,
     private readonly buildRagCitationsUseCase: BuildRagCitationsUseCase,
     private readonly saveRagTraceUseCase: SaveRagTraceUseCase,
@@ -105,9 +101,6 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         this.createContextSufficiencyNode(nodeTimings),
       )
       .addNode('memorySelectorNode', this.createMemoryNode(nodeTimings))
-      .addNode('draftAnswerNode', this.createDraftAnswerNode(nodeTimings))
-      .addNode('verifierNode', this.createVerifierNode(nodeTimings))
-      .addNode('revisionDraftNode', this.createRevisionDraftNode(nodeTimings))
       .addNode('finalAnswerNode', this.createFinalAnswerNode(nodeTimings))
       .addNode(
         'noContextAnswerNode',
@@ -130,19 +123,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         ['memorySelectorNode', 'noContextAnswerNode'],
       )
 
-      .addEdge('memorySelectorNode', 'draftAnswerNode')
-
-      .addConditionalEdges('draftAnswerNode', this.routeAfterDraftAnswer, [
-        'verifierNode',
-        'finalAnswerNode',
-      ])
-
-      .addConditionalEdges('verifierNode', this.routeAfterVerifier, [
-        'revisionDraftNode',
-        'finalAnswerNode',
-      ])
-
-      .addEdge('revisionDraftNode', 'verifierNode')
+      .addEdge('memorySelectorNode', 'finalAnswerNode')
       .addEdge('finalAnswerNode', 'citationNode')
       .addEdge('noContextAnswerNode', 'citationNode')
       .addEdge('citationNode', END)
@@ -246,54 +227,6 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     };
   }
 
-  private createDraftAnswerNode(nodeTimings: Record<string, number>) {
-    return async (
-      state: RagChatWorkflowState,
-    ): Promise<Partial<RagChatWorkflowState>> => {
-      if (!state.route?.needsVerification) {
-        return {};
-      }
-
-      const answer = await this.timed('draftAnswerNode', nodeTimings, () =>
-        this.generateDraftAnswerUseCase.execute(state),
-      );
-
-      return { answer };
-    };
-  }
-
-  private createVerifierNode(nodeTimings: Record<string, number>) {
-    return async (
-      state: RagChatWorkflowState,
-    ): Promise<Partial<RagChatWorkflowState>> => {
-      const verification = await this.timed('verifierNode', nodeTimings, () =>
-        this.verifierAgentUseCase.execute(state),
-      );
-
-      return { verification };
-    };
-  }
-
-  private createRevisionDraftNode(nodeTimings: Record<string, number>) {
-    return async (
-      state: RagChatWorkflowState,
-    ): Promise<Partial<RagChatWorkflowState>> => {
-      const nextState: RagChatWorkflowState = {
-        ...state,
-        retryCount: state.retryCount + 1,
-      };
-
-      const answer = await this.timed('revisionDraftNode', nodeTimings, () =>
-        this.generateDraftAnswerUseCase.execute(nextState),
-      );
-
-      return {
-        answer,
-        retryCount: nextState.retryCount,
-      };
-    };
-  }
-
   private createFinalAnswerNode(nodeTimings: Record<string, number>) {
     return async (
       state: RagChatWorkflowState,
@@ -351,26 +284,6 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     }
 
     return 'noContextAnswerNode';
-  };
-
-  private routeAfterDraftAnswer = (
-    state: RagChatWorkflowState,
-  ): 'verifierNode' | 'finalAnswerNode' => {
-    return state.route?.needsVerification ? 'verifierNode' : 'finalAnswerNode';
-  };
-
-  private routeAfterVerifier = (
-    state: RagChatWorkflowState,
-  ): 'revisionDraftNode' | 'finalAnswerNode' => {
-    if (
-      state.verification?.requiresRevision &&
-      !state.verification.passed &&
-      state.retryCount < 1
-    ) {
-      return 'revisionDraftNode';
-    }
-
-    return 'finalAnswerNode';
   };
 
   private async timed<T>(

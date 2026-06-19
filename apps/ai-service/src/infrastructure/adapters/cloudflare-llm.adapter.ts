@@ -19,50 +19,56 @@ export class CloudflareLlmAdapter implements ILlmService {
     userId: string,
     onToken: (token: string) => void,
   ): Promise<string> {
-    const primary = this.getPrimaryConfig();
+    const model = this.getModel();
+    const endpoint = this.getEndpoint();
+    const timeoutMs = this.getPositiveNumber(
+      'CLOUDFLARE_CHAT_TIMEOUT_MS',
+      15000,
+    );
+    const maxTokens = this.getPositiveNumber('CLOUDFLARE_CHAT_MAX_TOKENS', 450);
+    const temperature = this.getTemperature();
 
     this.logger.debug(
       [
         `Generating Cloudflare chat response for User [${userId}]`,
-        `model=${primary.model}`,
-        `endpoint=${primary.endpoint}`,
-        `timeoutMs=${primary.timeoutMs}`,
+        `model=${model}`,
+        `endpoint=${endpoint}`,
+        `timeoutMs=${timeoutMs}`,
+        `maxTokens=${maxTokens}`,
         `systemChars=${systemInstruction.length}`,
         `userChars=${userMessage.length}`,
       ].join(' '),
     );
 
-    const messages = [
-      {
-        role: 'system' as const,
-        content: this.buildSystemMessage(systemInstruction),
-      },
-      {
-        role: 'user' as const,
-        content: userMessage,
-      },
-    ];
-
     try {
       let emittedStreamToken = false;
 
       const response = await this.cloudflareTextClient.generateChatText({
-        model: primary.model,
-        endpoint: primary.endpoint,
-        timeoutMs: primary.timeoutMs,
-        maxTokens: primary.maxTokens,
-        temperature: primary.temperature,
+        model,
+        endpoint,
+        timeoutMs,
+        maxTokens,
+        temperature,
         onToken: (token: string) => {
           emittedStreamToken = true;
           onToken(token);
         },
-        messages,
+        messages: [
+          {
+            role: 'system',
+            content: this.buildSystemMessage(systemInstruction),
+          },
+          {
+            role: 'user',
+            content: userMessage,
+          },
+        ],
       });
 
       const finalAnswer = this.cleanAssistantResponse(response);
 
       if (finalAnswer.length === 0) {
-        throw new Error('Cloudflare primary model returned empty answer.');
+        throw new Error('Cloudflare chat returned empty answer.');
       }
 
       if (!emittedStreamToken) {
@@ -70,60 +76,17 @@ export class CloudflareLlmAdapter implements ILlmService {
       }
 
       return finalAnswer;
-    } catch (primaryError: unknown) {
-      const primaryMessage =
-        primaryError instanceof Error
-          ? primaryError.message
-          : String(primaryError);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
 
-      this.logger.warn(`primary chat model failed: ${primaryMessage}`);
+      this.logger.warn(`provider failure answer used: ${message}`);
 
-      const fallback = this.getFallbackConfig();
+      const fallback =
+        'I could not generate the answer right now because the AI provider returned an empty or failed response. Please try again.';
 
-      if (!fallback) {
-        return this.publishProviderFailure(onToken, primaryMessage);
-      }
+      onToken(fallback);
 
-      this.logger.warn(
-        [
-          'trying fallback chat model',
-          `model=${fallback.model}`,
-          `endpoint=${fallback.endpoint}`,
-          `timeoutMs=${fallback.timeoutMs}`,
-        ].join(' '),
-      );
-
-      try {
-        const fallbackAnswer = await this.cloudflareTextClient.generateChatText(
-          {
-            model: fallback.model,
-            endpoint: fallback.endpoint,
-            timeoutMs: fallback.timeoutMs,
-            maxTokens: fallback.maxTokens,
-            temperature: fallback.temperature,
-            messages,
-          },
-        );
-
-        const finalFallbackAnswer = this.cleanAssistantResponse(fallbackAnswer);
-
-        if (finalFallbackAnswer.length === 0) {
-          throw new Error('Cloudflare fallback model returned empty answer.');
-        }
-
-        onToken(finalFallbackAnswer);
-
-        return finalFallbackAnswer;
-      } catch (fallbackError: unknown) {
-        const fallbackMessage =
-          fallbackError instanceof Error
-            ? fallbackError.message
-            : String(fallbackError);
-
-        this.logger.warn(`fallback chat model failed: ${fallbackMessage}`);
-
-        return this.publishProviderFailure(onToken, fallbackMessage);
-      }
+      return fallback;
     }
   }
 
@@ -146,73 +109,32 @@ export class CloudflareLlmAdapter implements ILlmService {
     ].join('\n');
   }
 
-  private publishProviderFailure(
-    onToken: (token: string) => void,
-    reason: string,
-  ): string {
-    this.logger.warn(`fallback answer used: ${reason}`);
-
-    const fallback =
-      'I could not generate the answer right now because the AI provider returned an empty or failed response. Please try again.';
-
-    onToken(fallback);
-
-    return fallback;
+  private getModel(): string {
+    return (
+      this.configService.get<string>('CLOUDFLARE_CHAT_MODEL') ||
+      '@cf/meta/llama-3.1-8b-instruct-fast'
+    );
   }
 
-  private getPrimaryConfig(): {
-    model: string;
-    endpoint: CloudflareChatEndpoint;
-    timeoutMs: number;
-    maxTokens: number;
-    temperature: number;
-  } {
-    return {
-      model:
-        this.configService.get<string>('CLOUDFLARE_CHAT_MODEL') ||
-        '@cf/zai-org/glm-4.7-flash',
-      endpoint: this.getEndpoint('CLOUDFLARE_CHAT_ENDPOINT', 'chat_stream'),
-      timeoutMs: this.getPositiveNumber('CLOUDFLARE_CHAT_TIMEOUT_MS', 12000),
-      maxTokens: this.getPositiveNumber('CLOUDFLARE_CHAT_MAX_TOKENS', 500),
-      temperature: this.getTemperature('CLOUDFLARE_CHAT_TEMPERATURE', 0.2),
-    };
-  }
+  private getEndpoint(): CloudflareChatEndpoint {
+    const value = this.configService
+      .get<string>('CLOUDFLARE_CHAT_ENDPOINT')
+      ?.trim()
+      .toLowerCase();
 
-  private getFallbackConfig(): {
-    model: string;
-    endpoint: CloudflareChatEndpoint;
-    timeoutMs: number;
-    maxTokens: number;
-    temperature: number;
-  } | null {
-    const enabled = this.getBoolean('CLOUDFLARE_CHAT_FALLBACK_ENABLED', true);
-
-    if (!enabled) {
-      return null;
+    if (value === 'chat_stream') {
+      return 'chat_stream';
     }
 
-    return {
-      model:
-        this.configService.get<string>('CLOUDFLARE_CHAT_FALLBACK_MODEL') ||
-        this.configService.get<string>('CLOUDFLARE_MEMORY_MODEL') ||
-        '@cf/meta/llama-3.1-8b-instruct-fast',
-      endpoint: this.getEndpoint(
-        'CLOUDFLARE_CHAT_FALLBACK_ENDPOINT',
-        'chat_completions',
-      ),
-      timeoutMs: this.getPositiveNumber(
-        'CLOUDFLARE_CHAT_FALLBACK_TIMEOUT_MS',
-        15000,
-      ),
-      maxTokens: this.getPositiveNumber(
-        'CLOUDFLARE_CHAT_FALLBACK_MAX_TOKENS',
-        450,
-      ),
-      temperature: this.getTemperature(
-        'CLOUDFLARE_CHAT_FALLBACK_TEMPERATURE',
-        0.2,
-      ),
-    };
+    if (value === 'run') {
+      return 'run';
+    }
+
+    if (value === 'run_stream') {
+      return 'run_stream';
+    }
+
+    return 'chat_completions';
   }
 
   private cleanAssistantResponse(value: string): string {
@@ -223,56 +145,19 @@ export class CloudflareLlmAdapter implements ILlmService {
       .trim();
   }
 
-  private getEndpoint(
-    key: string,
-    fallback: CloudflareChatEndpoint,
-  ): CloudflareChatEndpoint {
-    const value = this.configService.get<string>(key)?.trim().toLowerCase();
-
-    if (value === 'run') {
-      return 'run';
-    }
-
-    if (value === 'run_stream') {
-      return 'run_stream';
-    }
-
-    if (value === 'chat_stream') {
-      return 'chat_stream';
-    }
-
-    if (value === 'chat_completions') {
-      return 'chat_completions';
-    }
-
-    return fallback;
-  }
-
-  private getBoolean(key: string, fallback: boolean): boolean {
-    const value = this.configService.get<string>(key)?.trim().toLowerCase();
-
-    if (value === 'true') {
-      return true;
-    }
-
-    if (value === 'false') {
-      return false;
-    }
-
-    return fallback;
-  }
-
   private getPositiveNumber(key: string, fallback: number): number {
     const value = Number(this.configService.get<string>(key) ?? fallback);
 
     return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 
-  private getTemperature(key: string, fallback: number): number {
-    const value = Number(this.configService.get<string>(key) ?? fallback);
+  private getTemperature(): number {
+    const value = Number(
+      this.configService.get<string>('CLOUDFLARE_CHAT_TEMPERATURE') ?? '0.2',
+    );
 
     if (!Number.isFinite(value)) {
-      return fallback;
+      return 0.2;
     }
 
     return Math.min(Math.max(value, 0), 1);
