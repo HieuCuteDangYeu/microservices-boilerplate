@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { ILlmService } from '../../domain/interfaces/llm.service.interface';
 import { CloudflareWorkersAiTextClient } from './cloudflare-workers-ai-text.client';
 
-type CloudflareChatEndpoint = 'chat_completions' | 'run' | 'run_stream';
+type CloudflareChatEndpoint =
+  | 'chat_completions'
+  | 'chat_stream'
+  | 'run'
+  | 'run_stream';
 
 @Injectable()
 export class CloudflareLlmAdapter implements ILlmService {
@@ -124,6 +128,10 @@ export class CloudflareLlmAdapter implements ILlmService {
 
     if (value === 'run_stream') {
       return 'run_stream';
+    }
+
+    if (value === 'chat_stream') {
+      return 'chat_stream';
     }
 
     return 'chat_completions';

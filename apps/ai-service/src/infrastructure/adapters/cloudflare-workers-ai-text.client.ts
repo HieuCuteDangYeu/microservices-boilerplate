@@ -39,9 +39,14 @@ interface CloudflareChatCompletionChoice {
     tool_calls?: unknown;
   };
   delta?: {
+    role?: string;
     content?: string | null;
     reasoning_content?: string | null;
+    refusal?: string | null;
+    tool_calls?: unknown;
   };
+  logprobs?: unknown;
+  token_ids?: unknown;
 }
 
 interface CloudflareChatCompletionResponse {
@@ -62,6 +67,7 @@ interface CloudflareChatCompletionResponse {
 }
 
 interface CloudflareStreamEvent {
+  success?: boolean;
   response?: string;
   text?: string;
   output?: string;
@@ -78,7 +84,21 @@ interface CloudflareStreamEvent {
   }>;
 }
 
-export type CloudflareChatEndpoint = 'chat_completions' | 'run' | 'run_stream';
+export type CloudflareChatEndpoint =
+  | 'chat_completions'
+  | 'chat_stream'
+  | 'run'
+  | 'run_stream';
+
+type ChatRequestInput = {
+  model: string;
+  messages: CloudflareChatMessage[];
+  maxTokens?: number;
+  temperature?: number;
+  endpoint?: CloudflareChatEndpoint;
+  fallbackToRunStream?: boolean;
+  onToken?: (token: string) => void;
+};
 
 @Injectable()
 export class CloudflareWorkersAiTextClient {
@@ -114,15 +134,7 @@ export class CloudflareWorkersAiTextClient {
     });
   }
 
-  async generateChatText(input: {
-    model: string;
-    messages: CloudflareChatMessage[];
-    maxTokens?: number;
-    temperature?: number;
-    endpoint?: CloudflareChatEndpoint;
-    fallbackToRunStream?: boolean;
-    onToken?: (token: string) => void;
-  }): Promise<string> {
+  async generateChatText(input: ChatRequestInput): Promise<string> {
     const accountId = this.configService.getOrThrow<string>(
       'CLOUDFLARE_ACCOUNT_ID',
     );
@@ -133,8 +145,35 @@ export class CloudflareWorkersAiTextClient {
 
     const endpoint = input.endpoint ?? this.getChatEndpoint();
 
+    if (endpoint === 'chat_stream') {
+      return await this.generateChatCompletionStreamText(
+        input,
+        accountId,
+        apiToken,
+      );
+    }
+
     if (endpoint === 'run_stream') {
-      return await this.generateRunChatStreamText(input, accountId, apiToken);
+      try {
+        return await this.generateRunChatStreamText(input, accountId, apiToken);
+      } catch (error: unknown) {
+        if (
+          !this.isEmptyAnswerError(error) ||
+          !this.shouldFallbackToAlternativeStream(input)
+        ) {
+          throw error;
+        }
+
+        this.logger.warn(
+          '[CloudflareRunChatStream] /ai/run stream returned empty answer, retrying with /ai/v1/chat/completions stream=true',
+        );
+
+        return await this.generateChatCompletionStreamText(
+          input,
+          accountId,
+          apiToken,
+        );
+      }
     }
 
     if (endpoint === 'run') {
@@ -143,41 +182,47 @@ export class CloudflareWorkersAiTextClient {
       } catch (error: unknown) {
         if (
           !this.isEmptyAnswerError(error) ||
-          !this.shouldFallbackToRun(input)
+          !this.shouldFallbackToAlternativeStream(input)
         ) {
           throw error;
         }
 
         this.logger.warn(
-          '[CloudflareRunChat] non-streaming run returned empty answer, retrying with stream=true',
+          '[CloudflareRunChat] non-streaming /ai/run returned empty answer, retrying with /ai/v1/chat/completions stream=true',
         );
 
-        return await this.generateRunChatStreamText(input, accountId, apiToken);
+        return await this.generateChatCompletionStreamText(
+          input,
+          accountId,
+          apiToken,
+        );
       }
     }
 
     try {
       return await this.generateChatCompletionText(input, accountId, apiToken);
     } catch (error: unknown) {
-      if (!this.isEmptyAnswerError(error) || !this.shouldFallbackToRun(input)) {
+      if (
+        !this.isEmptyAnswerError(error) ||
+        !this.shouldFallbackToAlternativeStream(input)
+      ) {
         throw error;
       }
 
       this.logger.warn(
-        '[CloudflareChat] chat-completions returned empty answer, retrying with /ai/run stream=true',
+        '[CloudflareChat] chat-completions returned empty answer, retrying with /ai/v1/chat/completions stream=true',
       );
 
-      return await this.generateRunChatStreamText(input, accountId, apiToken);
+      return await this.generateChatCompletionStreamText(
+        input,
+        accountId,
+        apiToken,
+      );
     }
   }
 
   private async generateChatCompletionText(
-    input: {
-      model: string;
-      messages: CloudflareChatMessage[];
-      maxTokens?: number;
-      temperature?: number;
-    },
+    input: ChatRequestInput,
     accountId: string,
     apiToken: string,
   ): Promise<string> {
@@ -185,17 +230,16 @@ export class CloudflareWorkersAiTextClient {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: this.buildHeaders(apiToken),
       body: JSON.stringify({
         model: input.model,
         messages: input.messages,
         max_completion_tokens: input.maxTokens ?? 700,
         temperature: input.temperature ?? 0.2,
+        modalities: ['text'],
         tool_choice: 'none',
         parallel_tool_calls: false,
+        reasoning_effort: this.getReasoningEffort(),
         stream: false,
       }),
     });
@@ -227,13 +271,38 @@ export class CloudflareWorkersAiTextClient {
     return content;
   }
 
+  private async generateChatCompletionStreamText(
+    input: ChatRequestInput,
+    accountId: string,
+    apiToken: string,
+  ): Promise<string> {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.buildHeaders(apiToken),
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages,
+        max_completion_tokens: input.maxTokens ?? 700,
+        temperature: input.temperature ?? 0.2,
+        modalities: ['text'],
+        tool_choice: 'none',
+        parallel_tool_calls: false,
+        reasoning_effort: this.getReasoningEffort(),
+        stream: true,
+      }),
+    });
+
+    return await this.readStreamResponse(
+      response,
+      'CloudflareChatCompletionStream',
+      input.onToken,
+    );
+  }
+
   private async generateRunChatText(
-    input: {
-      model: string;
-      messages: CloudflareChatMessage[];
-      maxTokens?: number;
-      temperature?: number;
-    },
+    input: ChatRequestInput,
     accountId: string,
     apiToken: string,
   ): Promise<string> {
@@ -241,16 +310,15 @@ export class CloudflareWorkersAiTextClient {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: this.buildHeaders(apiToken),
       body: JSON.stringify({
         messages: input.messages,
         max_completion_tokens: input.maxTokens ?? 700,
         temperature: input.temperature ?? 0.2,
+        modalities: ['text'],
         tool_choice: 'none',
         parallel_tool_calls: false,
+        reasoning_effort: this.getReasoningEffort(),
         stream: false,
       }),
     });
@@ -285,13 +353,7 @@ export class CloudflareWorkersAiTextClient {
   }
 
   private async generateRunChatStreamText(
-    input: {
-      model: string;
-      messages: CloudflareChatMessage[];
-      maxTokens?: number;
-      temperature?: number;
-      onToken?: (token: string) => void;
-    },
+    input: ChatRequestInput,
     accountId: string,
     apiToken: string,
   ): Promise<string> {
@@ -299,26 +361,27 @@ export class CloudflareWorkersAiTextClient {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: this.buildHeaders(apiToken),
       body: JSON.stringify({
         messages: input.messages,
         max_completion_tokens: input.maxTokens ?? 700,
         temperature: input.temperature ?? 0.2,
+        modalities: ['text'],
+        tool_choice: 'none',
+        parallel_tool_calls: false,
+        reasoning_effort: this.getReasoningEffort(),
         stream: true,
       }),
     });
 
-    return await this.readRunStreamResponse(
+    return await this.readStreamResponse(
       response,
       'CloudflareRunChatStream',
       input.onToken,
     );
   }
 
-  private async readRunStreamResponse(
+  private async readStreamResponse(
     response: Response,
     logPrefix: string,
     onToken?: (token: string) => void,
@@ -394,7 +457,7 @@ export class CloudflareWorkersAiTextClient {
           continue;
         }
 
-        if (shapeSamples.length < 3) {
+        if (shapeSamples.length < 5) {
           shapeSamples.push(this.describeStreamEventShape(parsed));
         }
       }
@@ -479,40 +542,6 @@ export class CloudflareWorkersAiTextClient {
     } catch {
       return null;
     }
-  }
-
-  private extractStreamEventText(event: CloudflareStreamEvent): string {
-    const response = this.streamText(event.response);
-
-    if (response.length > 0) {
-      return response;
-    }
-
-    const resultResponse = this.streamText(event.result?.response);
-
-    if (resultResponse.length > 0) {
-      return resultResponse;
-    }
-
-    const resultText = this.streamText(event.result?.text);
-
-    if (resultText.length > 0) {
-      return resultText;
-    }
-
-    const directText = this.streamText(event.text);
-
-    if (directText.length > 0) {
-      return directText;
-    }
-
-    const directOutput = this.streamText(event.output);
-
-    if (directOutput.length > 0) {
-      return directOutput;
-    }
-
-    return this.extractChatCompletionText(event);
   }
 
   private extractStreamErrorMessage(event: CloudflareStreamEvent): string {
@@ -638,8 +667,18 @@ export class CloudflareWorkersAiTextClient {
     return typeof value === 'string' ? value.trim() : '';
   }
 
-  private streamText(value: string | null | undefined): string {
-    return typeof value === 'string' ? value : '';
+  private buildHeaders(apiToken: string): Record<string, string> {
+    return {
+      Authorization: `Bearer ${apiToken}`,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  private getReasoningEffort(): string {
+    return (
+      this.configService.get<string>('CLOUDFLARE_CHAT_REASONING_EFFORT') ||
+      'low'
+    );
   }
 
   private getChatEndpoint(): CloudflareChatEndpoint {
@@ -656,10 +695,14 @@ export class CloudflareWorkersAiTextClient {
       return 'run_stream';
     }
 
+    if (value === 'chat_stream') {
+      return 'chat_stream';
+    }
+
     return 'chat_completions';
   }
 
-  private shouldFallbackToRun(input?: {
+  private shouldFallbackToAlternativeStream(input?: {
     fallbackToRunStream?: boolean;
   }): boolean {
     if (typeof input?.fallbackToRunStream === 'boolean') {
@@ -689,51 +732,44 @@ export class CloudflareWorkersAiTextClient {
 
     return JSON.stringify({
       success: json.success,
-
       hasResult: Boolean(json.result),
       hasResultResponse: Boolean(json.result?.response),
       resultResponseLength: json.result?.response?.length ?? 0,
       hasResultText: Boolean(json.result?.text),
       resultTextLength: json.result?.text?.length ?? 0,
-
       hasChoices: Boolean(json.choices?.length),
       choiceCount: json.choices?.length ?? 0,
       choiceKeys: choice ? Object.keys(choice) : [],
       finishReason: choice?.finish_reason ?? null,
-
       hasMessage: Boolean(message),
       messageKeys: message ? Object.keys(message) : [],
       messageRole: message?.role ?? null,
       contentType: typeof message?.content,
       contentLength:
         typeof message?.content === 'string' ? message.content.length : 0,
-
       hasReasoningContent: Boolean(message?.reasoning_content),
       reasoningContentLength:
         typeof message?.reasoning_content === 'string'
           ? message.reasoning_content.length
           : 0,
-
       hasRefusal: Boolean(message?.refusal),
       hasToolCalls: Boolean(message?.tool_calls),
-
       hasDelta: Boolean(delta),
       deltaKeys: delta ? Object.keys(delta) : [],
+      deltaRole: delta?.role ?? null,
       deltaContentLength:
         typeof delta?.content === 'string' ? delta.content.length : 0,
       deltaReasoningContentLength:
         typeof delta?.reasoning_content === 'string'
           ? delta.reasoning_content.length
           : 0,
-
+      hasDeltaToolCalls: Boolean(delta?.tool_calls),
       hasChoiceText: Boolean(choice?.text),
       choiceTextLength: choice?.text?.length ?? 0,
-
       hasDirectResponse: Boolean(json.response),
       directResponseLength: json.response?.length ?? 0,
       hasDirectOutput: Boolean(json.output),
       directOutputLength: json.output?.length ?? 0,
-
       hasError: Boolean(json.error),
       errorCount: json.errors?.length ?? 0,
     });
@@ -757,8 +793,11 @@ export class CloudflareWorkersAiTextClient {
 
   private describeStreamEventShape(event: CloudflareStreamEvent): string {
     const choice = event.choices?.[0];
+    const delta = choice?.delta;
+    const message = choice?.message;
 
     return JSON.stringify({
+      success: event.success,
       hasResponse: Boolean(event.response),
       responseLength: event.response?.length ?? 0,
       hasText: Boolean(event.text),
@@ -769,10 +808,24 @@ export class CloudflareWorkersAiTextClient {
       hasResultResponse: Boolean(event.result?.response),
       resultResponseLength: event.result?.response?.length ?? 0,
       hasChoices: Boolean(event.choices?.length),
+      choiceCount: event.choices?.length ?? 0,
       choiceKeys: choice ? Object.keys(choice) : [],
-      hasDeltaContent: Boolean(choice?.delta?.content),
-      deltaContentLength: choice?.delta?.content?.length ?? 0,
-      hasMessageContent: Boolean(choice?.message?.content),
+      finishReason: choice?.finish_reason ?? null,
+      hasLogprobs: Boolean(choice?.logprobs),
+      hasTokenIds: Boolean(choice?.token_ids),
+      hasDelta: Boolean(delta),
+      deltaKeys: delta ? Object.keys(delta) : [],
+      deltaRole: delta?.role ?? null,
+      hasDeltaContent: Boolean(delta?.content),
+      deltaContentLength: delta?.content?.length ?? 0,
+      hasDeltaReasoningContent: Boolean(delta?.reasoning_content),
+      deltaReasoningContentLength: delta?.reasoning_content?.length ?? 0,
+      hasDeltaToolCalls: Boolean(delta?.tool_calls),
+      hasMessage: Boolean(message),
+      hasMessageContent: Boolean(message?.content),
+      messageContentType: typeof message?.content,
+      messageContentLength:
+        typeof message?.content === 'string' ? message.content.length : 0,
       hasError: Boolean(event.error),
       errorCount: event.errors?.length ?? 0,
     });
