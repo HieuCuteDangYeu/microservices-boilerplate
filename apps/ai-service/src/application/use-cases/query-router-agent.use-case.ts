@@ -74,7 +74,7 @@ export class QueryRouterAgentUseCase {
           userPrompt: this.buildUserPrompt(input),
           jsonSchema: this.getJsonSchema(),
           maxTokens: 350,
-          temperature: 0.1,
+          temperature: 0,
         });
 
       return this.normalize(result);
@@ -91,48 +91,50 @@ export class QueryRouterAgentUseCase {
 
   private buildSystemPrompt(): string {
     return `
-You are a query router for a RAG chatbot.
+You are the semantic query router for a RAG chatbot.
 
-Classify the current user message into one intent and decide what evidence is required.
+Classify the current user message by meaning, not by keyword matching.
+
+Return only JSON matching the schema.
 
 Intent meanings:
-- NORMAL_CHAT: normal conversation, clarification, coding discussion, or general help.
-- REEL_VIDEO_QUESTION: the user asks about a reel/video shared in the conversation.
+- NORMAL_CHAT: general conversation, coding help, app discussion, clarification, or normal assistant chat.
+- REEL_VIDEO_QUESTION: the user asks about a reel/video/clip/media item shared in the current conversation.
 - CONVERSATION_MEMORY_QUESTION: the user asks what happened earlier in this conversation.
-- USER_MEMORY_QUESTION: the user asks about stable facts/preferences/profile known about the user.
+- USER_MEMORY_QUESTION: the user asks about stable facts, preferences, profile, or remembered user information.
 - TASK_ACTION_REQUEST: the user asks the system to perform an external action or tool operation.
 
 Reel question type meanings:
 - NONE: not a reel/video question.
-- TRANSCRIPT_CONTENT: asks what the reel says, explains, discusses, mentions, captions, or teaches.
-- VISUAL_CONTENT: asks about what is seen on screen, visual appearance, objects, colors, faces, layout, or imagery.
-- GENERAL_REEL_SUMMARY: asks for a summary, overview, "what is this reel about", main point, meaning, or explanation of the reel as a whole.
-- REEL_METADATA: asks about title, caption, description, hashtags, tags, author, sharing, or metadata.
-- AMBIGUOUS_REEL_REFERENCE: mentions a reel but does not clearly ask a content question.
+- TRANSCRIPT_CONTENT: asks what the reel says, explains, discusses, mentions, captions, quotes, or teaches.
+- VISUAL_CONTENT: asks about visual appearance, objects, people, colors, text on screen, layout, or what is seen.
+- GENERAL_REEL_SUMMARY: asks for the reel's overall meaning, summary, topic, main point, or what it is about.
+- REEL_METADATA: asks about title, description, caption, hashtags, tags, author, upload/share metadata.
+- AMBIGUOUS_REEL_REFERENCE: refers to a reel/video but the requested information is unclear.
 
 Evidence meanings:
-- TRANSCRIPT: transcript/text chunks are needed.
-- VISUAL: visual frame analysis is needed.
-- AUDIO: non-speech audio evidence is needed.
-- METADATA: reel title, description, caption, tags, or sharing metadata is needed.
-- CONVERSATION_MEMORY: recent/history summary is needed.
+- TRANSCRIPT: spoken words, transcript chunks, captions, or textual reel content are needed.
+- VISUAL: visual frame analysis or OCR is needed.
+- AUDIO: non-speech audio, music, tone, sound effects, or background audio is needed.
+- METADATA: title, description, caption, tags, hashtags, author, or share metadata is needed.
+- CONVERSATION_MEMORY: recent conversation/history summary is needed.
 - USER_MEMORY: long-term user memory is needed.
 - NONE: no special evidence is needed.
 
-Rules:
-1. Return only structured JSON matching the schema.
-2. Do not answer the user.
-3. Do not invent context.
-4. Mentioning "reel" or "video" alone does not automatically mean VISUAL_CONTENT.
-5. Use VISUAL_CONTENT only when the user asks for visual evidence, not when they ask what the reel says or summarizes.
-6. Questions about what is said, explained, discussed, mentioned, or captioned require TRANSCRIPT evidence.
-7. General reel summaries require TRANSCRIPT and METADATA when available.
-8. Questions like "what is this reel about", "summarize this reel", or "explain this reel" are GENERAL_REEL_SUMMARY.
-9. Reel metadata questions require METADATA evidence.
-10. Retrieval is needed for REEL_VIDEO_QUESTION when transcript or metadata evidence is needed.
-11. Conversation summary is useful for earlier-discussion questions and normal follow-up context.
-12. User memory is useful for preferences, stable user context, and personalized help.
-13. Verification is useful for reel/video, memory recall, or task/action answers.
+Routing rules:
+1. Do not answer the user.
+2. Do not invent available context.
+3. If the user asks about a shared reel/video/media item, use REEL_VIDEO_QUESTION.
+4. If the user asks for a general summary of a shared reel/video/media item, use GENERAL_REEL_SUMMARY.
+5. GENERAL_REEL_SUMMARY should require TRANSCRIPT and METADATA.
+6. TRANSCRIPT_CONTENT should require TRANSCRIPT.
+7. REEL_METADATA should require METADATA.
+8. VISUAL_CONTENT should require VISUAL.
+9. If the user asks what is visually shown, written on screen, or visible, do not treat transcript alone as enough.
+10. Retrieval is needed for REEL_VIDEO_QUESTION when requiredEvidence includes TRANSCRIPT or METADATA.
+11. Conversation summary is useful for follow-up references to earlier discussion.
+12. User memory is useful only for stable user preferences or profile.
+13. Verification is useful for reel/video and memory answers.
 `.trim();
   }
 
@@ -144,8 +146,10 @@ Rules:
 Current user message:
 ${input.message}
 
-Recent history, if available:
+Recent conversation context:
 ${input.recentHistory || '(empty)'}
+
+Classify the current user message.
 `.trim();
   }
 
@@ -215,33 +219,32 @@ ${input.recentHistory || '(empty)'}
       raw.reelQuestionType,
       intent,
     );
+
     const requiredEvidence = this.normalizeRequiredEvidence(
       raw.requiredEvidence,
       intent,
       reelQuestionType,
     );
 
-    const needsRetrieval =
-      typeof raw.needsRetrieval === 'boolean'
-        ? raw.needsRetrieval
-        : this.defaultNeedsRetrieval(intent, requiredEvidence);
-
     return {
       intent,
-      needsRetrieval,
-      needsUserMemory:
-        typeof raw.needsUserMemory === 'boolean'
-          ? raw.needsUserMemory
-          : intent === 'NORMAL_CHAT' || intent === 'USER_MEMORY_QUESTION',
-      needsConversationSummary:
-        typeof raw.needsConversationSummary === 'boolean'
-          ? raw.needsConversationSummary
-          : intent === 'NORMAL_CHAT' ||
-            intent === 'CONVERSATION_MEMORY_QUESTION',
-      needsVerification:
-        typeof raw.needsVerification === 'boolean'
-          ? raw.needsVerification
-          : intent !== 'NORMAL_CHAT',
+      needsRetrieval: this.normalizeNeedsRetrieval(
+        raw.needsRetrieval,
+        intent,
+        requiredEvidence,
+      ),
+      needsUserMemory: this.normalizeNeedsUserMemory(
+        raw.needsUserMemory,
+        intent,
+      ),
+      needsConversationSummary: this.normalizeNeedsConversationSummary(
+        raw.needsConversationSummary,
+        intent,
+      ),
+      needsVerification: this.normalizeNeedsVerification(
+        raw.needsVerification,
+        intent,
+      ),
       reelQuestionType,
       requiredEvidence,
       reason:
@@ -270,6 +273,10 @@ ${input.recentHistory || '(empty)'}
       typeof value === 'string' &&
       this.validReelQuestionTypes.has(value as RagReelQuestionType)
     ) {
+      if (intent !== 'REEL_VIDEO_QUESTION') {
+        return 'NONE';
+      }
+
       return value as RagReelQuestionType;
     }
 
@@ -283,25 +290,51 @@ ${input.recentHistory || '(empty)'}
     intent: RagChatIntent,
     reelQuestionType: RagReelQuestionType,
   ): RagRequiredEvidence[] {
-    let normalized: RagRequiredEvidence[] = [];
-
     if (Array.isArray(value)) {
-      normalized = value.filter(
+      const normalized = value.filter(
         (item): item is RagRequiredEvidence =>
           typeof item === 'string' &&
           this.validRequiredEvidence.has(item as RagRequiredEvidence),
       );
+
+      if (normalized.length > 0) {
+        return this.enforceEvidenceByIntentAndType(
+          normalized,
+          intent,
+          reelQuestionType,
+        );
+      }
     }
 
-    if (normalized.length === 0) {
-      normalized = this.defaultRequiredEvidence(intent, reelQuestionType);
+    return this.defaultRequiredEvidence(intent, reelQuestionType);
+  }
+
+  private enforceEvidenceByIntentAndType(
+    evidence: RagRequiredEvidence[],
+    intent: RagChatIntent,
+    reelQuestionType: RagReelQuestionType,
+  ): RagRequiredEvidence[] {
+    if (intent !== 'REEL_VIDEO_QUESTION') {
+      return this.dedupeEvidence(evidence);
     }
 
-    return this.enforceRequiredEvidenceForRoute(
-      normalized,
-      intent,
-      reelQuestionType,
-    );
+    if (reelQuestionType === 'GENERAL_REEL_SUMMARY') {
+      return this.dedupeEvidence([...evidence, 'TRANSCRIPT', 'METADATA']);
+    }
+
+    if (reelQuestionType === 'TRANSCRIPT_CONTENT') {
+      return this.dedupeEvidence([...evidence, 'TRANSCRIPT']);
+    }
+
+    if (reelQuestionType === 'REEL_METADATA') {
+      return this.dedupeEvidence([...evidence, 'METADATA']);
+    }
+
+    if (reelQuestionType === 'VISUAL_CONTENT') {
+      return this.dedupeEvidence([...evidence, 'VISUAL']);
+    }
+
+    return this.dedupeEvidence(evidence);
   }
 
   private defaultRequiredEvidence(
@@ -309,20 +342,20 @@ ${input.recentHistory || '(empty)'}
     reelQuestionType: RagReelQuestionType,
   ): RagRequiredEvidence[] {
     if (intent === 'REEL_VIDEO_QUESTION') {
-      if (reelQuestionType === 'VISUAL_CONTENT') {
-        return ['VISUAL'];
-      }
-
-      if (reelQuestionType === 'REEL_METADATA') {
-        return ['METADATA'];
-      }
-
       if (reelQuestionType === 'GENERAL_REEL_SUMMARY') {
         return ['TRANSCRIPT', 'METADATA'];
       }
 
       if (reelQuestionType === 'TRANSCRIPT_CONTENT') {
         return ['TRANSCRIPT'];
+      }
+
+      if (reelQuestionType === 'REEL_METADATA') {
+        return ['METADATA'];
+      }
+
+      if (reelQuestionType === 'VISUAL_CONTENT') {
+        return ['VISUAL'];
       }
 
       return ['TRANSCRIPT', 'METADATA'];
@@ -339,35 +372,8 @@ ${input.recentHistory || '(empty)'}
     return ['NONE'];
   }
 
-  private enforceRequiredEvidenceForRoute(
-    evidence: RagRequiredEvidence[],
-    intent: RagChatIntent,
-    reelQuestionType: RagReelQuestionType,
-  ): RagRequiredEvidence[] {
-    if (intent !== 'REEL_VIDEO_QUESTION') {
-      return this.dedupeEvidence(evidence);
-    }
-
-    if (reelQuestionType === 'GENERAL_REEL_SUMMARY') {
-      return this.dedupeEvidence([...evidence, 'TRANSCRIPT', 'METADATA']);
-    }
-
-    if (reelQuestionType === 'REEL_METADATA') {
-      return this.dedupeEvidence([...evidence, 'METADATA']);
-    }
-
-    if (reelQuestionType === 'TRANSCRIPT_CONTENT') {
-      return this.dedupeEvidence([...evidence, 'TRANSCRIPT']);
-    }
-
-    if (reelQuestionType === 'VISUAL_CONTENT') {
-      return this.dedupeEvidence([...evidence, 'VISUAL']);
-    }
-
-    return this.dedupeEvidence(evidence);
-  }
-
-  private defaultNeedsRetrieval(
+  private normalizeNeedsRetrieval(
+    value: unknown,
     intent: RagChatIntent,
     requiredEvidence: RagRequiredEvidence[],
   ): boolean {
@@ -375,9 +381,51 @@ ${input.recentHistory || '(empty)'}
       return false;
     }
 
-    return requiredEvidence.some(
-      (item) => item === 'TRANSCRIPT' || item === 'METADATA',
+    if (
+      requiredEvidence.includes('TRANSCRIPT') ||
+      requiredEvidence.includes('METADATA')
+    ) {
+      return true;
+    }
+
+    return typeof value === 'boolean' ? value : false;
+  }
+
+  private normalizeNeedsUserMemory(
+    value: unknown,
+    intent: RagChatIntent,
+  ): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    return intent === 'NORMAL_CHAT' || intent === 'USER_MEMORY_QUESTION';
+  }
+
+  private normalizeNeedsConversationSummary(
+    value: unknown,
+    intent: RagChatIntent,
+  ): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    return (
+      intent === 'NORMAL_CHAT' ||
+      intent === 'CONVERSATION_MEMORY_QUESTION' ||
+      intent === 'REEL_VIDEO_QUESTION'
     );
+  }
+
+  private normalizeNeedsVerification(
+    value: unknown,
+    intent: RagChatIntent,
+  ): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    return intent !== 'NORMAL_CHAT';
   }
 
   private dedupeEvidence(
