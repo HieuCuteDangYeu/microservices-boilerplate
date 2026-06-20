@@ -601,7 +601,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         : undefined,
     );
 
-    if (result.updatedCount > 0 && result.seenUpTo) {
+    if (result.seenUpTo) {
       client.to(conversationId).emit('messages_seen', {
         conversationId,
         readByUserId: userId,
