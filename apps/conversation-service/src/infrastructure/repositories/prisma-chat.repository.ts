@@ -24,6 +24,7 @@ import {
 } from '../../domain/entities/message.entity';
 import {
   IChatRepository,
+  type MarkMessagesAsSeenResult,
   type AnchorMessageExpansion,
   type AnchorMessageWindow,
   type MediaProcessingSyncResult,
@@ -949,29 +950,66 @@ export class PrismaChatRepository implements IChatRepository {
   async markMessagesAsSeen(
     conversationId: string,
     userId: string,
-  ): Promise<number> {
+    upToMessageId?: string,
+  ): Promise<MarkMessagesAsSeenResult> {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(conversationId);
     if (!isObjectId) throw new BadRequestException('Invalid conversation ID');
 
     await this.assertConversationParticipant(conversationId, userId);
 
     try {
+      const boundaryRecord = upToMessageId
+        ? await this.resolveAnchorBoundaryRecord(conversationId, upToMessageId)
+        : await this.prisma.message.findFirst({
+            where: { conversationId },
+            orderBy: this.anchorOrderBy(),
+            select: { id: true, createdAt: true, conversationId: true },
+          });
+
+      if (!boundaryRecord) {
+        return { updatedCount: 0 };
+      }
+
+      const boundary = this.toAnchorBoundary(boundaryRecord);
+      const seenAt = new Date();
       const result = await this.prisma.message.updateMany({
         where: {
           conversationId: conversationId,
           senderId: { not: userId },
           readBy: { none: { userId: userId } },
+          OR: [
+            { createdAt: { lt: boundary.createdAt } },
+            {
+              createdAt: boundary.createdAt,
+              id: { lte: boundary.stableId },
+            },
+          ],
         },
         data: {
-          readBy: { push: { userId: userId, at: new Date() } },
+          readBy: { push: { userId: userId, at: seenAt } },
         },
       });
 
       if (result.count > 0) {
         await this.clearConversationCache(conversationId);
       }
-      return result.count;
+      return {
+        updatedCount: result.count,
+        seenAt,
+        seenUpTo: {
+          messageId: boundaryRecord.id,
+          createdAt: boundaryRecord.createdAt,
+        },
+      };
     } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
       this.logger.error(error);
       throw new InternalServerErrorException('Could not mark seen');
     }

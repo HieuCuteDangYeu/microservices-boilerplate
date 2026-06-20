@@ -574,22 +574,40 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('mark_seen')
   async handleMarkSeen(
-    @MessageBody() conversationId: string,
+    @MessageBody()
+    payload:
+      | string
+      | {
+          conversationId: string;
+          upToMessageId?: string;
+        },
     @ConnectedSocket() client: Socket,
   ) {
     const userId = await this.resolveUserId(client);
     if (!userId) return;
 
-    const updatedCount = await this.chatRepository.markMessagesAsSeen(
+    const conversationId =
+      typeof payload === 'string' ? payload : payload?.conversationId;
+
+    if (typeof conversationId !== 'string' || !conversationId.trim()) {
+      return;
+    }
+
+    const result = await this.chatRepository.markMessagesAsSeen(
       conversationId,
       userId,
+      typeof payload === 'object' && payload?.upToMessageId
+        ? payload.upToMessageId
+        : undefined,
     );
 
-    if (updatedCount > 0) {
+    if (result.updatedCount > 0 && result.seenUpTo) {
       client.to(conversationId).emit('messages_seen', {
         conversationId,
         readByUserId: userId,
-        at: new Date(),
+        frontierCreatedAt: result.seenUpTo.createdAt.toISOString(),
+        messageId: result.seenUpTo.messageId,
+        at: result.seenAt?.toISOString() ?? new Date().toISOString(),
       });
       console.log(
         `✅ [Socket] Emitted messages_seen to room ${conversationId}`,

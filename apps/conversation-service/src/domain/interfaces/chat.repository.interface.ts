@@ -11,6 +11,15 @@ export interface MediaProcessingSyncResult {
   media: MessageMedia;
 }
 
+export interface MarkMessagesAsSeenResult {
+  updatedCount: number;
+  seenAt?: Date;
+  seenUpTo?: {
+    messageId: string;
+    createdAt: Date;
+  };
+}
+
 export interface AnchorMessageWindow {
   targetMessageId: string;
   messages: Message[];
@@ -60,7 +69,8 @@ export abstract class IChatRepository {
   abstract markMessagesAsSeen(
     conversationId: string,
     userId: string,
-  ): Promise<number>;
+    upToMessageId?: string,
+  ): Promise<MarkMessagesAsSeenResult>;
   abstract hasSharedConversation(
     userId1: string,
     userId2: string,

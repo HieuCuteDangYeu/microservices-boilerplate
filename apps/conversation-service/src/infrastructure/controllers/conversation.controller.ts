@@ -271,10 +271,12 @@ export class ConversationMicroserviceController {
   ) {
     try {
       return {
-        updatedCount: await this.chatRepository.markMessagesAsSeen(
-          data.conversationId,
-          data.userId,
-        ),
+        updatedCount: (
+          await this.chatRepository.markMessagesAsSeen(
+            data.conversationId,
+            data.userId,
+          )
+        ).updatedCount,
       };
     } catch (err: unknown) {
       const error = err as Error;
