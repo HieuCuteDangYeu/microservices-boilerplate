@@ -111,8 +111,8 @@ importers:
         specifier: ^4.0.1
         version: 4.0.1
       pnpm:
-        specifier: ^10.26.2
-        version: 10.33.4
+        specifier: 9.15.0
+        version: 9.15.0
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -3548,8 +3548,8 @@ packages:
     resolution: {integrity: sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA==}
     engines: {node: '>=4'}
 
-  pnpm@10.33.4:
-    resolution: {integrity: sha512-HGezs1my1AgRm6HtKJ80uPw8aHNBK+xv0mT73IJInlEPy+y5zp0i2ufzt2Jp2EQQRgFL3KU7mXnNelYa1jG4AA==}
+  pnpm@9.15.0:
+    resolution: {integrity: sha512-duI3l2CkMo7EQVgVvNZije5yevN3mqpMkU45RBVsQpmSGon5djge4QfUHxLPpLZmgcqccY8GaPoIMe1MbYulbA==}
     engines: {node: '>=18.12'}
     hasBin: true
 
@@ -8110,7 +8110,7 @@ snapshots:
 
   pluralize@8.0.0: {}
 
-  pnpm@10.33.4: {}
+  pnpm@9.15.0: {}
 
   postal-mime@2.7.4: {}
 
