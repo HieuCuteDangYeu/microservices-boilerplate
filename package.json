@@ -66,6 +66,10 @@
     "seed:all": "pnpm run seed:auth && pnpm run seed:user",
     "backfill:reel-chunks": "node dist/apps/content-service/apps/content-service/src/infrastructure/jobs/backfill-reel-chunks.job.js"
   },
+  "packageManager": "pnpm@9.15.0",
+  "overrides": {
+    "sharp": "^0.33.0"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",
     "@aws-sdk/s3-request-presigner": "^3.958.0",
@@ -145,10 +149,5 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "sharp": "^0.33.0"
-    }
   }
 }
