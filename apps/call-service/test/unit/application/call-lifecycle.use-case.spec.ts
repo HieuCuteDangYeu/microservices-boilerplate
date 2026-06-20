@@ -1,12 +1,12 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
-import { AnswerCallUseCase } from './answer-call.use-case';
-import { CreateTransportUseCase } from './create-transport.use-case';
-import { InitiateCallUseCase } from './initiate-call.use-case';
-import { JoinCallUseCase } from './join-call.use-case';
-import { LeaveCallUseCase } from './leave-call.use-case';
-import { CallParticipant } from '../../domain/entities/call-participant.entity';
-import { CallSession } from '../../domain/entities/call-session.entity';
+import { AnswerCallUseCase } from '../../../src/application/use-cases/answer-call.use-case';
+import { CreateTransportUseCase } from '../../../src/application/use-cases/create-transport.use-case';
+import { InitiateCallUseCase } from '../../../src/application/use-cases/initiate-call.use-case';
+import { JoinCallUseCase } from '../../../src/application/use-cases/join-call.use-case';
+import { LeaveCallUseCase } from '../../../src/application/use-cases/leave-call.use-case';
+import { CallParticipant } from '../../../src/domain/entities/call-participant.entity';
+import { CallSession } from '../../../src/domain/entities/call-session.entity';
 
 describe('Call lifecycle use cases', () => {
   const baseSession = new CallSession({
@@ -320,6 +320,27 @@ describe('Call lifecycle use cases', () => {
         userId: 'user-b',
       }),
     );
+  });
+
+  it('does not allow answering before the callee has joined', async () => {
+    const sessionRepository = {
+      findByCallId: jest.fn().mockResolvedValue(new CallSession(baseSession)),
+      save: jest.fn(),
+    };
+    const eventPublisher = {
+      publish: jest.fn(),
+    };
+
+    const useCase = new AnswerCallUseCase(
+      sessionRepository as never,
+      eventPublisher,
+    );
+
+    await expect(useCase.execute('call-1', 'user-b')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(sessionRepository.save).not.toHaveBeenCalled();
+    expect(eventPublisher.publish).not.toHaveBeenCalled();
   });
 
   it('cancels a pre-answer call and clears room state', async () => {

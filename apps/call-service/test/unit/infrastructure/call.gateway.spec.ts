@@ -1,8 +1,8 @@
 import { GATEWAY_OPTIONS } from '@nestjs/websockets/constants';
 import type { Socket } from 'socket.io';
-import { CallParticipant } from '../../domain/entities/call-participant.entity';
-import { CallSession } from '../../domain/entities/call-session.entity';
-import { CallGateway } from './call.gateway';
+import { CallParticipant } from '../../../src/domain/entities/call-participant.entity';
+import { CallSession } from '../../../src/domain/entities/call-session.entity';
+import { CallGateway } from '../../../src/infrastructure/gateways/call.gateway';
 
 describe('CallGateway reconnect recovery', () => {
   const initiatedVoiceSession = new CallSession({
@@ -80,16 +80,27 @@ describe('CallGateway reconnect recovery', () => {
       }),
     } as never;
 
+    const callerSocket = createSocket({
+      id: 'socket-0',
+      userId: initiatedVoiceSession.initiatorId,
+      callIds: [],
+      emit: jest.fn(),
+    });
+
     await gateway.handleInitiateCall(
       {
         conversationId: initiatedVoiceSession.conversationId,
         targetUserId: initiatedVoiceSession.targetUserId,
         callType: 'VOICE',
       },
-      createSocket({
-        id: 'socket-0',
-        userId: initiatedVoiceSession.initiatorId,
-        callIds: [],
+      callerSocket,
+    );
+
+    expect(callerSocket.emit).toHaveBeenCalledWith(
+      'call_joined',
+      expect.objectContaining({
+        callId: initiatedVoiceSession.callId,
+        noAnswerTimeoutMs: 30000,
       }),
     );
 

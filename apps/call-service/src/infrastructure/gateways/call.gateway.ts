@@ -4,6 +4,7 @@ import {
   Inject,
   Logger,
   NotFoundException,
+  UseFilters,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import {
@@ -32,6 +33,7 @@ import type { CallSession } from '../../domain/entities/call-session.entity';
 import type { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
 import type { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
 import type { ICallStateRepository } from '../../domain/interfaces/call-state.repository.interface';
+import { CallWsExceptionFilter } from './call-ws-exception.filter';
 
 type InitiateCallPayload = {
   conversationId: string;
@@ -88,6 +90,7 @@ type ResumeConsumerPayload = {
   pingInterval: 5000,
   pingTimeout: 5000,
 })
+@UseFilters(new CallWsExceptionFilter())
 export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
 
@@ -248,6 +251,9 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: result.role,
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
+      ...(result.session.callType === 'VOICE'
+        ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
+        : {}),
     });
 
     this.server.to(result.session.targetUserId).emit('incoming_call', {
@@ -285,6 +291,9 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: result.role,
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
+      ...(result.session.callType === 'VOICE'
+        ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
+        : {}),
     });
 
     if (result.shouldEmitNewPeer) {

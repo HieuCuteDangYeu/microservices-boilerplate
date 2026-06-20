@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { io, type Socket } from 'socket.io-client';
 import { INestApplication } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { CallGateway } from '../src/infrastructure/gateways/call.gateway';
-import { CallServiceModule } from '../src/call-service.module';
+import { CallGateway } from '../../src/infrastructure/gateways/call.gateway';
+import { CallServiceModule } from '../../src/call-service.module';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import type {
   ActiveProducerResult,
@@ -13,7 +13,7 @@ import type {
   CreateSendTransportResult,
   ProducedMediaResult,
   RouterRtpCapabilitiesResult,
-} from '../src/domain/interfaces/call-media.engine.interface';
+} from '../../src/domain/interfaces/call-media.engine.interface';
 
 type RoomState = {
   transports: Map<
@@ -750,7 +750,10 @@ describe('Call Service P0 flow (e2e)', () => {
     const caller = await connectClient('caller-token');
     const callee = await connectClient('callee-token');
 
-    const callerJoined = onceEvent<{ callId: string }>(caller, 'call_joined');
+    const callerJoined = onceEvent<{ callId: string; noAnswerTimeoutMs: number }>(
+      caller,
+      'call_joined',
+    );
     const incomingCall = onceEvent<{ callId: string }>(callee, 'incoming_call');
 
     caller.emit('initiate_call', {
@@ -759,11 +762,12 @@ describe('Call Service P0 flow (e2e)', () => {
       callType: 'VOICE',
     });
 
-    const [{ callId }, incoming] = await Promise.all([
+    const [{ callId, noAnswerTimeoutMs }, incoming] = await Promise.all([
       callerJoined,
       incomingCall,
     ]);
     expect(incoming.callId).toBe(callId);
+    expect(noAnswerTimeoutMs).toBe(50);
 
     const callEnded = onceEvent<{ callId: string; reason: string }>(
       callee,
@@ -833,6 +837,58 @@ describe('Call Service P0 flow (e2e)', () => {
           entry.payload.reason === 'no_answer',
       ),
     ).toBeDefined();
+  });
+
+  it('does not let answer_call bypass join_call before the no-answer timeout', async () => {
+    const caller = await connectClient('caller-token');
+    const callee = await connectClient('callee-token');
+
+    const callerJoined = onceEvent<{ callId: string }>(caller, 'call_joined');
+    const incomingCall = onceEvent<{ callId: string }>(callee, 'incoming_call');
+
+    caller.emit('initiate_call', {
+      conversationId: 'conv-cancel',
+      targetUserId: calleeUser.id,
+      callType: 'VOICE',
+    });
+
+    const [{ callId }, incoming] = await Promise.all([
+      callerJoined,
+      incomingCall,
+    ]);
+    expect(incoming.callId).toBe(callId);
+
+    const answerException = onceEvent<{ status: string; message: string }>(
+      callee,
+      'exception',
+    );
+    const callerEnded = onceEvent<{ callId: string; reason: string }>(
+      caller,
+      'call_ended',
+    );
+    const calleeEnded = onceEvent<{ callId: string; reason: string }>(
+      callee,
+      'call_ended',
+    );
+
+    callee.emit('answer_call', { callId });
+
+    await expect(answerException).resolves.toEqual(
+      expect.objectContaining({
+        status: 'error',
+        message: 'Call cannot be answered in its current state',
+      }),
+    );
+    await expect(callerEnded).resolves.toEqual({
+      callId,
+      reason: 'no_answer',
+    });
+    await expect(calleeEnded).resolves.toEqual({
+      callId,
+      reason: 'no_answer',
+    });
+
+    await expectCallStateCleared(callId);
   });
 
   it('fails fast when a ringing call disconnects before answer', async () => {

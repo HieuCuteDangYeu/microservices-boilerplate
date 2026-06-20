@@ -26,7 +26,7 @@ export class AnswerCallUseCase {
       throw new ForbiddenException('Only the callee can answer this call');
     }
 
-    if (session.status !== 'ringing' && session.status !== 'initiated') {
+    if (session.status !== 'ringing') {
       throw new ForbiddenException(
         'Call cannot be answered in its current state',
       );
