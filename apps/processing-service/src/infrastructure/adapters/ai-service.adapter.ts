@@ -2,6 +2,10 @@ import {
   GenerateEmbeddingRequest,
   GenerateEmbeddingResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
+import {
+  ExtractedReelMetadata,
+  ReelMetadataExtractionInput,
+} from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -66,6 +70,30 @@ export class AiServiceAdapter implements IAiService {
       this.logger.error(
         `Failed to transcribe audio via AI service: ${message}`,
       );
+      throw error;
+    }
+  }
+
+  async extractReelMetadata(
+    input: ReelMetadataExtractionInput,
+  ): Promise<ExtractedReelMetadata> {
+    try {
+      const response = await lastValueFrom(
+        this.aiClient
+          .send<{
+            metadata: ExtractedReelMetadata;
+          }>('ai.extract_reel_metadata', input)
+          .pipe(catchError((error) => this.handleMicroserviceError(error))),
+      );
+
+      return response.metadata;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.error(
+        `Failed to extract reel metadata via AI service: ${message}`,
+      );
+
       throw error;
     }
   }

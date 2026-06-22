@@ -1,9 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { EmbedReelChunksUseCase } from '@processing/application/use-cases/embed-reel-chunks.use-case';
+import { NormalizeReelMetadataUseCase } from '@processing/application/use-cases/normalize-reel-metadata.use-case';
+import { ValidateReelIndexUseCase } from '@processing/application/use-cases/validate-reel-index.use-case';
 import { AiServiceAdapter } from '@processing/infrastructure/adapters/ai-service.adapter';
-import { ConversationMediaAdapter } from '@processing/infrastructure/adapters/conversation-media.adapter';
 import { ContentServiceAdapter } from '@processing/infrastructure/adapters/content-service.adapter';
+import { ConversationMediaAdapter } from '@processing/infrastructure/adapters/conversation-media.adapter';
+import { LangGraphReelIndexingWorkflowAdapter } from '@processing/infrastructure/adapters/langgraph-reel-indexing-workflow.adapter';
 import { BuildReelAiMetadataUseCase } from './application/use-cases/build-reel-ai-metadata.use-case';
 import { BuildReelEmbeddingTextUseCase } from './application/use-cases/build-reel-embedding-text.use-case';
 import { BuildReelSearchIndexUseCase } from './application/use-cases/build-reel-search-index.use-case';
@@ -113,6 +117,9 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     JobConcurrencyLimiterService,
     R2Service,
     TempFileService,
+    EmbedReelChunksUseCase,
+    NormalizeReelMetadataUseCase,
+    ValidateReelIndexUseCase,
     {
       provide: 'IAiService',
       useClass: AiServiceAdapter,
@@ -140,6 +147,10 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     {
       provide: 'IConversationMediaService',
       useClass: ConversationMediaAdapter,
+    },
+    {
+      provide: 'IReelIndexingWorkflow',
+      useClass: LangGraphReelIndexingWorkflowAdapter,
     },
   ],
 })

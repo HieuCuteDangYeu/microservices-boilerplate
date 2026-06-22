@@ -1,3 +1,4 @@
+import { ExtractReelMetadataUseCase } from '@ai/application/use-cases/extract-reel-metadata.use-case';
 import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
@@ -5,6 +6,7 @@ import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-aud
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
 import type { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+import type { ReelMetadataExtractionInput } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 import { Controller } from '@nestjs/common';
 import {
@@ -23,6 +25,7 @@ export class AiController {
     private readonly transcribeAudioBufferUseCase: TranscribeAudioBufferUseCase,
     private readonly streamChatUseCase: StreamChatUseCase,
     private readonly handleConversationTurnCompletedUseCase: HandleConversationTurnCompletedUseCase,
+    private readonly extractReelMetadataUseCase: ExtractReelMetadataUseCase,
   ) {}
 
   @MessagePattern('ai.generate_embedding')
@@ -166,6 +169,36 @@ export class AiController {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[ConversationTurnCompleted] ${message}`);
+    }
+  }
+
+  @MessagePattern('ai.extract_reel_metadata')
+  async handleExtractReelMetadata(
+    @Payload() data: ReelMetadataExtractionInput,
+  ) {
+    if (!data || typeof data !== 'object') {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid reel metadata extraction payload',
+      });
+    }
+
+    try {
+      const metadata = await this.extractReelMetadataUseCase.execute(data);
+
+      return { metadata };
+    } catch (err: unknown) {
+      if (err instanceof RpcException) {
+        throw err;
+      }
+
+      const error = err as Error;
+      console.error(`[ExtractReelMetadata] ${error.message}`);
+
+      throw new RpcException({
+        statusCode: 500,
+        message: error.message,
+      });
     }
   }
 }

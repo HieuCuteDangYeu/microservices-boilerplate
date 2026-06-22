@@ -55,19 +55,29 @@ export class ProcessReelUseCase {
         progress: currentProgress,
       });
 
-      const { transcript, transcriptVtt, transcriptSegments, chunks } =
-        await this.buildReelAiMetadataUseCase.execute({
-          reelId,
-          title: data.title,
-          description: data.description,
-          tags: data.tags,
-          inputPath: workspace.inputPath,
-          audioPath: workspace.audioPath,
-        });
+      const {
+        title,
+        description,
+        tags,
+        transcript,
+        transcriptVtt,
+        transcriptSegments,
+        chunks,
+      } = await this.buildReelAiMetadataUseCase.execute({
+        reelId,
+        title: data.title,
+        description: data.description,
+        tags: data.tags,
+        inputPath: workspace.inputPath,
+        audioPath: workspace.audioPath,
+      });
 
       await this.contentService.emitProcessingCompleted({
         reelId,
         status: 'COMPLETED',
+        title,
+        description,
+        tags,
         transcript,
         transcriptVtt,
         transcriptSegments,

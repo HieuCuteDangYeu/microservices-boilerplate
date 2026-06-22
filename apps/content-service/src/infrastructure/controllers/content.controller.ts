@@ -149,6 +149,9 @@ export class ContentController {
     data: {
       reelId: string;
       status: 'COMPLETED';
+      title?: string;
+      description?: string;
+      tags?: string[];
       transcript?: string;
       transcriptVtt?: string;
       transcriptSegments?: TranscriptSegment[];
@@ -171,6 +174,9 @@ export class ContentController {
         data.message,
         data.progress,
         data.chunks,
+        data.title,
+        data.description,
+        data.tags,
       );
     } catch (err: unknown) {
       const error = err as Error;

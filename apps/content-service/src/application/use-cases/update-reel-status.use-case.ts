@@ -23,12 +23,18 @@ export class UpdateReelStatusUseCase {
     processingMessage?: string,
     processingProgress?: number,
     chunks?: ReelChunkIndexInput[],
+    title?: string,
+    description?: string,
+    tags?: string[],
   ) {
     let sanitizedTranscript = transcript;
     let sanitizedTranscriptVtt = transcriptVtt?.trim() || undefined;
     let sanitizedTranscriptSegments =
       this.normalizeTranscriptSegments(transcriptSegments);
     const sanitizedChunks = this.normalizeChunks(chunks);
+    const sanitizedTitle = this.normalizeOptionalText(title, 80);
+    const sanitizedDescription = this.normalizeOptionalText(description, 500);
+    const sanitizedTags = this.normalizeTags(tags);
     let nextStage = processingStage;
     let nextMessage = processingMessage;
     let nextProgress = this.normalizeProgress(processingProgress);
@@ -95,6 +101,9 @@ export class UpdateReelStatusUseCase {
       nextMessage,
       nextProgress,
       sanitizedChunks,
+      sanitizedTitle,
+      sanitizedDescription,
+      sanitizedTags,
     );
   }
 
@@ -222,5 +231,58 @@ export class UpdateReelStatusUseCase {
     });
 
     return sanitized.length > 0 ? sanitized : undefined;
+  }
+
+  private normalizeOptionalText(
+    value: unknown,
+    maxChars: number,
+  ): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalized = value.replace(/\s+/g, ' ').trim();
+
+    if (!normalized) {
+      return undefined;
+    }
+
+    return normalized.length > maxChars
+      ? normalized.slice(0, maxChars).trim()
+      : normalized;
+  }
+
+  private normalizeTags(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    const seen = new Set<string>();
+    const tags: string[] = [];
+
+    for (const rawTag of value) {
+      if (typeof rawTag !== 'string') {
+        continue;
+      }
+
+      const tag = rawTag
+        .replace(/^#+/, '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+
+      if (!tag || seen.has(tag)) {
+        continue;
+      }
+
+      seen.add(tag);
+      tags.push(tag);
+
+      if (tags.length >= 8) {
+        break;
+      }
+    }
+
+    return tags.length > 0 ? tags : undefined;
   }
 }

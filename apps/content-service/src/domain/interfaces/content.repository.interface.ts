@@ -96,6 +96,9 @@ export interface IContentRepository {
     processingMessage?: string,
     processingProgress?: number,
     chunks?: ReelChunkIndexInput[],
+    title?: string,
+    description?: string,
+    tags?: string[],
   ): Promise<Reel>;
 
   findById(id: string): Promise<Reel | null>;

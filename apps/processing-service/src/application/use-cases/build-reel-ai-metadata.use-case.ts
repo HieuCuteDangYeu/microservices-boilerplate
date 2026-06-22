@@ -1,26 +1,18 @@
 import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { IAiService } from '../../domain/interfaces/ai-service.interface';
-import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
-import type { IVideoProcessingService } from '../../domain/interfaces/video-processing.service.interface';
-import { formatProcessingError } from '../utils/format-processing-error';
-import { BuildReelSearchIndexUseCase } from './build-reel-search-index.use-case';
-import { BuildReelTranscriptionPromptUseCase } from './build-reel-transcription-prompt.use-case';
+import type {
+  IReelIndexingWorkflow,
+  ReelIndexingWorkflowTraceStep,
+} from '../../domain/interfaces/reel-indexing-workflow.interface';
 
 @Injectable()
 export class BuildReelAiMetadataUseCase {
   private readonly logger = new Logger(BuildReelAiMetadataUseCase.name);
 
   constructor(
-    @Inject('IAiService')
-    private readonly aiService: IAiService,
-    @Inject('IVideoProcessingService')
-    private readonly videoProcessingService: IVideoProcessingService,
-    @Inject('ITempFileService')
-    private readonly tempFileService: ITempFileService,
-    private readonly buildReelSearchIndexUseCase: BuildReelSearchIndexUseCase,
-    private readonly buildReelTranscriptionPromptUseCase: BuildReelTranscriptionPromptUseCase,
+    @Inject('IReelIndexingWorkflow')
+    private readonly reelIndexingWorkflow: IReelIndexingWorkflow,
   ) {}
 
   async execute(data: {
@@ -31,63 +23,46 @@ export class BuildReelAiMetadataUseCase {
     inputPath: string;
     audioPath: string;
   }): Promise<{
+    title?: string;
+    description?: string;
+    tags?: string[];
     transcript?: string;
     transcriptVtt?: string;
     transcriptSegments?: TranscriptionResult['segments'];
     chunks?: ReelChunkIndexInput[];
   }> {
-    let transcription: TranscriptionResult | undefined;
+    const result = await this.reelIndexingWorkflow.execute(data);
 
-    try {
-      await this.videoProcessingService.extractAudioForTranscription(
-        data.inputPath,
-        data.audioPath,
-      );
-
-      const audioBuffer = this.tempFileService.readFile(data.audioPath);
-
-      this.tempFileService.removeFileIfExists(data.audioPath);
-
-      transcription = await this.aiService.transcribeAudio(audioBuffer, {
-        initialPrompt: this.buildReelTranscriptionPromptUseCase.execute(data),
-      });
-
-      this.logger.log(
-        `[Reel ${data.reelId}] Audio transcription completed: chars=${transcription.text?.length ?? 0}, segments=${transcription.segments?.length ?? 0}`,
-      );
-    } catch (error: unknown) {
-      const { message, stack } = formatProcessingError(error);
-
-      this.logger.warn(
-        `[Reel ${data.reelId}] Audio transcription failed, continuing with metadata-only indexing if available: ${message}`,
-        stack,
-      );
-    } finally {
-      this.tempFileService.removeFileIfExists(data.audioPath);
-    }
-
-    const transcript = transcription?.text?.trim() || undefined;
-    const transcriptVtt = transcription?.vtt?.trim() || undefined;
-
-    const transcriptSegments =
-      transcription?.segments && transcription.segments.length > 0
-        ? transcription.segments
-        : undefined;
-
-    const chunks = await this.buildReelSearchIndexUseCase.execute({
-      reelId: data.reelId,
-      title: data.title,
-      description: data.description,
-      tags: data.tags,
-      transcript,
-      transcriptSegments,
-    });
+    this.logTrace(data.reelId, result.trace, result.nodeTimings);
 
     return {
-      transcript,
-      transcriptVtt,
-      transcriptSegments,
-      chunks: chunks.length > 0 ? chunks : undefined,
+      title: result.title,
+      description: result.description,
+      tags: result.tags,
+      transcript: result.transcript,
+      transcriptVtt: result.transcriptVtt,
+      transcriptSegments: result.transcriptSegments,
+      chunks: result.chunks,
     };
+  }
+
+  private logTrace(
+    reelId: string,
+    trace: ReelIndexingWorkflowTraceStep[],
+    nodeTimings: Record<string, number>,
+  ): void {
+    const traceSummary = trace
+      .map((step) => `${step.node}:${step.status}`)
+      .join(' -> ');
+
+    this.logger.log(
+      `[Reel ${reelId}] Indexing workflow trace: ${traceSummary}`,
+    );
+
+    this.logger.debug(
+      `[Reel ${reelId}] Indexing workflow timings: ${JSON.stringify(
+        nodeTimings,
+      )}`,
+    );
   }
 }

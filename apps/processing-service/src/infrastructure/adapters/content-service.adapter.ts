@@ -84,6 +84,9 @@ export class ContentServiceAdapter implements IContentService {
     stage?: string;
     message?: string;
     progress?: number;
+    title?: string;
+    description?: string;
+    tags?: string[];
   }): Promise<void> {
     try {
       await firstValueFrom(

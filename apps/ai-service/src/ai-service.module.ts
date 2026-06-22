@@ -1,6 +1,7 @@
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
 import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-context-sufficiency.use-case';
 import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
+import { ExtractReelMetadataUseCase } from '@ai/application/use-cases/extract-reel-metadata.use-case';
 import { ExtractUserMemoriesFromTurnUseCase } from '@ai/application/use-cases/extract-user-memories-from-turn.use-case';
 import { GenerateDraftAnswerUseCase } from '@ai/application/use-cases/generate-draft-answer.use-case';
 import { GenerateEmbeddingUseCase } from '@ai/application/use-cases/generate-embedding.use-case';
@@ -119,6 +120,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     BuildRagCitationsUseCase,
     SaveRagTraceUseCase,
     MemoryWriterAgentUseCase,
+    ExtractReelMetadataUseCase,
 
     {
       provide: 'IEmbeddingService',

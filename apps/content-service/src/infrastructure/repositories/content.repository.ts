@@ -110,10 +110,16 @@ export class ContentRepository
     processingMessage?: string,
     processingProgress?: number,
     chunks?: ReelChunkIndexInput[],
+    title?: string,
+    description?: string,
+    tags?: string[],
   ): Promise<Reel> {
     const updatedRecord = await this.$transaction(async (tx) => {
       const data: Record<string, unknown> = { status };
 
+      if (title !== undefined) data['title'] = title;
+      if (description !== undefined) data['description'] = description;
+      if (tags !== undefined) data['tags'] = tags;
       if (transcript !== undefined) data['transcript'] = transcript;
       if (transcriptVtt !== undefined) data['transcriptVtt'] = transcriptVtt;
       if (transcriptSegments !== undefined) {

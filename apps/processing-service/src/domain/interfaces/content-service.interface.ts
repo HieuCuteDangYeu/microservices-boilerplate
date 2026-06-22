@@ -21,6 +21,9 @@ export interface IContentService {
   emitProcessingCompleted(data: {
     reelId: string;
     status: 'COMPLETED';
+    title?: string;
+    description?: string;
+    tags?: string[];
     transcript?: string;
     transcriptVtt?: string;
     transcriptSegments?: TranscriptSegment[];
