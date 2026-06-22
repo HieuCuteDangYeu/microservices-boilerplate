@@ -1107,6 +1107,13 @@ export class PrismaChatRepository implements IChatRepository {
       return undefined;
     }
 
+    if (content === RECALLED_PREVIEW_CONTENT) {
+      return this.buildTextOnlyReplyPreview({
+        content,
+        senderName,
+      });
+    }
+
     return {
       senderName,
       content,
@@ -1114,6 +1121,23 @@ export class PrismaChatRepository implements IChatRepository {
       ...(typeof mediaWidth === 'number' ? { mediaWidth } : {}),
       ...(typeof mediaHeight === 'number' ? { mediaHeight } : {}),
       type: type as MessageReplyPreview['type'],
+    };
+  }
+
+  private buildTextOnlyReplyPreview({
+    content,
+    senderName,
+  }: {
+    content?: string;
+    senderName: string;
+  }): MessageReplyPreview {
+    return {
+      senderName,
+      content:
+        typeof content === 'string' && content.length > 0
+          ? content
+          : RECALLED_PREVIEW_CONTENT,
+      type: 'text',
     };
   }
 
@@ -1125,6 +1149,13 @@ export class PrismaChatRepository implements IChatRepository {
 
     if (!current) {
       return undefined;
+    }
+
+    if (content === RECALLED_PREVIEW_CONTENT) {
+      return this.buildTextOnlyReplyPreview({
+        content,
+        senderName: current.senderName,
+      });
     }
 
     return {
@@ -1303,6 +1334,13 @@ export class PrismaChatRepository implements IChatRepository {
     }
 
     const replyTargetMedia = this.normalizeMedia(replyTarget.media);
+    const senderName = await this.getUserPreviewName(replyTarget.senderId);
+
+    if (replyTarget.isRecalled) {
+      return this.buildTextOnlyReplyPreview({
+        senderName,
+      });
+    }
 
     const thumbnailUri =
       replyTarget.type === 'video'
@@ -1310,7 +1348,7 @@ export class PrismaChatRepository implements IChatRepository {
         : (replyTargetMedia?.thumbnailUrl ?? replyTargetMedia?.fileUrl);
 
     return {
-      senderName: await this.getUserPreviewName(replyTarget.senderId),
+      senderName,
       content: this.getReplyPreviewContent(replyTarget),
       ...(thumbnailUri ? { thumbnailUri } : {}),
       ...(replyTargetMedia?.width

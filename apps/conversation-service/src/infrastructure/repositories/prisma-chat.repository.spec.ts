@@ -12,6 +12,10 @@ type ReplyPreviewHarness = {
     replyToId: string | undefined,
     conversationId: string,
   ) => Promise<MessageReplyPreview | undefined>;
+  mergeReplyPreviewContent: (
+    value: unknown,
+    content: string,
+  ) => MessageReplyPreview | undefined;
   normalizeReplyPreview: (value: unknown) => MessageReplyPreview | undefined;
 };
 
@@ -148,6 +152,33 @@ describe('PrismaChatRepository reply previews', () => {
     });
   });
 
+  it('returns a text-only preview when replying to a recalled media message', async () => {
+    const { repository } = createRepositoryHarness({
+      replyTarget: {
+        id: 'image-message',
+        conversationId: 'conversation-1',
+        senderId: 'sender-1',
+        content: '[Hinh anh]',
+        type: 'image',
+        signalType: 0,
+        isRecalled: true,
+        media: {
+          fileUrl: 'https://cdn.velora.test/chat/image.jpg',
+          width: 1200,
+          height: 900,
+        },
+      },
+    });
+
+    await expect(
+      repository.buildReplyPreview('image-message', 'conversation-1'),
+    ).resolves.toEqual({
+      senderName: 'Sender Name',
+      content: 'Tin nhắn đã thu hồi',
+      type: 'text',
+    });
+  });
+
   it('rejects reply targets from another conversation', async () => {
     const { repository } = createRepositoryHarness({
       replyTarget: {
@@ -185,6 +216,47 @@ describe('PrismaChatRepository reply previews', () => {
       mediaWidth: 1080,
       mediaHeight: 1920,
       type: 'video',
+    });
+  });
+
+  it('normalizes recalled reply previews to text-only metadata', () => {
+    const { repository } = createRepositoryHarness({});
+
+    expect(
+      repository.normalizeReplyPreview({
+        senderName: 'Sender Name',
+        content: 'Tin nhắn đã thu hồi',
+        thumbnailUri: 'https://cdn.velora.test/chat/video-thumb.jpg',
+        mediaWidth: 1080,
+        mediaHeight: 1920,
+        type: 'video',
+      }),
+    ).toEqual({
+      senderName: 'Sender Name',
+      content: 'Tin nhắn đã thu hồi',
+      type: 'text',
+    });
+  });
+
+  it('drops media metadata when recall updates an existing reply preview', () => {
+    const { repository } = createRepositoryHarness({});
+
+    expect(
+      repository.mergeReplyPreviewContent(
+        {
+          senderName: 'Sender Name',
+          content: '[Video]',
+          thumbnailUri: 'https://cdn.velora.test/chat/video-thumb.jpg',
+          mediaWidth: 1080,
+          mediaHeight: 1920,
+          type: 'video',
+        },
+        'Tin nhắn đã thu hồi',
+      ),
+    ).toEqual({
+      senderName: 'Sender Name',
+      content: 'Tin nhắn đã thu hồi',
+      type: 'text',
     });
   });
 });
