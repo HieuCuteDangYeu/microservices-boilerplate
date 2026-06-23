@@ -27,16 +27,16 @@ export class MemoryWriterAgentUseCase {
       true,
     );
 
-    let messageCount = 0;
-
-    if (conversationMemoryEnabled) {
-      const result = await this.safeUpdateConversationMemory(payload);
-      messageCount = result.messageCount;
-    }
+    const conversationResult = conversationMemoryEnabled
+      ? await this.safeUpdateConversationMemory(payload)
+      : {
+          messageCount: this.estimateMessageCount(payload),
+          summaryUpdated: false,
+        };
 
     if (
       userMemoryExtractionEnabled &&
-      this.shouldExtractUserMemory(messageCount)
+      this.shouldExtractUserMemory(conversationResult.messageCount)
     ) {
       await this.safeExtractUserMemories(payload);
     }
@@ -55,7 +55,7 @@ export class MemoryWriterAgentUseCase {
       );
 
       return {
-        messageCount: 0,
+        messageCount: this.estimateMessageCount(payload),
         summaryUpdated: false,
       };
     }
@@ -99,12 +99,20 @@ export class MemoryWriterAgentUseCase {
 
     const everyNTurns = this.getPositiveNumber(
       'AI_USER_MEMORY_EVERY_N_TURNS',
-      6,
+      1,
     );
 
     const turnCount = Math.floor(messageCount / 2);
 
     return turnCount > 0 && turnCount % everyNTurns === 0;
+  }
+
+  private estimateMessageCount(
+    payload: ConversationTurnCompletedPayload,
+  ): number {
+    const recentMessageCount = payload.memory?.recentMessages?.length ?? 0;
+
+    return Math.max(recentMessageCount + 2, 2);
   }
 
   private getBoolean(key: string, fallback: boolean): boolean {

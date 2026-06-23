@@ -5,6 +5,7 @@ import { ReelContextSearchResult } from '@common/content/interfaces/reel-context
 import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { ReelShare } from '@content/domain/entities/reel-share.entity';
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/content-client';
 import { Reel } from '../../domain/entities/reel.entity';
 import {
@@ -26,6 +27,10 @@ export class ContentRepository
   extends PrismaClient
   implements OnModuleInit, IContentRepository
 {
+  constructor(private readonly configService: ConfigService) {
+    super();
+  }
+
   private readonly reelListSelect = {
     id: true,
     userId: true,
@@ -50,6 +55,71 @@ export class ContentRepository
 
   async onModuleDestroy() {
     await this.$disconnect();
+  }
+
+  private getSearchNumber(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const value = Number(this.configService.get<string>(key) ?? fallback);
+
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.min(Math.max(value, min), max);
+  }
+
+  private getSearchInteger(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    return Math.round(this.getSearchNumber(key, fallback, min, max));
+  }
+
+  private getNormalizedSearchWeights(): {
+    vectorWeight: number;
+    keywordWeight: number;
+    metadataWeight: number;
+  } {
+    const vector = this.getSearchNumber(
+      'CONTENT_RAG_VECTOR_WEIGHT',
+      0.62,
+      0,
+      1,
+    );
+    const keyword = this.getSearchNumber(
+      'CONTENT_RAG_KEYWORD_WEIGHT',
+      0.28,
+      0,
+      1,
+    );
+    const metadata = this.getSearchNumber(
+      'CONTENT_RAG_METADATA_WEIGHT',
+      0.1,
+      0,
+      1,
+    );
+
+    const total = vector + keyword + metadata;
+
+    if (total <= 0) {
+      return {
+        vectorWeight: 0.62,
+        keywordWeight: 0.28,
+        metadataWeight: 0.1,
+      };
+    }
+
+    return {
+      vectorWeight: vector / total,
+      keywordWeight: keyword / total,
+      metadataWeight: metadata / total,
+    };
   }
 
   private toDomain(record: Record<string, unknown>): Reel {
@@ -214,9 +284,22 @@ export class ContentRepository
     const vectorLiteral = `[${input.queryVector.join(',')}]`;
     const queryText = input.queryText.trim();
 
-    const maxDistance = 0.65;
-    const candidateLimit = 50;
+    const maxDistance = this.getSearchNumber(
+      'CONTENT_RAG_MAX_DISTANCE',
+      0.65,
+      0,
+      2,
+    );
+    const candidateLimit = this.getSearchInteger(
+      'CONTENT_RAG_CANDIDATE_LIMIT',
+      50,
+      10,
+      200,
+    );
     const finalLimit = Math.min(Math.max(input.limit ?? 8, 1), 20);
+
+    const { vectorWeight, keywordWeight, metadataWeight } =
+      this.getNormalizedSearchWeights();
 
     const sharedOnly = input.sharedOnly === true;
     const conversationId = input.conversationId ?? null;
@@ -232,6 +315,8 @@ export class ContentRepository
         rc.text AS "chunkText",
         rc."startTime" AS "startTime",
         rc."endTime" AS "endTime",
+        r."createdAt" AS "createdAt",
+        r."viewCount" AS "viewCount",
         (rc.embedding <=> ${vectorLiteral}::vector)::float AS distance,
         (1.0 - LEAST((rc.embedding <=> ${vectorLiteral}::vector)::float, 1.0))::float AS "vectorScore",
         0.0::float AS "keywordScore"
@@ -271,6 +356,8 @@ export class ContentRepository
         rc.text AS "chunkText",
         rc."startTime" AS "startTime",
         rc."endTime" AS "endTime",
+        r."createdAt" AS "createdAt",
+        r."viewCount" AS "viewCount",
         NULL::float AS distance,
         0.0::float AS "vectorScore",
         (
@@ -353,6 +440,8 @@ export class ContentRepository
         "chunkText",
         "startTime",
         "endTime",
+        "createdAt",
+        "viewCount",
         MIN(distance) AS distance,
         MAX("vectorScore") AS "vectorScore",
         MAX("keywordScore") AS "keywordScore"
@@ -365,7 +454,35 @@ export class ContentRepository
         tags,
         "chunkText",
         "startTime",
-        "endTime"
+        "endTime",
+        "createdAt",
+        "viewCount"
+    ),
+
+    scored AS (
+      SELECT
+        *,
+        (
+          (
+            1.0 / (
+              1.0 +
+              (
+                GREATEST(
+                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "createdAt")) / 86400.0,
+                  0.0
+                ) / 30.0
+              )
+            )
+          ) * 0.55
+          +
+          (
+            LEAST(
+              LN(COALESCE("viewCount", 0)::float + 1.0) / LN(1001.0),
+              1.0
+            )
+          ) * 0.45
+        )::float AS "metadataScore"
+      FROM grouped
     )
 
     SELECT
@@ -380,16 +497,18 @@ export class ContentRepository
       distance,
       "vectorScore",
       "keywordScore",
+      "metadataScore",
       (
-        ("vectorScore" * 0.70) +
-        (LEAST("keywordScore", 1.0) * 0.30)
+        ("vectorScore" * ${vectorWeight}) +
+        (LEAST("keywordScore", 1.0) * ${keywordWeight}) +
+        ("metadataScore" * ${metadataWeight})
       )::float AS score,
       CASE
         WHEN "vectorScore" > 0 AND "keywordScore" > 0 THEN 'HYBRID'
         WHEN "keywordScore" > 0 THEN 'KEYWORD'
         ELSE 'VECTOR'
       END AS "matchedBy"
-    FROM grouped
+    FROM scored
     ORDER BY score DESC, distance ASC NULLS LAST
     LIMIT ${finalLimit};
   `;

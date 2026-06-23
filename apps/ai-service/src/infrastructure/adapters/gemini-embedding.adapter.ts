@@ -1,5 +1,3 @@
-// apps/ai-service/src/infrastructure/adapters/gemini-embedding.adapter.ts
-
 import {
   GenerateEmbeddingRequest,
   GenerateEmbeddingResult,
