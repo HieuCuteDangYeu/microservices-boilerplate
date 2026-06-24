@@ -1,5 +1,5 @@
+import { UserMemory } from '@ai/domain/entities/user-memory.entity';
 import type { UserMemoryType } from '@common/ai/interfaces/user-memory.interface';
-import { UserMemory } from '../entities/user-memory.entity';
 
 export interface UserMemoryUpsertInput {
   userId: string;
@@ -8,10 +8,31 @@ export interface UserMemoryUpsertInput {
   normalizedContent: string;
   confidence: number;
   sourceConversationId?: string;
+  embedding?: number[];
+  embeddingModel?: string;
+}
+
+export interface UserMemorySemanticSearchInput {
+  userId: string;
+  queryVector: number[];
+  limit: number;
+  minScore?: number;
+  minConfidence?: number;
+}
+
+export interface UserMemoryEmbeddingUpdateInput {
+  memoryId: string;
+  embedding: number[];
+  embeddingModel: string;
 }
 
 export interface IUserMemoryRepository {
   findByUserId(userId: string, limit: number): Promise<UserMemory[]>;
+  findRelevantByUserId(
+    input: UserMemorySemanticSearchInput,
+  ): Promise<UserMemory[]>;
+  findWithoutEmbedding(limit: number): Promise<UserMemory[]>;
   upsertMany(memories: UserMemoryUpsertInput[]): Promise<UserMemory[]>;
+  updateEmbedding(input: UserMemoryEmbeddingUpdateInput): Promise<void>;
   markUsed(memoryIds: string[]): Promise<void>;
 }

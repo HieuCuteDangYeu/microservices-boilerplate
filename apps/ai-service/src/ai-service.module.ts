@@ -1,3 +1,4 @@
+import { BackfillUserMemoryEmbeddingsUseCase } from '@ai/application/use-cases/backfill-user-memory-embeddings.use-case';
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
 import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-context-sufficiency.use-case';
 import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
@@ -108,6 +109,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     HandleConversationTurnCompletedUseCase,
     GetConversationMemoryUseCase,
     UpdateConversationMemoryUseCase,
+    BackfillUserMemoryEmbeddingsUseCase,
 
     QueryRouterAgentUseCase,
     RetrievalAgentUseCase,

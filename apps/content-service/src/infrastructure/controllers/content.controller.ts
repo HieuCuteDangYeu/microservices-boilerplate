@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
+import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
@@ -48,6 +49,7 @@ export class ContentController {
     private readonly createReelShareLinkUseCase: CreateReelShareLinkUseCase,
     private readonly resolveReelShareLinkUseCase: ResolveReelShareLinkUseCase,
     private readonly revokeReelShareLinkUseCase: RevokeReelShareLinkUseCase,
+    private readonly backfillReelChunksUseCase: BackfillReelChunksUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -774,5 +776,66 @@ export class ContentController {
         message: `Revoke Reel Share Link Error: ${err.message}`,
       });
     }
+  }
+
+  @MessagePattern('content.backfill_reel_chunks')
+  async handleBackfillReelChunks(
+    @Payload()
+    payload?: {
+      limit?: number;
+      batchSize?: number;
+      maxReels?: number;
+      reelId?: string;
+      dryRun?: boolean;
+    },
+  ) {
+    try {
+      const limit = this.normalizeBackfillNumber(payload?.limit, 20, 1, 100);
+
+      const batchSize = this.normalizeBackfillNumber(
+        payload?.batchSize,
+        limit,
+        1,
+        100,
+      );
+
+      const reelId =
+        typeof payload?.reelId === 'string' && payload.reelId.trim().length > 0
+          ? payload.reelId.trim()
+          : undefined;
+
+      const maxReels = reelId
+        ? 1
+        : this.normalizeBackfillNumber(payload?.maxReels, limit, 1, 500);
+
+      const dryRun = payload?.dryRun === true;
+
+      return await this.backfillReelChunksUseCase.execute({
+        batchSize,
+        maxReels,
+        reelId,
+        dryRun,
+      });
+    } catch (error: unknown) {
+      const err = error as Error;
+
+      throw new RpcException({
+        statusCode: 500,
+        message: `Backfill Reel Chunks Error: ${err.message}`,
+      });
+    }
+  }
+
+  private normalizeBackfillNumber(
+    value: number | undefined,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    if (value === undefined || !Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.min(Math.max(Math.floor(value), min), max);
   }
 }

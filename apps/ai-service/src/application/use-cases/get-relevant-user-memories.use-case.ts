@@ -1,7 +1,9 @@
 import { UserMemory } from '@ai/domain/entities/user-memory.entity';
+import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type { IUserMemoryRepository } from '@ai/domain/interfaces/user-memory.repository.interface';
 import type { RelevantUserMemoriesContext } from '@common/ai/interfaces/user-memory.interface';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 interface ScoredUserMemory {
   memory: UserMemory;
@@ -11,17 +13,23 @@ interface ScoredUserMemory {
 
 @Injectable()
 export class GetRelevantUserMemoriesUseCase {
+  private readonly logger = new Logger(GetRelevantUserMemoriesUseCase.name);
+
   private readonly defaultLimit = 8;
   private readonly maxSelectedMemories = 12;
   private readonly candidateMultiplier = 5;
   private readonly maxCandidatePool = 60;
-
-  private readonly minRelevanceScore = 0.12;
+  private readonly minLexicalRelevanceScore = 0.12;
   private readonly fallbackLimit = 3;
 
   constructor(
+    private readonly configService: ConfigService,
+
     @Inject('IUserMemoryRepository')
     private readonly userMemoryRepository: IUserMemoryRepository,
+
+    @Inject('IEmbeddingService')
+    private readonly embeddingService: IEmbeddingService,
   ) {}
 
   async execute(input: {
@@ -35,21 +43,20 @@ export class GetRelevantUserMemoriesUseCase {
       this.maxSelectedMemories,
     );
 
-    const candidateLimit = Math.min(
-      this.maxCandidatePool,
-      Math.max(selectedLimit * this.candidateMultiplier, selectedLimit),
-    );
-
-    const candidates = await this.userMemoryRepository.findByUserId(
-      input.userId,
-      candidateLimit,
-    );
-
-    const selected = this.selectRelevantMemories({
-      candidates,
+    const semanticMemories = await this.findSemanticMemories({
+      userId: input.userId,
       queryText: input.queryText,
       limit: selectedLimit,
     });
+
+    const selected =
+      semanticMemories.length > 0
+        ? semanticMemories
+        : await this.findLexicalFallbackMemories({
+            userId: input.userId,
+            queryText: input.queryText,
+            limit: selectedLimit,
+          });
 
     await this.userMemoryRepository.markUsed(
       selected
@@ -71,19 +78,88 @@ export class GetRelevantUserMemoriesUseCase {
     };
   }
 
-  private selectRelevantMemories(input: {
-    candidates: UserMemory[];
+  private async findSemanticMemories(input: {
+    userId: string;
     queryText: string;
     limit: number;
-  }): UserMemory[] {
-    if (input.candidates.length === 0) {
+  }): Promise<UserMemory[]> {
+    if (!this.getBoolean('AI_USER_MEMORY_SEMANTIC_RETRIEVAL_ENABLED', true)) {
       return [];
     }
 
-    const scored = this.scoreMemories(input.candidates, input.queryText);
+    const query = input.queryText.trim();
+
+    if (!query) {
+      return [];
+    }
+
+    try {
+      const embedding = await this.embeddingService.generateVector({
+        text: query,
+        taskType: 'RETRIEVAL_QUERY',
+      });
+
+      const expectedDimensions = this.getExpectedEmbeddingDimensions();
+
+      if (embedding.dimensions !== expectedDimensions) {
+        this.logger.warn(
+          `[UserMemory] semantic retrieval skipped because query dimensions=${embedding.dimensions}, expected=${expectedDimensions}`,
+        );
+
+        return [];
+      }
+
+      return await this.userMemoryRepository.findRelevantByUserId({
+        userId: input.userId,
+        queryVector: embedding.values,
+        limit: input.limit,
+        minScore: this.getNumber(
+          'AI_USER_MEMORY_MIN_SEMANTIC_SCORE',
+          0.42,
+          -1,
+          1,
+        ),
+        minConfidence: this.getNumber(
+          'AI_USER_MEMORY_MIN_CONFIDENCE',
+          0.5,
+          0,
+          1,
+        ),
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.warn(
+        `[UserMemory] semantic retrieval failed userId=${input.userId}: ${message}`,
+      );
+
+      return [];
+    }
+  }
+
+  private async findLexicalFallbackMemories(input: {
+    userId: string;
+    queryText: string;
+    limit: number;
+  }): Promise<UserMemory[]> {
+    const candidateLimit = Math.min(
+      this.maxCandidatePool,
+      Math.max(input.limit * this.candidateMultiplier, input.limit),
+    );
+
+    const candidates = await this.userMemoryRepository.findByUserId(
+      input.userId,
+      candidateLimit,
+    );
+
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    const scored = this.scoreMemories(candidates, input.queryText);
 
     const relevant = scored.filter(
-      (item) => item.relevanceScore >= this.minRelevanceScore,
+      (item) => item.relevanceScore >= this.minLexicalRelevanceScore,
     );
 
     if (relevant.length > 0) {
@@ -276,6 +352,41 @@ export class GetRelevantUserMemoriesUseCase {
       .replace(/[^\p{L}\p{N}\s.-]/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  private getExpectedEmbeddingDimensions(): number {
+    const value = Number(
+      this.configService.get<string>('AI_USER_MEMORY_EMBEDDING_DIMENSIONS') ??
+        this.configService.get<string>('GEMINI_EMBEDDING_DIMENSIONS') ??
+        '384',
+    );
+
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : 384;
+  }
+
+  private getBoolean(key: string, fallback: boolean): boolean {
+    const value = this.configService.get<string>(key);
+
+    if (value === undefined) {
+      return fallback;
+    }
+
+    return value.toLowerCase() === 'true';
+  }
+
+  private getNumber(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const value = Number(this.configService.get<string>(key) ?? fallback);
+
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.min(Math.max(value, min), max);
   }
 
   private normalizeLimit(value: number, min: number, max: number): number {

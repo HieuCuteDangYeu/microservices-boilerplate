@@ -1,3 +1,4 @@
+import { BackfillUserMemoryEmbeddingsUseCase } from '@ai/application/use-cases/backfill-user-memory-embeddings.use-case';
 import { ExtractReelMetadataUseCase } from '@ai/application/use-cases/extract-reel-metadata.use-case';
 import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
@@ -26,6 +27,7 @@ export class AiController {
     private readonly streamChatUseCase: StreamChatUseCase,
     private readonly handleConversationTurnCompletedUseCase: HandleConversationTurnCompletedUseCase,
     private readonly extractReelMetadataUseCase: ExtractReelMetadataUseCase,
+    private readonly backfillUserMemoryEmbeddingsUseCase: BackfillUserMemoryEmbeddingsUseCase,
   ) {}
 
   @MessagePattern('ai.generate_embedding')
@@ -194,6 +196,28 @@ export class AiController {
 
       const error = err as Error;
       console.error(`[ExtractReelMetadata] ${error.message}`);
+
+      throw new RpcException({
+        statusCode: 500,
+        message: error.message,
+      });
+    }
+  }
+
+  @MessagePattern('ai.backfill_user_memory_embeddings')
+  async handleBackfillUserMemoryEmbeddings(
+    @Payload() payload?: { limit?: number },
+  ) {
+    try {
+      const result = await this.backfillUserMemoryEmbeddingsUseCase.execute({
+        limit: payload?.limit,
+      });
+
+      return result;
+    } catch (err: unknown) {
+      const error = err as Error;
+
+      console.error(`[BackfillUserMemoryEmbeddings] ${error.message}`);
 
       throw new RpcException({
         statusCode: 500,

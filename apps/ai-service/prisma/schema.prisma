@@ -25,6 +25,8 @@ model UserMemory {
   normalizedContent    String         @db.Text
   confidence           Float          @default(0.7)
   sourceConversationId String?
+  embedding            Unsupported("vector(384)")?
+  embeddingModel       String?
   lastUsedAt           DateTime?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
@@ -32,6 +34,7 @@ model UserMemory {
   @@index([userId])
   @@index([type])
   @@index([updatedAt])
+  @@index([userId, embeddingModel])
   @@unique([userId, type, normalizedContent])
 }
 

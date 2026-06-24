@@ -8,6 +8,8 @@ export class UserMemory {
   readonly normalizedContent: string;
   readonly confidence: number;
   readonly sourceConversationId?: string;
+  readonly embeddingModel?: string;
+  readonly semanticScore?: number;
   readonly lastUsedAt?: Date;
   readonly createdAt?: Date;
   readonly updatedAt?: Date;
@@ -20,6 +22,8 @@ export class UserMemory {
     normalizedContent: string;
     confidence: number;
     sourceConversationId?: string;
+    embeddingModel?: string;
+    semanticScore?: number;
     lastUsedAt?: Date;
     createdAt?: Date;
     updatedAt?: Date;
@@ -31,6 +35,8 @@ export class UserMemory {
     this.normalizedContent = data.normalizedContent;
     this.confidence = data.confidence;
     this.sourceConversationId = data.sourceConversationId;
+    this.embeddingModel = data.embeddingModel;
+    this.semanticScore = data.semanticScore;
     this.lastUsedAt = data.lastUsedAt;
     this.createdAt = data.createdAt;
     this.updatedAt = data.updatedAt;

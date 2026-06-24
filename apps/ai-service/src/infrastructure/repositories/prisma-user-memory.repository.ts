@@ -1,11 +1,29 @@
-import { Injectable } from '@nestjs/common';
-import { UserMemory as PrismaUserMemory } from '@prisma/ai-client';
-import { UserMemory } from '../../domain/entities/user-memory.entity';
+import { UserMemory } from '@ai/domain/entities/user-memory.entity';
 import type {
   IUserMemoryRepository,
+  UserMemoryEmbeddingUpdateInput,
+  UserMemorySemanticSearchInput,
   UserMemoryUpsertInput,
-} from '../../domain/interfaces/user-memory.repository.interface';
-import { PrismaService } from '../prisma/prisma.service';
+} from '@ai/domain/interfaces/user-memory.repository.interface';
+import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
+import type { UserMemoryType } from '@common/ai/interfaces/user-memory.interface';
+import { Injectable } from '@nestjs/common';
+import type { UserMemory as PrismaUserMemory } from '@prisma/ai-client';
+
+interface UserMemoryRawRecord {
+  id: string;
+  userId: string;
+  type: UserMemoryType;
+  content: string;
+  normalizedContent: string;
+  confidence: number;
+  sourceConversationId: string | null;
+  embeddingModel: string | null;
+  semanticScore?: number | null;
+  lastUsedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 @Injectable()
 export class PrismaUserMemoryRepository implements IUserMemoryRepository {
@@ -20,44 +38,187 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
         },
       },
       orderBy: [{ updatedAt: 'desc' }, { confidence: 'desc' }],
-      take: limit,
+      take: this.normalizeLimit(limit, 1, 100),
     });
 
     return memories.map((memory) => this.toDomain(memory));
+  }
+
+  async findRelevantByUserId(
+    input: UserMemorySemanticSearchInput,
+  ): Promise<UserMemory[]> {
+    if (input.queryVector.length === 0) {
+      return [];
+    }
+
+    const vectorLiteral = `[${input.queryVector.join(',')}]`;
+    const limit = this.normalizeLimit(input.limit, 1, 50);
+    const minScore = this.clamp(input.minScore ?? 0.42, -1, 1);
+    const minConfidence = this.clamp(input.minConfidence ?? 0.5, 0, 1);
+
+    const rows = await this.prisma.$queryRaw<UserMemoryRawRecord[]>`
+      WITH ranked AS (
+        SELECT
+          um.id,
+          um."userId",
+          um.type::text AS type,
+          um.content,
+          um."normalizedContent",
+          um.confidence,
+          um."sourceConversationId",
+          um."embeddingModel",
+          um."lastUsedAt",
+          um."createdAt",
+          um."updatedAt",
+          (um.embedding <=> ${vectorLiteral}::vector)::float AS distance
+        FROM "UserMemory" um
+        WHERE um."userId" = ${input.userId}
+          AND um.embedding IS NOT NULL
+          AND um.confidence >= ${minConfidence}
+      ),
+
+      scored AS (
+        SELECT
+          *,
+          (1.0 - LEAST(distance, 1.0))::float AS "semanticScore",
+          (
+            ((1.0 - LEAST(distance, 1.0)) * 0.82)
+            +
+            (confidence * 0.12)
+            +
+            (
+              (
+                1.0 / (
+                  1.0 +
+                  (
+                    GREATEST(
+                      EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "updatedAt")) / 86400.0,
+                      0.0
+                    ) / 30.0
+                  )
+                )
+              ) * 0.06
+            )
+          )::float AS "rankScore"
+        FROM ranked
+      )
+
+      SELECT
+        id,
+        "userId",
+        type,
+        content,
+        "normalizedContent",
+        confidence,
+        "sourceConversationId",
+        "embeddingModel",
+        "semanticScore",
+        "lastUsedAt",
+        "createdAt",
+        "updatedAt"
+      FROM scored
+      WHERE "semanticScore" >= ${minScore}
+      ORDER BY "rankScore" DESC, "semanticScore" DESC
+      LIMIT ${limit};
+    `;
+
+    return rows.map((row) => this.toDomainFromRaw(row));
+  }
+
+  async findWithoutEmbedding(limit: number): Promise<UserMemory[]> {
+    const normalizedLimit = this.normalizeLimit(limit, 1, 500);
+
+    const rows = await this.prisma.$queryRaw<UserMemoryRawRecord[]>`
+      SELECT
+        id,
+        "userId",
+        type::text AS type,
+        content,
+        "normalizedContent",
+        confidence,
+        "sourceConversationId",
+        "embeddingModel",
+        NULL::float AS "semanticScore",
+        "lastUsedAt",
+        "createdAt",
+        "updatedAt"
+      FROM "UserMemory"
+      WHERE embedding IS NULL
+      ORDER BY "updatedAt" DESC
+      LIMIT ${normalizedLimit};
+    `;
+
+    return rows.map((row) => this.toDomainFromRaw(row));
   }
 
   async upsertMany(inputs: UserMemoryUpsertInput[]): Promise<UserMemory[]> {
     const results: UserMemory[] = [];
 
     for (const input of inputs) {
-      const memory = await this.prisma.userMemory.upsert({
-        where: {
-          userId_type_normalizedContent: {
+      const memory = await this.prisma.$transaction(async (tx) => {
+        const saved = await tx.userMemory.upsert({
+          where: {
+            userId_type_normalizedContent: {
+              userId: input.userId,
+              type: input.type,
+              normalizedContent: input.normalizedContent,
+            },
+          },
+          create: {
             userId: input.userId,
             type: input.type,
+            content: input.content,
             normalizedContent: input.normalizedContent,
+            confidence: input.confidence,
+            sourceConversationId: input.sourceConversationId,
+            embeddingModel: input.embeddingModel,
           },
-        },
-        create: {
-          userId: input.userId,
-          type: input.type,
-          content: input.content,
-          normalizedContent: input.normalizedContent,
-          confidence: input.confidence,
-          sourceConversationId: input.sourceConversationId,
-        },
-        update: {
-          content: input.content,
-          confidence: Math.max(input.confidence, 0.5),
-          sourceConversationId: input.sourceConversationId,
-          updatedAt: new Date(),
-        },
+          update: {
+            content: input.content,
+            confidence: Math.max(input.confidence, 0.5),
+            sourceConversationId: input.sourceConversationId,
+            embeddingModel: input.embeddingModel,
+            updatedAt: new Date(),
+          },
+        });
+
+        if (this.hasEmbedding(input.embedding)) {
+          const vectorLiteral = `[${input.embedding.join(',')}]`;
+
+          await tx.$executeRaw`
+            UPDATE "UserMemory"
+            SET
+              embedding = ${vectorLiteral}::vector,
+              "embeddingModel" = ${input.embeddingModel ?? null},
+              "updatedAt" = CURRENT_TIMESTAMP
+            WHERE id = ${saved.id}
+          `;
+        }
+
+        return saved;
       });
 
       results.push(this.toDomain(memory));
     }
 
     return results;
+  }
+
+  async updateEmbedding(input: UserMemoryEmbeddingUpdateInput): Promise<void> {
+    if (!this.hasEmbedding(input.embedding)) {
+      return;
+    }
+
+    const vectorLiteral = `[${input.embedding.join(',')}]`;
+
+    await this.prisma.$executeRaw`
+      UPDATE "UserMemory"
+      SET
+        embedding = ${vectorLiteral}::vector,
+        "embeddingModel" = ${input.embeddingModel},
+        "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = ${input.memoryId}
+    `;
   }
 
   async markUsed(memoryIds: string[]): Promise<void> {
@@ -86,9 +247,47 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       normalizedContent: memory.normalizedContent,
       confidence: memory.confidence,
       sourceConversationId: memory.sourceConversationId ?? undefined,
+      embeddingModel: memory.embeddingModel ?? undefined,
       lastUsedAt: memory.lastUsedAt ?? undefined,
       createdAt: memory.createdAt,
       updatedAt: memory.updatedAt,
     });
+  }
+
+  private toDomainFromRaw(memory: UserMemoryRawRecord): UserMemory {
+    return new UserMemory({
+      id: memory.id,
+      userId: memory.userId,
+      type: memory.type,
+      content: memory.content,
+      normalizedContent: memory.normalizedContent,
+      confidence: memory.confidence,
+      sourceConversationId: memory.sourceConversationId ?? undefined,
+      embeddingModel: memory.embeddingModel ?? undefined,
+      semanticScore: memory.semanticScore ?? undefined,
+      lastUsedAt: memory.lastUsedAt ?? undefined,
+      createdAt: memory.createdAt,
+      updatedAt: memory.updatedAt,
+    });
+  }
+
+  private hasEmbedding(value?: number[]): value is number[] {
+    return (
+      Array.isArray(value) &&
+      value.length > 0 &&
+      value.every((item) => typeof item === 'number' && Number.isFinite(item))
+    );
+  }
+
+  private normalizeLimit(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) {
+      return min;
+    }
+
+    return Math.min(Math.max(Math.floor(value), min), max);
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
   }
 }
