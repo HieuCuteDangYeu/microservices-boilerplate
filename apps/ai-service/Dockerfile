@@ -26,17 +26,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
-RUN corepack enable
-RUN corepack prepare pnpm@9.15.0 --activate
-
-COPY . .
-
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts
-
-RUN chown -R node:node /usr/src/app/node_modules
-
-COPY --from=builder /usr/src/app/dist ./dist
-COPY --from=builder /usr/src/app/node_modules/@prisma/ai-client ./node_modules/@prisma/ai-client
+COPY --from=builder --chown=node:node /usr/src/app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /usr/src/app/dist ./dist
 
 USER node
 

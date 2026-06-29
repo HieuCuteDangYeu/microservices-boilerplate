@@ -47,14 +47,14 @@ const resolveBinaryPath = (
     return configuredPath;
   }
 
-  if (canExecute(packagedPath)) {
-    return packagedPath;
-  }
-
   const systemPath = findBinaryOnPath(binaryName);
 
   if (systemPath) {
     return systemPath;
+  }
+
+  if (canExecute(packagedPath)) {
+    return packagedPath;
   }
 
   throw new Error(
@@ -68,23 +68,191 @@ const ffprobePath = resolveBinaryPath('ffprobe', ffprobeInstaller.path);
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
 
+type AdaptiveVariant = {
+  name: '360p' | '540p' | '720p' | '1080p';
+  width: number;
+  height: number;
+  bitrate: string;
+  maxrate: string;
+  bufsize: string;
+  audioBitrate: string;
+  minSourceLongSide: number;
+};
+
+const ADAPTIVE_VARIANTS: AdaptiveVariant[] = [
+  {
+    name: '360p',
+    width: 360,
+    height: 640,
+    bitrate: '800k',
+    maxrate: '1000k',
+    bufsize: '1600k',
+    audioBitrate: '96k',
+    minSourceLongSide: 0,
+  },
+  {
+    name: '540p',
+    width: 540,
+    height: 960,
+    bitrate: '1600k',
+    maxrate: '2000k',
+    bufsize: '3200k',
+    audioBitrate: '128k',
+    minSourceLongSide: 900,
+  },
+  {
+    name: '720p',
+    width: 720,
+    height: 1280,
+    bitrate: '2800k',
+    maxrate: '3500k',
+    bufsize: '5600k',
+    audioBitrate: '128k',
+    minSourceLongSide: 1200,
+  },
+  {
+    name: '1080p',
+    width: 1080,
+    height: 1920,
+    bitrate: '5000k',
+    maxrate: '6500k',
+    bufsize: '10000k',
+    audioBitrate: '128k',
+    minSourceLongSide: 1800,
+  },
+];
+
 @Injectable()
 export class FfmpegService implements IVideoProcessingService {
   async transcodeToHls(inputPath: string, outputDir: string): Promise<void> {
+    await this.transcodeToAdaptiveHls(inputPath, outputDir);
+  }
+
+  private async getEligibleAdaptiveVariants(
+    inputPath: string,
+  ): Promise<AdaptiveVariant[]> {
+    const metadata = await this.getVideoMetadata(inputPath);
+    const longSide = Math.max(metadata.width ?? 0, metadata.height ?? 0);
+
+    if (longSide <= 0) {
+      return ADAPTIVE_VARIANTS.filter((variant) => variant.name !== '1080p');
+    }
+
+    const variants = ADAPTIVE_VARIANTS.filter(
+      (variant) => longSide >= variant.minSourceLongSide,
+    );
+
+    return variants.length > 0 ? variants : [ADAPTIVE_VARIANTS[0]];
+  }
+
+  private async transcodeToAdaptiveHls(
+    inputPath: string,
+    outputDir: string,
+  ): Promise<void> {
     fs.mkdirSync(outputDir, { recursive: true });
 
-    const outputPath = `${outputDir}/stream.m3u8`;
+    const variants = await this.getEligibleAdaptiveVariants(inputPath);
+
+    for (const variant of variants) {
+      fs.mkdirSync(path.join(outputDir, variant.name), { recursive: true });
+    }
+
+    const hasAudio = await this.hasAudioStream(inputPath);
+
+    const filterComplex = [
+      `[0:v]split=${variants.length}${variants
+        .map((_, index) => `[v${index}src]`)
+        .join('')}`,
+      ...variants.map(
+        (variant, index) =>
+          `[v${index}src]scale=${variant.width}:${variant.height}:force_original_aspect_ratio=increase,crop=${variant.width}:${variant.height},setsar=1[v${index}]`,
+      ),
+    ].join(';');
+
+    const outputOptions: string[] = ['-filter_complex', filterComplex];
+
+    variants.forEach((_, index) => {
+      outputOptions.push('-map', `[v${index}]`);
+
+      if (hasAudio) {
+        outputOptions.push('-map', '0:a:0');
+      }
+    });
+
+    outputOptions.push(
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-profile:v',
+      'main',
+      '-level',
+      '4.0',
+      '-pix_fmt',
+      'yuv420p',
+      '-r',
+      '30',
+      '-g',
+      '60',
+      '-keyint_min',
+      '60',
+      '-sc_threshold',
+      '0',
+      '-force_key_frames',
+      'expr:gte(t,n_forced*2)',
+    );
+
+    variants.forEach((variant, index) => {
+      outputOptions.push(
+        `-b:v:${index}`,
+        variant.bitrate,
+        `-maxrate:v:${index}`,
+        variant.maxrate,
+        `-bufsize:v:${index}`,
+        variant.bufsize,
+      );
+    });
+
+    if (hasAudio) {
+      outputOptions.push('-c:a', 'aac', '-ar', '48000');
+
+      variants.forEach((variant, index) => {
+        outputOptions.push(`-b:a:${index}`, variant.audioBitrate);
+      });
+    }
+
+    outputOptions.push(
+      '-start_number',
+      '0',
+      '-hls_time',
+      '2',
+      '-hls_playlist_type',
+      'vod',
+      '-hls_flags',
+      'independent_segments',
+      '-hls_list_size',
+      '0',
+      '-hls_segment_filename',
+      path.join(outputDir, '%v', 'segment_%03d.ts'),
+      '-master_pl_name',
+      'master.m3u8',
+      '-var_stream_map',
+      variants
+        .map((variant, index) =>
+          hasAudio
+            ? `v:${index},a:${index},name:${variant.name}`
+            : `v:${index},name:${variant.name}`,
+        )
+        .join(' '),
+      '-f',
+      'hls',
+    );
+
+    const outputPath = path.join(outputDir, '%v', 'stream.m3u8');
 
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
-        .outputOptions([
-          '-profile:v baseline',
-          '-level 3.0',
-          '-start_number 0',
-          '-hls_time 10',
-          '-hls_list_size 0',
-          '-f hls',
-        ])
+        .outputOptions(outputOptions)
         .output(outputPath)
         .on('end', () => resolve())
         .on('error', (err) =>
@@ -183,6 +351,21 @@ export class FfmpegService implements IVideoProcessingService {
               ? videoStream.height
               : undefined,
         });
+      });
+    });
+  }
+
+  private async hasAudioStream(inputPath: string): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(inputPath, (error, metadata) => {
+        if (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+
+        resolve(
+          metadata.streams.some((stream) => stream.codec_type === 'audio'),
+        );
       });
     });
   }

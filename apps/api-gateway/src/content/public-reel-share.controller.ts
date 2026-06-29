@@ -95,7 +95,7 @@ export class PublicReelShareController {
     const folderPath =
       extIndex !== -1 ? mediaKey.substring(0, extIndex) : mediaKey;
 
-    return `${this.cdnDomain}/${folderPath}/stream.m3u8`;
+    return `${this.cdnDomain}/${folderPath}/master.m3u8`;
   }
 
   private handleMicroserviceError(error: any): never {

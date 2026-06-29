@@ -64,6 +64,7 @@
     "seed:auth": "dotenv -e .env -- ts-node apps/auth-service/prisma/seed.ts",
     "seed:user": "dotenv -e .env -- ts-node apps/user-service/prisma/seed.ts",
     "seed:all": "pnpm run seed:auth && pnpm run seed:user",
+    "purge:content-reels": "node scripts/purge-content-reels.cjs",
     "backfill:reel-chunks": "node scripts/send-rmq-message.cjs content_queue content.backfill_reel_chunks '{\"limit\":20}'",
     "backfill:user-memory-embeddings": "node scripts/send-rmq-message.cjs ai_queue ai.backfill_user_memory_embeddings '{\"limit\":100}'"
   },

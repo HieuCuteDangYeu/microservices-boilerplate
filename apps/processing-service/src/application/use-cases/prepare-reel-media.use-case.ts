@@ -79,6 +79,8 @@ export class PrepareReelMediaUseCase {
 
       currentProgress = 60;
 
+      await this.mediaStorageService.deleteObjectsByPrefix(s3Prefix);
+
       await this.emitProgress({
         reelId: data.reelId,
         stage: 'UPLOADING_STREAM',
