@@ -1,6 +1,6 @@
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { IVideoProcessingService } from '@processing/domain/interfaces/video-processing.service.interface';
 import ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
@@ -124,6 +124,8 @@ const ADAPTIVE_VARIANTS: AdaptiveVariant[] = [
 
 @Injectable()
 export class FfmpegService implements IVideoProcessingService {
+  private readonly logger = new Logger(FfmpegService.name);
+
   async transcodeToHls(inputPath: string, outputDir: string): Promise<void> {
     await this.transcodeToAdaptiveHls(inputPath, outputDir);
   }
@@ -153,9 +155,9 @@ export class FfmpegService implements IVideoProcessingService {
 
     const variants = await this.getEligibleAdaptiveVariants(inputPath);
 
-    for (const variant of variants) {
-      fs.mkdirSync(path.join(outputDir, variant.name), { recursive: true });
-    }
+    variants.forEach((_, index) => {
+      fs.mkdirSync(path.join(outputDir, String(index)), { recursive: true });
+    });
 
     const hasAudio = await this.hasAudioStream(inputPath);
 
@@ -184,10 +186,6 @@ export class FfmpegService implements IVideoProcessingService {
       'libx264',
       '-preset',
       'veryfast',
-      '-profile:v',
-      'main',
-      '-level',
-      '4.0',
       '-pix_fmt',
       'yuv420p',
       '-r',
@@ -201,6 +199,15 @@ export class FfmpegService implements IVideoProcessingService {
       '-force_key_frames',
       'expr:gte(t,n_forced*2)',
     );
+
+    variants.forEach((_, index) => {
+      outputOptions.push(
+        `-profile:v:${index}`,
+        'main',
+        `-level:v:${index}`,
+        '4.0',
+      );
+    });
 
     variants.forEach((variant, index) => {
       outputOptions.push(
@@ -238,11 +245,7 @@ export class FfmpegService implements IVideoProcessingService {
       'master.m3u8',
       '-var_stream_map',
       variants
-        .map((variant, index) =>
-          hasAudio
-            ? `v:${index},a:${index},name:${variant.name}`
-            : `v:${index},name:${variant.name}`,
-        )
+        .map((_, index) => (hasAudio ? `v:${index},a:${index}` : `v:${index}`))
         .join(' '),
       '-f',
       'hls',
@@ -254,6 +257,12 @@ export class FfmpegService implements IVideoProcessingService {
       ffmpeg(inputPath)
         .outputOptions(outputOptions)
         .output(outputPath)
+        .on('start', (commandLine) => {
+          this.logger.log(`[HLS] FFmpeg command: ${commandLine}`);
+        })
+        .on('stderr', (line) => {
+          this.logger.warn(`[HLS] ${line}`);
+        })
         .on('end', () => resolve())
         .on('error', (err) =>
           reject(err instanceof Error ? err : new Error(String(err))),
