@@ -1,5 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { IContentService } from '../../domain/interfaces/content-service.interface';
+import type { IJobConcurrencyLimiterService } from '../../domain/interfaces/job-concurrency-limiter.service.interface';
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import { formatProcessingError } from '../utils/format-processing-error';
 import { BuildReelAiMetadataUseCase } from './build-reel-ai-metadata.use-case';
@@ -13,12 +15,15 @@ export class ProcessReelUseCase {
   private readonly logger = new Logger(ProcessReelUseCase.name);
 
   constructor(
+    private readonly configService: ConfigService,
     private readonly prepareReelMediaUseCase: PrepareReelMediaUseCase,
     private readonly buildReelAiMetadataUseCase: BuildReelAiMetadataUseCase,
     @Inject('IContentService')
     private readonly contentService: IContentService,
     @Inject('ITempFileService')
     private readonly tempFileService: ITempFileService,
+    @Inject('IJobConcurrencyLimiterService')
+    private readonly jobConcurrencyLimiter: IJobConcurrencyLimiterService,
   ) {}
 
   async execute(data: {
@@ -29,85 +34,101 @@ export class ProcessReelUseCase {
     description?: string;
     tags?: string[];
   }): Promise<void> {
-    const { reelId, mediaKey } = data;
+    const concurrency = this.getConcurrencyLimit();
 
-    this.logger.log(`[Reel ${reelId}] Received processing job for ${mediaKey}`);
+    await this.jobConcurrencyLimiter.runExclusive(async () => {
+      const { reelId, mediaKey } = data;
 
-    const workspace = this.tempFileService.createReelProcessingWorkspace();
-
-    let currentProgress = 10;
-
-    try {
-      const mediaResult = await this.prepareReelMediaUseCase.execute({
-        reelId,
-        mediaKey,
-        inputPath: workspace.inputPath,
-        hlsOutputDir: workspace.hlsOutputDir,
-        thumbnailPath: workspace.thumbnailPath,
-      });
-
-      currentProgress = 90;
-
-      await this.emitProgress({
-        reelId,
-        stage: 'AI_ENRICHMENT',
-        message: 'Indexing reel for AI search',
-        progress: currentProgress,
-      });
-
-      const {
-        title,
-        description,
-        tags,
-        transcript,
-        transcriptVtt,
-        transcriptSegments,
-        chunks,
-      } = await this.buildReelAiMetadataUseCase.execute({
-        reelId,
-        title: data.title,
-        description: data.description,
-        tags: data.tags,
-        inputPath: workspace.inputPath,
-        audioPath: workspace.audioPath,
-      });
-
-      await this.contentService.emitProcessingCompleted({
-        reelId,
-        status: 'COMPLETED',
-        title,
-        description,
-        tags,
-        transcript,
-        transcriptVtt,
-        transcriptSegments,
-        chunks,
-        thumbnailKey: mediaResult.thumbnailKey,
-        stage: 'READY',
-        message: 'Video is ready to watch',
-        progress: 100,
-      });
-
-      this.logger.log(`[Reel ${reelId}] Processing completed successfully`);
-    } catch (error: unknown) {
-      const { message, stack } = formatProcessingError(error);
-
-      this.logger.error(
-        `[Reel ${reelId}] Processing failed: ${message}`,
-        stack,
+      this.logger.log(
+        `[Reel ${reelId}] Received processing job for ${mediaKey}`,
       );
 
-      if (error instanceof PrepareReelMediaError) {
-        currentProgress = error.progress;
-      }
+      const workspace = this.tempFileService.createReelProcessingWorkspace();
 
-      await this.emitFailed({
-        reelId,
-        progress: currentProgress,
-      });
-    } finally {
-      this.tempFileService.removeDirIfExists(workspace.workDir);
-    }
+      let currentProgress = 10;
+
+      try {
+        const mediaResult = await this.prepareReelMediaUseCase.execute({
+          reelId,
+          mediaKey,
+          inputPath: workspace.inputPath,
+          hlsOutputDir: workspace.hlsOutputDir,
+          thumbnailPath: workspace.thumbnailPath,
+        });
+
+        currentProgress = 90;
+
+        await this.emitProgress({
+          reelId,
+          stage: 'AI_ENRICHMENT',
+          message: 'Indexing reel for AI search',
+          progress: currentProgress,
+        });
+
+        const {
+          title,
+          description,
+          tags,
+          transcript,
+          transcriptVtt,
+          transcriptSegments,
+          chunks,
+        } = await this.buildReelAiMetadataUseCase.execute({
+          reelId,
+          title: data.title,
+          description: data.description,
+          tags: data.tags,
+          inputPath: workspace.inputPath,
+          audioPath: workspace.audioPath,
+        });
+
+        await this.contentService.emitProcessingCompleted({
+          reelId,
+          status: 'COMPLETED',
+          title,
+          description,
+          tags,
+          transcript,
+          transcriptVtt,
+          transcriptSegments,
+          chunks,
+          thumbnailKey: mediaResult.thumbnailKey,
+          stage: 'READY',
+          message: 'Video is ready to watch',
+          progress: 100,
+        });
+
+        this.logger.log(`[Reel ${reelId}] Processing completed successfully`);
+      } catch (error: unknown) {
+        const { message, stack } = formatProcessingError(error);
+
+        this.logger.error(
+          `[Reel ${reelId}] Processing failed: ${message}`,
+          stack,
+        );
+
+        if (error instanceof PrepareReelMediaError) {
+          currentProgress = error.progress;
+        }
+
+        await this.emitFailed({
+          reelId,
+          progress: currentProgress,
+        });
+      } finally {
+        this.tempFileService.removeDirIfExists(workspace.workDir);
+      }
+    }, concurrency);
+  }
+
+  private getConcurrencyLimit(): number {
+    const rawValue =
+      this.configService.get<string>('REEL_VIDEO_PROCESSING_CONCURRENCY') ??
+      this.configService.get<string>('MEDIA_VIDEO_PROCESSING_CONCURRENCY') ??
+      '1';
+    const parsed = Number(rawValue);
+
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
   }
 
   private async emitProgress(data: {
