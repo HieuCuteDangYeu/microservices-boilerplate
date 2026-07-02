@@ -154,9 +154,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.sendMessageUseCase
       .execute(payload, senderId)
       .then(async (savedMessage: Message) => {
-        this.server
+        const savedMessageDto = ChatMapper.toDto(savedMessage);
+
+        client.emit('message_synced', savedMessageDto);
+        client
           .to(payload.conversationId)
-          .emit('message_synced', ChatMapper.toDto(savedMessage));
+          .emit('message_synced', savedMessageDto);
 
         // Update conversation sidebar for all participants (lastMessage, ordering)
         const conversation = await this.chatRepository.findConversation(
