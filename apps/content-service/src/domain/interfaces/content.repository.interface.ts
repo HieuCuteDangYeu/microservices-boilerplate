@@ -8,10 +8,12 @@ import { Reel } from '../entities/reel.entity';
 
 export interface ReelListQuery {
   userId?: string;
+  viewerId?: string;
   visibility?: 'public' | 'private';
   limit?: number;
   cursor?: { createdAt: Date; id: string };
   onlyPublished?: boolean;
+  ranked?: boolean;
 }
 
 export interface ReelUpdateData {
@@ -80,6 +82,31 @@ export interface ReelShareLinkCreateInput {
 export interface ReelShareLinkWithReel {
   link: ReelShareLink;
   reel: Reel;
+}
+
+export interface ReelViewEventInput {
+  reelId: string;
+  userId: string;
+  sessionId?: string;
+  eventType:
+    | 'IMPRESSION'
+    | 'WATCH_START'
+    | 'WATCH_PROGRESS'
+    | 'WATCH_END'
+    | 'SKIP'
+    | 'COMPLETE'
+    | 'REPLAY'
+    | 'PAUSE'
+    | 'RESUME'
+    | 'MUTE'
+    | 'UNMUTE';
+  watchMs?: number;
+  durationMs?: number;
+  percentageWatched?: number;
+  muted?: boolean;
+  completed?: boolean;
+  replayed?: boolean;
+  skipped?: boolean;
 }
 
 export interface IContentRepository {
@@ -163,4 +190,6 @@ export interface IContentRepository {
   deleteReel(id: string, userId: string): Promise<boolean>;
 
   incrementViewCount(id: string): Promise<Reel | null>;
+
+  trackReelEvents(events: ReelViewEventInput[]): Promise<void>;
 }

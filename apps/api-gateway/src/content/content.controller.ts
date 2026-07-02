@@ -4,6 +4,7 @@ import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { GetReelContextQueryDto } from '@common/content/dtos/get-reel-context.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
 import { ShareReelDto } from '@common/content/dtos/share-reel.dto';
+import { TrackReelEventsDto } from '@common/content/dtos/track-reel-events.dto';
 import { UpdateReelDto } from '@common/content/dtos/update-reel.dto';
 import { ReelProfileContextResponse } from '@common/content/interfaces/reel-context-response.interface';
 import { ReelProcessingStatus } from '@common/content/interfaces/reel-processing-status.interface';
@@ -148,12 +149,12 @@ export class ContentController {
           nextCursor: string | null;
         }>('content.list_reels', {
           userId: query.userId,
+          viewerId: request.user!.id,
           visibility: effectiveVisibility,
           limit: query.limit,
           cursor: query.cursor,
-          // Exclude PENDING/PROCESSING/FAILED from public feed to prevent
-          // broken streamUrl thumbnails that haven't been transcoded yet
           onlyPublished: isPublicFeed,
+          ranked: query.ranked ?? isPublicFeed,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
@@ -162,6 +163,24 @@ export class ContentController {
       items: await this.enrichFeedItems(result.items),
       nextCursor: result.nextCursor,
     };
+  }
+
+  @Post('reels/events')
+  @ApiOperation({ summary: 'Track reel watch/impression events' })
+  async trackReelEvents(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: TrackReelEventsDto,
+  ) {
+    await lastValueFrom(
+      this.contentClient
+        .send<{ success: boolean }>('content.track_reel_events', {
+          userId: request.user!.id,
+          events: body.events,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return { success: true };
   }
 
   @Get('reels/:id')

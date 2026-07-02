@@ -20,6 +20,7 @@ import {
   ReelShareLinkCreateInput,
   ReelShareLinkWithReel,
   ReelUpdateData,
+  ReelViewEventInput,
 } from '../../domain/interfaces/content.repository.interface';
 
 @Injectable()
@@ -518,7 +519,23 @@ export class ContentRepository
     items: Reel[];
     nextCursor: ReelCursor | null;
   }> {
-    const limit = query.limit ?? 20;
+    const limit = Math.min(Math.max(query.limit ?? 20, 1), 50);
+
+    const shouldUseRankedPublicFeed =
+      query.ranked === true &&
+      Boolean(query.viewerId) &&
+      !query.userId &&
+      query.visibility === 'public' &&
+      query.onlyPublished === true;
+
+    if (shouldUseRankedPublicFeed) {
+      return this.listRankedPublicReels({
+        viewerId: query.viewerId!,
+        limit,
+        cursor: query.cursor,
+      });
+    }
+
     const where: Record<string, unknown> = {};
 
     if (query.visibility) {
@@ -565,6 +582,182 @@ export class ContentRepository
         : null;
 
     return { items, nextCursor };
+  }
+
+  private async listRankedPublicReels(input: {
+    viewerId: string;
+    limit: number;
+    cursor?: ReelCursor;
+  }): Promise<{
+    items: Reel[];
+    nextCursor: ReelCursor | null;
+  }> {
+    const where: Record<string, unknown> = {
+      visibility: 'public',
+      status: 'COMPLETED',
+    };
+
+    if (input.cursor) {
+      where['OR'] = [
+        { createdAt: { lt: input.cursor.createdAt } },
+        {
+          createdAt: input.cursor.createdAt,
+          id: { gt: input.cursor.id },
+        },
+      ];
+    }
+
+    const records = await this.reel.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: input.limit + 1,
+      select: this.reelListSelect,
+    });
+
+    const hasMore = records.length > input.limit;
+    const pageRecords = records.slice(0, input.limit);
+
+    if (pageRecords.length === 0) {
+      return {
+        items: [],
+        nextCursor: null,
+      };
+    }
+
+    const reelIds = pageRecords.map((record) => record.id);
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const viewerEvents = await this.reelViewEvent.findMany({
+      where: {
+        userId: input.viewerId,
+        reelId: { in: reelIds },
+        createdAt: { gte: since },
+      },
+      select: {
+        reelId: true,
+        eventType: true,
+        watchMs: true,
+        percentageWatched: true,
+        skipped: true,
+        completed: true,
+        replayed: true,
+        createdAt: true,
+      },
+    });
+
+    const statsByReel = new Map<
+      string,
+      {
+        impressionCount: number;
+        skipCount: number;
+        completeCount: number;
+        replayCount: number;
+        totalWatchMs: number;
+        maxPercentageWatched: number;
+        latestSeenAt: number;
+      }
+    >();
+
+    for (const event of viewerEvents) {
+      const current = statsByReel.get(event.reelId) ?? {
+        impressionCount: 0,
+        skipCount: 0,
+        completeCount: 0,
+        replayCount: 0,
+        totalWatchMs: 0,
+        maxPercentageWatched: 0,
+        latestSeenAt: 0,
+      };
+
+      if (event.eventType === 'IMPRESSION') {
+        current.impressionCount += 1;
+      }
+
+      if (event.eventType === 'SKIP' || event.skipped) {
+        current.skipCount += 1;
+      }
+
+      if (event.eventType === 'COMPLETE' || event.completed) {
+        current.completeCount += 1;
+      }
+
+      if (event.eventType === 'REPLAY' || event.replayed) {
+        current.replayCount += 1;
+      }
+
+      current.totalWatchMs += event.watchMs ?? 0;
+      current.maxPercentageWatched = Math.max(
+        current.maxPercentageWatched,
+        event.percentageWatched ?? 0,
+      );
+      current.latestSeenAt = Math.max(
+        current.latestSeenAt,
+        event.createdAt.getTime(),
+      );
+
+      statsByReel.set(event.reelId, current);
+    }
+
+    const now = Date.now();
+
+    const scored = pageRecords.map((record) => {
+      const reel = this.toDomain(record);
+      const stats = statsByReel.get(reel.id);
+
+      const ageHours = Math.max(
+        0,
+        (now - reel.createdAt.getTime()) / (1000 * 60 * 60),
+      );
+
+      const freshnessScore = 1 / (1 + ageHours / 72);
+      const popularityScore = Math.min(
+        Math.log(Number(reel.viewCount ?? 0) + 1) / Math.log(1000),
+        1,
+      );
+
+      const seenPenalty = stats?.impressionCount ? 0.42 : 0;
+      const skipPenalty = stats?.skipCount
+        ? Math.min(0.8, stats.skipCount * 0.32)
+        : 0;
+      const completedPenalty = stats?.completeCount ? 0.22 : 0;
+      const replayBoost = stats?.replayCount
+        ? Math.min(0.3, stats.replayCount * 0.12)
+        : 0;
+
+      const score =
+        freshnessScore * 0.58 +
+        popularityScore * 0.22 +
+        replayBoost -
+        seenPenalty -
+        skipPenalty -
+        completedPenalty;
+
+      return {
+        reel,
+        score,
+      };
+    });
+
+    scored.sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return right.reel.createdAt.getTime() - left.reel.createdAt.getTime();
+    });
+
+    const chronologicalLastRecord = pageRecords[pageRecords.length - 1];
+
+    return {
+      items: scored.map((item) => item.reel),
+      nextCursor:
+        hasMore && chronologicalLastRecord
+          ? {
+              createdAt: chronologicalLastRecord.createdAt,
+              id: chronologicalLastRecord.id,
+            }
+          : null,
+    };
   }
 
   async getProfileReelContext(
@@ -911,5 +1104,51 @@ export class ContentRepository
     });
 
     return this.toReelShareLinkDomain(record);
+  }
+
+  async trackReelEvents(events: ReelViewEventInput[]): Promise<void> {
+    if (events.length === 0) {
+      return;
+    }
+
+    await this.$transaction(async (tx) => {
+      await tx.reelViewEvent.createMany({
+        data: events.map((event) => ({
+          reelId: event.reelId,
+          userId: event.userId,
+          sessionId: event.sessionId,
+          eventType: event.eventType,
+          watchMs: event.watchMs ?? 0,
+          durationMs: event.durationMs,
+          percentageWatched: event.percentageWatched,
+          muted: event.muted,
+          completed: event.completed,
+          replayed: event.replayed,
+          skipped: event.skipped,
+        })),
+      });
+
+      const startedReelIds = [
+        ...new Set(
+          events
+            .filter((event) => event.eventType === 'WATCH_START')
+            .map((event) => event.reelId),
+        ),
+      ];
+
+      for (const reelId of startedReelIds) {
+        await tx.reel.updateMany({
+          where: {
+            id: reelId,
+            status: 'COMPLETED',
+          },
+          data: {
+            viewCount: {
+              increment: 1,
+            },
+          },
+        });
+      }
+    });
   }
 }

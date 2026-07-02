@@ -1,3 +1,4 @@
+import { TrackReelEventsUseCase } from '@ai/application/use-cases/track-reel-events.use-case';
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
@@ -50,6 +51,7 @@ export class ContentController {
     private readonly resolveReelShareLinkUseCase: ResolveReelShareLinkUseCase,
     private readonly revokeReelShareLinkUseCase: RevokeReelShareLinkUseCase,
     private readonly backfillReelChunksUseCase: BackfillReelChunksUseCase,
+    private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -824,6 +826,55 @@ export class ContentController {
         message: `Backfill Reel Chunks Error: ${err.message}`,
       });
     }
+  }
+
+  @MessagePattern('content.track_reel_events')
+  async trackReelEvents(
+    @Payload()
+    data: {
+      userId: string;
+      events: Array<{
+        reelId: string;
+        sessionId?: string;
+        eventType:
+          | 'IMPRESSION'
+          | 'WATCH_START'
+          | 'WATCH_PROGRESS'
+          | 'WATCH_END'
+          | 'SKIP'
+          | 'COMPLETE'
+          | 'REPLAY'
+          | 'PAUSE'
+          | 'RESUME'
+          | 'MUTE'
+          | 'UNMUTE';
+        watchMs?: number;
+        durationMs?: number;
+        percentageWatched?: number;
+        muted?: boolean;
+        completed?: boolean;
+        replayed?: boolean;
+        skipped?: boolean;
+      }>;
+    },
+  ) {
+    if (
+      !data ||
+      typeof data.userId !== 'string' ||
+      data.userId.trim().length === 0 ||
+      !Array.isArray(data.events) ||
+      data.events.length === 0 ||
+      data.events.length > 50
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for reel event tracking',
+      });
+    }
+
+    await this.trackReelEventsUseCase.execute(data.userId, data.events);
+
+    return { success: true };
   }
 
   private normalizeBackfillNumber(

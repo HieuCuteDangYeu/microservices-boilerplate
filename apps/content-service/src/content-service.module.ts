@@ -1,3 +1,4 @@
+import { TrackReelEventsUseCase } from '@ai/application/use-cases/track-reel-events.use-case';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
@@ -85,6 +86,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     ResolveReelShareLinkUseCase,
     RevokeReelShareLinkUseCase,
     BackfillReelChunksUseCase,
+    TrackReelEventsUseCase,
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,

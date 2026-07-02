@@ -39,6 +39,7 @@ model Reel {
   chunks     ReelChunk[]
   shares     ReelShare[]
   shareLinks ReelShareLink[]
+  viewEvents ReelViewEvent[]
 
   @@index([userId])
   @@index([visibility, createdAt(sort: Desc)])
@@ -106,4 +107,29 @@ model ReelShareLink {
   @@index([createdBy])
   @@index([expiresAt])
   @@index([revokedAt])
+}
+
+model ReelViewEvent {
+  id                String   @id @default(uuid())
+  reelId            String
+  userId            String
+  sessionId         String?
+  eventType         String
+  watchMs           Int      @default(0)
+  durationMs        Int?
+  percentageWatched Float?
+  muted             Boolean?
+  completed         Boolean?
+  replayed          Boolean?
+  skipped           Boolean?
+  createdAt         DateTime @default(now())
+
+  reel Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  @@index([reelId])
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([userId, reelId, createdAt])
 }
