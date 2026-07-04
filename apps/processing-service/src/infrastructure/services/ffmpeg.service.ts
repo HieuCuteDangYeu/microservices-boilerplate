@@ -68,59 +68,214 @@ const ffprobePath = resolveBinaryPath('ffprobe', ffprobeInstaller.path);
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
 
+type AdaptiveVariantName = '360p' | '540p' | '720p' | '1080p';
+
+type ReelHlsQualityProfile = 'data_saver' | 'balanced' | 'high';
+
 type AdaptiveVariant = {
-  name: '360p' | '540p' | '720p' | '1080p';
+  name: AdaptiveVariantName;
   width: number;
   height: number;
-  bitrate: string;
-  maxrate: string;
-  bufsize: string;
-  audioBitrate: string;
+  bitrateKbps: number;
+  maxrateKbps: number;
+  bufsizeKbps: number;
+  audioBitrateKbps: number;
   minSourceLongSide: number;
 };
 
-const ADAPTIVE_VARIANTS: AdaptiveVariant[] = [
-  {
-    name: '360p',
-    width: 360,
-    height: 640,
-    bitrate: '800k',
-    maxrate: '1000k',
-    bufsize: '1600k',
-    audioBitrate: '96k',
-    minSourceLongSide: 0,
-  },
-  {
-    name: '540p',
-    width: 540,
-    height: 960,
-    bitrate: '1600k',
-    maxrate: '2000k',
-    bufsize: '3200k',
-    audioBitrate: '128k',
-    minSourceLongSide: 900,
-  },
-  {
-    name: '720p',
-    width: 720,
-    height: 1280,
-    bitrate: '2800k',
-    maxrate: '3500k',
-    bufsize: '5600k',
-    audioBitrate: '128k',
-    minSourceLongSide: 1200,
-  },
-  {
-    name: '1080p',
-    width: 1080,
-    height: 1920,
-    bitrate: '5000k',
-    maxrate: '6500k',
-    bufsize: '10000k',
-    audioBitrate: '128k',
-    minSourceLongSide: 1800,
-  },
-];
+type VideoMetadata = {
+  durationMs?: number;
+  width?: number;
+  height?: number;
+  rotation?: number;
+};
+
+const DEFAULT_HLS_SEGMENT_SECONDS = 2;
+const DEFAULT_HLS_FPS = 30;
+const DEFAULT_THUMBNAIL_TIMESTAMP = '00:00:02';
+
+const QUALITY_LADDERS: Record<ReelHlsQualityProfile, AdaptiveVariant[]> = {
+  data_saver: [
+    {
+      name: '360p',
+      width: 360,
+      height: 640,
+      bitrateKbps: 550,
+      maxrateKbps: 700,
+      bufsizeKbps: 1100,
+      audioBitrateKbps: 64,
+      minSourceLongSide: 0,
+    },
+    {
+      name: '540p',
+      width: 540,
+      height: 960,
+      bitrateKbps: 1100,
+      maxrateKbps: 1400,
+      bufsizeKbps: 2200,
+      audioBitrateKbps: 96,
+      minSourceLongSide: 900,
+    },
+  ],
+  balanced: [
+    {
+      name: '360p',
+      width: 360,
+      height: 640,
+      bitrateKbps: 750,
+      maxrateKbps: 950,
+      bufsizeKbps: 1500,
+      audioBitrateKbps: 96,
+      minSourceLongSide: 0,
+    },
+    {
+      name: '540p',
+      width: 540,
+      height: 960,
+      bitrateKbps: 1400,
+      maxrateKbps: 1800,
+      bufsizeKbps: 2800,
+      audioBitrateKbps: 112,
+      minSourceLongSide: 900,
+    },
+    {
+      name: '720p',
+      width: 720,
+      height: 1280,
+      bitrateKbps: 2400,
+      maxrateKbps: 3100,
+      bufsizeKbps: 4800,
+      audioBitrateKbps: 128,
+      minSourceLongSide: 1200,
+    },
+  ],
+  high: [
+    {
+      name: '360p',
+      width: 360,
+      height: 640,
+      bitrateKbps: 850,
+      maxrateKbps: 1100,
+      bufsizeKbps: 1700,
+      audioBitrateKbps: 96,
+      minSourceLongSide: 0,
+    },
+    {
+      name: '540p',
+      width: 540,
+      height: 960,
+      bitrateKbps: 1600,
+      maxrateKbps: 2100,
+      bufsizeKbps: 3200,
+      audioBitrateKbps: 128,
+      minSourceLongSide: 900,
+    },
+    {
+      name: '720p',
+      width: 720,
+      height: 1280,
+      bitrateKbps: 2800,
+      maxrateKbps: 3600,
+      bufsizeKbps: 5600,
+      audioBitrateKbps: 128,
+      minSourceLongSide: 1200,
+    },
+    {
+      name: '1080p',
+      width: 1080,
+      height: 1920,
+      bitrateKbps: 4800,
+      maxrateKbps: 6200,
+      bufsizeKbps: 9600,
+      audioBitrateKbps: 160,
+      minSourceLongSide: 1800,
+    },
+  ],
+};
+
+const parsePositiveIntegerEnv = (
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number => {
+  const rawValue = process.env[key];
+  const parsed = Number(rawValue);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+};
+
+const parseBooleanEnv = (key: string, fallback: boolean): boolean => {
+  const rawValue = process.env[key]?.trim().toLowerCase();
+
+  if (!rawValue) {
+    return fallback;
+  }
+
+  if (['1', 'true', 'yes', 'on'].includes(rawValue)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(rawValue)) {
+    return false;
+  }
+
+  return fallback;
+};
+
+const getQualityProfile = (): ReelHlsQualityProfile => {
+  const rawValue = process.env.REEL_HLS_QUALITY_PROFILE?.trim().toLowerCase();
+
+  if (
+    rawValue === 'data_saver' ||
+    rawValue === 'balanced' ||
+    rawValue === 'high'
+  ) {
+    return rawValue;
+  }
+
+  return 'balanced';
+};
+
+const toKbps = (value: number) => `${value}k`;
+
+const normalizeRotation = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.abs(Math.round(value)) % 360;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+
+    if (Number.isFinite(parsed)) {
+      return Math.abs(Math.round(parsed)) % 360;
+    }
+  }
+
+  return undefined;
+};
+
+const getEffectiveDimensions = (metadata: VideoMetadata) => {
+  const width = metadata.width ?? 0;
+  const height = metadata.height ?? 0;
+  const rotation = metadata.rotation ?? 0;
+
+  if (rotation === 90 || rotation === 270) {
+    return {
+      width: height,
+      height: width,
+    };
+  }
+
+  return {
+    width,
+    height,
+  };
+};
 
 @Injectable()
 export class FfmpegService implements IVideoProcessingService {
@@ -130,21 +285,55 @@ export class FfmpegService implements IVideoProcessingService {
     await this.transcodeToAdaptiveHls(inputPath, outputDir);
   }
 
+  private getConfiguredLadder(): AdaptiveVariant[] {
+    const qualityProfile = getQualityProfile();
+    const include1080p = parseBooleanEnv('REEL_HLS_INCLUDE_1080P', false);
+    const maxVariants = parsePositiveIntegerEnv(
+      'REEL_HLS_MAX_VARIANTS',
+      qualityProfile === 'high' ? 4 : 3,
+      1,
+      4,
+    );
+
+    let variants = QUALITY_LADDERS[qualityProfile];
+
+    if (!include1080p) {
+      variants = variants.filter((variant) => variant.name !== '1080p');
+    }
+
+    return variants.slice(0, maxVariants);
+  }
+
   private async getEligibleAdaptiveVariants(
     inputPath: string,
   ): Promise<AdaptiveVariant[]> {
     const metadata = await this.getVideoMetadata(inputPath);
-    const longSide = Math.max(metadata.width ?? 0, metadata.height ?? 0);
+    const dimensions = getEffectiveDimensions(metadata);
+    const longSide = Math.max(dimensions.width, dimensions.height);
+    const configuredVariants = this.getConfiguredLadder();
 
     if (longSide <= 0) {
-      return ADAPTIVE_VARIANTS.filter((variant) => variant.name !== '1080p');
+      return configuredVariants.filter((variant) => variant.name !== '1080p');
     }
 
-    const variants = ADAPTIVE_VARIANTS.filter(
+    const variants = configuredVariants.filter(
       (variant) => longSide >= variant.minSourceLongSide,
     );
 
-    return variants.length > 0 ? variants : [ADAPTIVE_VARIANTS[0]];
+    return variants.length > 0 ? variants : [configuredVariants[0]];
+  }
+
+  private getHlsSegmentSeconds(): number {
+    return parsePositiveIntegerEnv(
+      'REEL_HLS_SEGMENT_SECONDS',
+      DEFAULT_HLS_SEGMENT_SECONDS,
+      1,
+      6,
+    );
+  }
+
+  private getOutputFps(): number {
+    return parsePositiveIntegerEnv('REEL_HLS_FPS', DEFAULT_HLS_FPS, 24, 60);
   }
 
   private async transcodeToAdaptiveHls(
@@ -154,12 +343,23 @@ export class FfmpegService implements IVideoProcessingService {
     fs.mkdirSync(outputDir, { recursive: true });
 
     const variants = await this.getEligibleAdaptiveVariants(inputPath);
+    const hasAudio = await this.hasAudioStream(inputPath);
+    const hlsSegmentSeconds = this.getHlsSegmentSeconds();
+    const outputFps = this.getOutputFps();
+    const gopSize = outputFps * hlsSegmentSeconds;
 
     variants.forEach((_, index) => {
       fs.mkdirSync(path.join(outputDir, String(index)), { recursive: true });
     });
 
-    const hasAudio = await this.hasAudioStream(inputPath);
+    this.logger.log(
+      `[HLS] Preparing ${variants.length} variant(s): ${variants
+        .map(
+          (variant) =>
+            `${variant.name}:${variant.width}x${variant.height}@${variant.bitrateKbps}k`,
+        )
+        .join(', ')}`,
+    );
 
     const filterComplex = [
       `[0:v]split=${variants.length}${variants
@@ -185,19 +385,19 @@ export class FfmpegService implements IVideoProcessingService {
       '-c:v',
       'libx264',
       '-preset',
-      'veryfast',
+      process.env.REEL_HLS_X264_PRESET?.trim() || 'veryfast',
       '-pix_fmt',
       'yuv420p',
       '-r',
-      '30',
+      String(outputFps),
       '-g',
-      '60',
+      String(gopSize),
       '-keyint_min',
-      '60',
+      String(gopSize),
       '-sc_threshold',
       '0',
       '-force_key_frames',
-      'expr:gte(t,n_forced*2)',
+      `expr:gte(t,n_forced*${hlsSegmentSeconds})`,
     );
 
     variants.forEach((_, index) => {
@@ -212,11 +412,11 @@ export class FfmpegService implements IVideoProcessingService {
     variants.forEach((variant, index) => {
       outputOptions.push(
         `-b:v:${index}`,
-        variant.bitrate,
+        toKbps(variant.bitrateKbps),
         `-maxrate:v:${index}`,
-        variant.maxrate,
+        toKbps(variant.maxrateKbps),
         `-bufsize:v:${index}`,
-        variant.bufsize,
+        toKbps(variant.bufsizeKbps),
       );
     });
 
@@ -224,7 +424,7 @@ export class FfmpegService implements IVideoProcessingService {
       outputOptions.push('-c:a', 'aac', '-ar', '48000');
 
       variants.forEach((variant, index) => {
-        outputOptions.push(`-b:a:${index}`, variant.audioBitrate);
+        outputOptions.push(`-b:a:${index}`, toKbps(variant.audioBitrateKbps));
       });
     }
 
@@ -232,9 +432,11 @@ export class FfmpegService implements IVideoProcessingService {
       '-start_number',
       '0',
       '-hls_time',
-      '2',
+      String(hlsSegmentSeconds),
       '-hls_playlist_type',
       'vod',
+      '-hls_segment_type',
+      'mpegts',
       '-hls_flags',
       'independent_segments',
       '-hls_list_size',
@@ -280,7 +482,9 @@ export class FfmpegService implements IVideoProcessingService {
         .format('wav')
         .output(outputPath)
         .on('end', () => resolve())
-        .on('error', (err) => reject(err))
+        .on('error', (err) =>
+          reject(err instanceof Error ? err : new Error(String(err))),
+        )
         .run();
     });
   }
@@ -309,13 +513,23 @@ export class FfmpegService implements IVideoProcessingService {
   async extractThumbnail(
     inputPath: string,
     outputPath: string,
-    timestamp = '00:00:02',
+    timestamp = DEFAULT_THUMBNAIL_TIMESTAMP,
   ): Promise<void> {
+    const safeTimestamp = await this.getSafeThumbnailTimestamp(
+      inputPath,
+      timestamp,
+    );
+
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
-        .seekInput(timestamp)
+        .seekInput(safeTimestamp)
         .frames(1)
-        .size('480x?')
+        .outputOptions([
+          '-vf',
+          'scale=480:854:force_original_aspect_ratio=increase,crop=480:854,setsar=1',
+          '-q:v',
+          '3',
+        ])
         .output(outputPath)
         .on('end', () => resolve())
         .on('error', (err) =>
@@ -325,11 +539,7 @@ export class FfmpegService implements IVideoProcessingService {
     });
   }
 
-  async getVideoMetadata(inputPath: string): Promise<{
-    durationMs?: number;
-    width?: number;
-    height?: number;
-  }> {
+  async getVideoMetadata(inputPath: string): Promise<VideoMetadata> {
     return new Promise((resolve, reject) => {
       ffmpeg.ffprobe(inputPath, (error, metadata) => {
         if (error) {
@@ -346,6 +556,21 @@ export class FfmpegService implements IVideoProcessingService {
             ? metadata.format.duration
             : undefined;
 
+        const videoStreamRecord =
+          typeof videoStream === 'object' && videoStream !== null
+            ? (videoStream as Record<string, unknown>)
+            : null;
+
+        const videoStreamTags =
+          typeof videoStreamRecord?.tags === 'object' &&
+          videoStreamRecord.tags !== null
+            ? (videoStreamRecord.tags as Record<string, unknown>)
+            : null;
+
+        const rotation =
+          normalizeRotation(videoStreamRecord?.rotation) ??
+          normalizeRotation(videoStreamTags?.rotate);
+
         resolve({
           durationMs:
             durationSeconds !== undefined
@@ -359,9 +584,32 @@ export class FfmpegService implements IVideoProcessingService {
             typeof videoStream?.height === 'number'
               ? videoStream.height
               : undefined,
+          rotation,
         });
       });
     });
+  }
+
+  private async getSafeThumbnailTimestamp(
+    inputPath: string,
+    preferredTimestamp: string,
+  ): Promise<string> {
+    const metadata = await this.getVideoMetadata(inputPath);
+    const durationMs = metadata.durationMs ?? 0;
+
+    if (durationMs <= 0) {
+      return preferredTimestamp;
+    }
+
+    if (durationMs < 2500) {
+      return '00:00:00.200';
+    }
+
+    if (durationMs < 5000) {
+      return '00:00:01';
+    }
+
+    return preferredTimestamp;
   }
 
   private async hasAudioStream(inputPath: string): Promise<boolean> {
