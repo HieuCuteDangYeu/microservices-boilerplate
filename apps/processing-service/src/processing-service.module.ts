@@ -4,6 +4,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { EmbedReelChunksUseCase } from '@processing/application/use-cases/embed-reel-chunks.use-case';
 import { NormalizeReelMetadataUseCase } from '@processing/application/use-cases/normalize-reel-metadata.use-case';
 import { ValidateReelIndexUseCase } from '@processing/application/use-cases/validate-reel-index.use-case';
+import { ValidateReelStreamUseCase } from '@processing/application/use-cases/validate-reel-stream.use-case';
 import { AiServiceAdapter } from '@processing/infrastructure/adapters/ai-service.adapter';
 import { ContentServiceAdapter } from '@processing/infrastructure/adapters/content-service.adapter';
 import { ConversationMediaAdapter } from '@processing/infrastructure/adapters/conversation-media.adapter';
@@ -113,6 +114,7 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     BuildReelTranscriptionPromptUseCase,
     BuildTranscriptChunksUseCase,
     PrepareReelMediaUseCase,
+    ValidateReelStreamUseCase,
     FfmpegService,
     JobConcurrencyLimiterService,
     R2Service,

@@ -46,6 +46,8 @@ export class ProcessReelUseCase {
       const workspace = this.tempFileService.createReelProcessingWorkspace();
 
       let currentProgress = 10;
+      let failedStage = 'FAILED';
+      let failedMessage = 'Video processing failed';
 
       try {
         const mediaResult = await this.prepareReelMediaUseCase.execute({
@@ -109,11 +111,15 @@ export class ProcessReelUseCase {
 
         if (error instanceof PrepareReelMediaError) {
           currentProgress = error.progress;
+          failedStage = error.stage;
+          failedMessage = error.publicMessage;
         }
 
         await this.emitFailed({
           reelId,
           progress: currentProgress,
+          stage: failedStage,
+          message: failedMessage,
         });
       } finally {
         this.tempFileService.removeDirIfExists(workspace.workDir);
@@ -158,13 +164,15 @@ export class ProcessReelUseCase {
   private async emitFailed(data: {
     reelId: string;
     progress: number;
+    stage: string;
+    message: string;
   }): Promise<void> {
     try {
       await this.contentService.emitProcessingFailed({
         reelId: data.reelId,
         status: 'FAILED',
-        stage: 'FAILED',
-        message: 'Video processing failed',
+        stage: data.stage,
+        message: data.message,
         progress: data.progress,
       });
     } catch (error: unknown) {

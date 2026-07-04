@@ -1,6 +1,7 @@
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -14,6 +15,7 @@ import { NodeHttpHandler } from '@smithy/node-http-handler';
 import * as fs from 'fs';
 import * as https from 'https';
 import * as path from 'path';
+import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 
 type UploadFile = {
@@ -92,7 +94,7 @@ export class R2Service implements IMediaStorageService {
   async downloadVideo(key: string, downloadPath: string): Promise<void> {
     const command = new GetObjectCommand({
       Bucket: this.bucketName,
-      Key: key,
+      Key: this.normalizeKey(key),
     });
 
     const response = await this.s3Client.send(command);
@@ -137,12 +139,13 @@ export class R2Service implements IMediaStorageService {
 
   async uploadHlsDirectory(localDir: string, s3Prefix: string): Promise<void> {
     const files = this.listFilesRecursively(localDir);
+    const cleanPrefix = this.normalizeKey(s3Prefix).replace(/\/+$/, '');
 
     await this.uploadWithConcurrency(files, 8, async (file) => {
       const fileStream = fs.createReadStream(file.absolutePath);
       const normalizedRelativeKey = file.relativeKey.split(path.sep).join('/');
 
-      const key = `${s3Prefix}/${normalizedRelativeKey}`;
+      const key = `${cleanPrefix}/${normalizedRelativeKey}`;
       const fileName = path.basename(file.absolutePath);
 
       const command = new PutObjectCommand({
@@ -161,10 +164,12 @@ export class R2Service implements IMediaStorageService {
     localPath: string,
     s3Key: string,
   ): Promise<UploadedThumbnail> {
+    const cleanKey = this.normalizeKey(s3Key);
     const fileBuffer = fs.readFileSync(localPath);
+
     const command = new PutObjectCommand({
       Bucket: this.bucketName,
-      Key: s3Key,
+      Key: cleanKey,
       Body: fileBuffer,
       ContentType: 'image/jpeg',
       CacheControl: IMMUTABLE_MEDIA_CACHE_CONTROL,
@@ -173,14 +178,100 @@ export class R2Service implements IMediaStorageService {
     await this.s3Client.send(command);
 
     return {
-      key: s3Key,
-      url: this.getPublicUrl(s3Key),
+      key: cleanKey,
+      url: this.getPublicUrl(cleanKey),
     };
   }
 
+  async objectExists(key: string): Promise<boolean> {
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.normalizeKey(key),
+        }),
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async getObjectText(key: string): Promise<string> {
+    const response = await this.s3Client.send(
+      new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: this.normalizeKey(key),
+      }),
+    );
+
+    if (!response.Body) {
+      return '';
+    }
+
+    return this.streamToString(response.Body);
+  }
+
   getPublicUrl(key: string): string {
-    const normalizedKey = key.replace(/^\/+/, '');
+    const normalizedKey = this.normalizeKey(key);
     return `${this.publicDomain}/${normalizedKey}`;
+  }
+
+  private normalizeKey(key: string): string {
+    return key.replace(/^\/+/, '').trim();
+  }
+
+  private async streamToString(body: unknown): Promise<string> {
+    if (!body) {
+      return '';
+    }
+
+    if (typeof body === 'string') {
+      return body;
+    }
+
+    if (
+      typeof body === 'object' &&
+      body !== null &&
+      'transformToString' in body &&
+      typeof (body as { transformToString?: unknown }).transformToString ===
+        'function'
+    ) {
+      return await (
+        body as { transformToString: () => Promise<string> }
+      ).transformToString();
+    }
+
+    const readable =
+      body instanceof Readable
+        ? body
+        : Readable.from(
+            body as Iterable<Uint8Array> | AsyncIterable<Uint8Array>,
+          );
+
+    const chunks: Uint8Array[] = [];
+
+    for await (const chunk of readable as AsyncIterable<unknown>) {
+      if (typeof chunk === 'string') {
+        chunks.push(Buffer.from(chunk, 'utf8'));
+        continue;
+      }
+
+      if (chunk instanceof Uint8Array) {
+        chunks.push(chunk);
+        continue;
+      }
+
+      if (chunk instanceof ArrayBuffer) {
+        chunks.push(new Uint8Array(chunk));
+        continue;
+      }
+
+      chunks.push(Buffer.from(String(chunk), 'utf8'));
+    }
+
+    return Buffer.concat(chunks).toString('utf8');
   }
 
   private async listObjectKeys(prefix: string): Promise<string[]> {

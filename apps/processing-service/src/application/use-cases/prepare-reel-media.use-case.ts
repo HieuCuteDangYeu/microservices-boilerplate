@@ -4,16 +4,29 @@ import type { IMediaStorageService } from '../../domain/interfaces/media-storage
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import type { IVideoProcessingService } from '../../domain/interfaces/video-processing.service.interface';
 import { formatProcessingError } from '../utils/format-processing-error';
+import {
+  ReelStreamValidationError,
+  ValidateReelStreamUseCase,
+} from './validate-reel-stream.use-case';
 
 export class PrepareReelMediaError extends Error {
+  readonly stage: string;
+  readonly publicMessage: string;
+
   constructor(
     error: unknown,
     readonly progress: number,
+    options: {
+      stage?: string;
+      publicMessage?: string;
+    } = {},
   ) {
     const { message, stack } = formatProcessingError(error);
 
     super(message);
     this.stack = stack;
+    this.stage = options.stage ?? 'FAILED';
+    this.publicMessage = options.publicMessage ?? 'Video processing failed';
   }
 }
 
@@ -30,6 +43,7 @@ export class PrepareReelMediaUseCase {
     private readonly contentService: IContentService,
     @Inject('ITempFileService')
     private readonly tempFileService: ITempFileService,
+    private readonly validateReelStreamUseCase: ValidateReelStreamUseCase,
   ) {}
 
   async execute(data: {
@@ -42,6 +56,8 @@ export class PrepareReelMediaUseCase {
     thumbnailKey: string;
   }> {
     let currentProgress = 10;
+    let currentStage = 'DOWNLOADING';
+    let currentPublicMessage = 'Video processing failed';
 
     try {
       await this.contentService.emitProcessingStarted({
@@ -60,10 +76,11 @@ export class PrepareReelMediaUseCase {
       this.logger.log(`[Reel ${data.reelId}] Downloaded source video`);
 
       currentProgress = 30;
+      currentStage = 'TRANSCODING';
 
       await this.emitProgress({
         reelId: data.reelId,
-        stage: 'TRANSCODING',
+        stage: currentStage,
         message: 'Transcoding video for streaming',
         progress: currentProgress,
       });
@@ -78,12 +95,13 @@ export class PrepareReelMediaUseCase {
       const s3Prefix = data.mediaKey.replace(/\.[^.]+$/, '');
 
       currentProgress = 60;
+      currentStage = 'UPLOADING_STREAM';
 
       await this.mediaStorageService.deleteObjectsByPrefix(s3Prefix);
 
       await this.emitProgress({
         reelId: data.reelId,
-        stage: 'UPLOADING_STREAM',
+        stage: currentStage,
         message: 'Uploading streaming files',
         progress: currentProgress,
       });
@@ -98,10 +116,11 @@ export class PrepareReelMediaUseCase {
       );
 
       currentProgress = 75;
+      currentStage = 'GENERATING_THUMBNAIL';
 
       await this.emitProgress({
         reelId: data.reelId,
-        stage: 'GENERATING_THUMBNAIL',
+        stage: currentStage,
         message: 'Generating reel thumbnail',
         progress: currentProgress,
       });
@@ -122,6 +141,26 @@ export class PrepareReelMediaUseCase {
         `[Reel ${data.reelId}] Uploaded thumbnail ${thumbnailKey}`,
       );
 
+      currentProgress = 85;
+      currentStage = 'VALIDATING_STREAM';
+      currentPublicMessage =
+        'Streaming files could not be prepared. Please try again.';
+
+      await this.emitProgress({
+        reelId: data.reelId,
+        stage: currentStage,
+        message: 'Checking streaming files',
+        progress: currentProgress,
+      });
+
+      await this.validateReelStreamUseCase.execute({
+        reelId: data.reelId,
+        s3Prefix,
+        thumbnailKey,
+      });
+
+      currentProgress = 88;
+
       this.tempFileService.removeDirIfExists(data.hlsOutputDir);
       this.tempFileService.removeFileIfExists(data.thumbnailPath);
 
@@ -129,7 +168,17 @@ export class PrepareReelMediaUseCase {
         thumbnailKey,
       };
     } catch (error: unknown) {
-      throw new PrepareReelMediaError(error, currentProgress);
+      if (error instanceof ReelStreamValidationError) {
+        throw new PrepareReelMediaError(error, currentProgress, {
+          stage: 'STREAM_VALIDATION_FAILED',
+          publicMessage: error.message,
+        });
+      }
+
+      throw new PrepareReelMediaError(error, currentProgress, {
+        stage: currentStage,
+        publicMessage: currentPublicMessage,
+      });
     }
   }
 

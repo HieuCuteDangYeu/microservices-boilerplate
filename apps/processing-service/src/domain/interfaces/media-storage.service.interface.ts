@@ -12,5 +12,9 @@ export interface IMediaStorageService {
 
   uploadThumbnail(localPath: string, s3Key: string): Promise<UploadedThumbnail>;
 
+  objectExists(key: string): Promise<boolean>;
+
+  getObjectText(key: string): Promise<string>;
+
   getPublicUrl(key: string): string;
 }
