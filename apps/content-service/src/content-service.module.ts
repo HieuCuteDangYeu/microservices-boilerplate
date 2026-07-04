@@ -7,6 +7,7 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
+import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
@@ -87,6 +88,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     RevokeReelShareLinkUseCase,
     BackfillReelChunksUseCase,
     TrackReelEventsUseCase,
+    ReprocessReelUseCase,
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,

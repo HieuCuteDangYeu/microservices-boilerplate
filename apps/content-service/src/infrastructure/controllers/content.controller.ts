@@ -11,6 +11,7 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
+import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
@@ -18,7 +19,12 @@ import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-r
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { Reel } from '@content/domain/entities/reel.entity';
-import { InvalidMediaFileError } from '@content/domain/errors/content.error';
+import {
+  InvalidMediaFileError,
+  ReelAlreadyProcessingError,
+  ReelNotFoundError,
+  ReelReprocessForbiddenError,
+} from '@content/domain/errors/content.error';
 import {
   ReelListQuery,
   ReelUpdateData,
@@ -52,6 +58,7 @@ export class ContentController {
     private readonly revokeReelShareLinkUseCase: RevokeReelShareLinkUseCase,
     private readonly backfillReelChunksUseCase: BackfillReelChunksUseCase,
     private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
+    private readonly reprocessReelUseCase: ReprocessReelUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -300,6 +307,74 @@ export class ContentController {
       throw new RpcException({
         statusCode: 404,
         message: 'Reel not found',
+      });
+    }
+  }
+
+  @MessagePattern('content.reprocess_reel')
+  async reprocessReel(
+    @Payload()
+    data: {
+      reelId: string;
+      userId: string;
+      isAdmin?: boolean;
+    },
+  ) {
+    if (
+      !data ||
+      typeof data.reelId !== 'string' ||
+      data.reelId.trim().length === 0 ||
+      typeof data.userId !== 'string' ||
+      data.userId.trim().length === 0
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for reel reprocessing',
+      });
+    }
+
+    try {
+      const reel = await this.reprocessReelUseCase.execute(
+        data.reelId.trim(),
+        data.userId.trim(),
+        data.isAdmin === true,
+      );
+
+      return this.toSerializable(reel);
+    } catch (error: unknown) {
+      if (error instanceof ReelNotFoundError) {
+        throw new RpcException({
+          statusCode: 404,
+          message: error.message,
+        });
+      }
+
+      if (error instanceof ReelReprocessForbiddenError) {
+        throw new RpcException({
+          statusCode: 403,
+          message: error.message,
+        });
+      }
+
+      if (error instanceof ReelAlreadyProcessingError) {
+        throw new RpcException({
+          statusCode: 409,
+          message: error.message,
+        });
+      }
+
+      if (error instanceof InvalidMediaFileError) {
+        throw new RpcException({
+          statusCode: 400,
+          message: error.message,
+        });
+      }
+
+      const err = error as Error;
+
+      throw new RpcException({
+        statusCode: 500,
+        message: `Reprocess Reel Error: ${err.message}`,
       });
     }
   }

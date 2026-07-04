@@ -26,6 +26,20 @@ export class ReelShareForbiddenError extends Error {
   }
 }
 
+export class ReelReprocessForbiddenError extends Error {
+  constructor(message = 'You are not allowed to reprocess this reel.') {
+    super(message);
+    this.name = 'ReelReprocessForbiddenError';
+  }
+}
+
+export class ReelAlreadyProcessingError extends Error {
+  constructor(message = 'This reel is already being processed.') {
+    super(message);
+    this.name = 'ReelAlreadyProcessingError';
+  }
+}
+
 export class ReelShareLinkNotFoundError extends Error {
   constructor() {
     super('Reel share link not found.');

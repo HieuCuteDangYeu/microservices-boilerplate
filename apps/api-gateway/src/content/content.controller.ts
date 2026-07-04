@@ -260,6 +260,25 @@ export class ContentController {
     };
   }
 
+  @Post('reels/:id/reprocess')
+  @ApiOperation({ summary: 'Retry processing a failed reel' })
+  async reprocessReel(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') reelId: string,
+  ) {
+    const reel = await lastValueFrom(
+      this.contentClient
+        .send<Reel>('content.reprocess_reel', {
+          reelId,
+          userId: request.user!.id,
+          isAdmin: request.user!.roles?.includes('ADMIN') === true,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return this._enrichReel(reel);
+  }
+
   @Get('reels/:id/status')
   @ApiOperation({ summary: 'Get reel processing status' })
   async getReelStatus(
