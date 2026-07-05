@@ -1,5 +1,6 @@
 import { TrackReelEventsUseCase } from '@ai/application/use-cases/track-reel-events.use-case';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
+import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
@@ -89,6 +90,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     BackfillReelChunksUseCase,
     TrackReelEventsUseCase,
     ReprocessReelUseCase,
+    ClaimReelProcessingAttemptUseCase,
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,

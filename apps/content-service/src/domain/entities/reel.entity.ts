@@ -17,6 +17,12 @@ export class Reel {
   processingStage?: string;
   processingMessage?: string;
   processingProgress?: number;
+  processingAttemptId?: string;
+  processingStartedAt?: Date;
+  processingFailedAt?: Date;
+  processingCompletedAt?: Date;
+  processingErrorCode?: string;
+  processingErrorDetail?: string;
   createdAt: Date;
   updatedAt: Date;
 }

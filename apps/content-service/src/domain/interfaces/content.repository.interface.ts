@@ -112,6 +112,16 @@ export interface ReelViewEventInput {
 export interface IContentRepository {
   createReel(reel: Partial<Reel>): Promise<Reel>;
 
+  queueReelProcessingAttempt(
+    reelId: string,
+    processingAttemptId: string,
+  ): Promise<Reel>;
+
+  claimProcessingAttempt(input: {
+    reelId: string;
+    processingAttemptId: string;
+  }): Promise<boolean>;
+
   updateReelStatus(
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
@@ -126,6 +136,9 @@ export interface IContentRepository {
     title?: string,
     description?: string,
     tags?: string[],
+    expectedProcessingAttemptId?: string,
+    processingErrorCode?: string,
+    processingErrorDetail?: string,
   ): Promise<Reel>;
 
   findById(id: string): Promise<Reel | null>;

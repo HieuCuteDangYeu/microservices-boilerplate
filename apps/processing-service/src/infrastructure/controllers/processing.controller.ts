@@ -1,6 +1,6 @@
+import type { ProcessVideoThumbnailPayload } from '@common/media/dtos/process-video-thumbnail.dto';
 import { Controller } from '@nestjs/common';
 import { EventPattern, Payload } from '@nestjs/microservices';
-import type { ProcessVideoThumbnailPayload } from '@common/media/dtos/process-video-thumbnail.dto';
 import { ProcessChatVideoUseCase } from '../../application/use-cases/process-chat-video.use-case';
 import { ProcessReelUseCase } from '../../application/use-cases/process-reel.use-case';
 
@@ -18,6 +18,7 @@ export class ProcessingController {
       reelId: string;
       mediaKey: string;
       userId: string;
+      processingAttemptId?: string;
       title?: string;
       description?: string;
       tags?: string[];

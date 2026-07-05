@@ -26,6 +26,9 @@ export class UpdateReelStatusUseCase {
     title?: string,
     description?: string,
     tags?: string[],
+    expectedProcessingAttemptId?: string,
+    processingErrorCode?: string,
+    processingErrorDetail?: string,
   ) {
     let sanitizedTranscript = transcript;
     let sanitizedTranscriptVtt = transcriptVtt?.trim() || undefined;
@@ -104,6 +107,9 @@ export class UpdateReelStatusUseCase {
       sanitizedTitle,
       sanitizedDescription,
       sanitizedTags,
+      expectedProcessingAttemptId,
+      processingErrorCode,
+      processingErrorDetail,
     );
   }
 
@@ -161,34 +167,27 @@ export class UpdateReelStatusUseCase {
       return undefined;
     }
 
-    const sanitized = segments.flatMap((segment) => {
-      if (!segment || typeof segment !== 'object') {
-        return [];
-      }
+    return segments
+      .map((segment) => ({
+        text: typeof segment.text === 'string' ? segment.text.trim() : '',
+        start: this.normalizeTimestamp(segment.start),
+        end: this.normalizeTimestamp(segment.end),
+      }))
+      .filter(
+        (segment) =>
+          segment.text.length > 0 &&
+          segment.start !== undefined &&
+          segment.end !== undefined &&
+          segment.end >= segment.start,
+      ) as TranscriptSegment[];
+  }
 
-      const start = Number(segment.start);
-      const end = Number(segment.end);
-      const text = typeof segment.text === 'string' ? segment.text.trim() : '';
+  private normalizeTimestamp(value?: number): number | undefined {
+    if (value === undefined || !Number.isFinite(value)) {
+      return undefined;
+    }
 
-      if (
-        !Number.isFinite(start) ||
-        !Number.isFinite(end) ||
-        text.length === 0
-      ) {
-        return [];
-      }
-
-      return [
-        {
-          ...segment,
-          start,
-          end,
-          text,
-        },
-      ];
-    });
-
-    return sanitized.length > 0 ? sanitized : undefined;
+    return Math.max(0, Number(value.toFixed(3)));
   }
 
   private normalizeChunks(
@@ -198,91 +197,40 @@ export class UpdateReelStatusUseCase {
       return undefined;
     }
 
-    const sanitized = chunks.flatMap((chunk, index) => {
-      if (!chunk || typeof chunk !== 'object') {
-        return [];
-      }
-
-      const text = typeof chunk.text === 'string' ? chunk.text.trim() : '';
-      const embedding = Array.isArray(chunk.embedding) ? chunk.embedding : [];
-
-      if (text.length === 0 || embedding.length === 0) {
-        return [];
-      }
-
-      return [
-        {
-          chunkIndex: Number.isInteger(chunk.chunkIndex)
-            ? chunk.chunkIndex
-            : index,
-          text,
-          startTime:
-            chunk.startTime !== undefined && Number.isFinite(chunk.startTime)
-              ? chunk.startTime
-              : undefined,
-          endTime:
-            chunk.endTime !== undefined && Number.isFinite(chunk.endTime)
-              ? chunk.endTime
-              : undefined,
-          embedding,
-          embeddingModel: chunk.embeddingModel || 'gemini-embedding-001:384',
-        },
-      ];
-    });
-
-    return sanitized.length > 0 ? sanitized : undefined;
+    return chunks.filter(
+      (chunk) =>
+        typeof chunk.text === 'string' &&
+        chunk.text.trim().length > 0 &&
+        Array.isArray(chunk.embedding) &&
+        chunk.embedding.length > 0,
+    );
   }
 
   private normalizeOptionalText(
-    value: unknown,
-    maxChars: number,
+    value: string | undefined,
+    maxLength: number,
   ): string | undefined {
     if (typeof value !== 'string') {
       return undefined;
     }
 
-    const normalized = value.replace(/\s+/g, ' ').trim();
+    const trimmed = value.trim();
 
-    if (!normalized) {
+    if (trimmed.length === 0) {
       return undefined;
     }
 
-    return normalized.length > maxChars
-      ? normalized.slice(0, maxChars).trim()
-      : normalized;
+    return trimmed.slice(0, maxLength);
   }
 
-  private normalizeTags(value: unknown): string[] | undefined {
-    if (!Array.isArray(value)) {
+  private normalizeTags(tags?: string[]): string[] | undefined {
+    if (!Array.isArray(tags)) {
       return undefined;
     }
 
-    const seen = new Set<string>();
-    const tags: string[] = [];
-
-    for (const rawTag of value) {
-      if (typeof rawTag !== 'string') {
-        continue;
-      }
-
-      const tag = rawTag
-        .replace(/^#+/, '')
-        .trim()
-        .replace(/\s+/g, ' ')
-        .toLowerCase();
-
-      if (!tag || seen.has(tag)) {
-        continue;
-      }
-
-      seen.add(tag);
-      tags.push(tag);
-
-      if (tags.length >= 8) {
-        break;
-      }
-    }
-
-    return tags.length > 0 ? tags : undefined;
+    return tags
+      .map((tag) => tag.trim().replace(/^#/, '').toLowerCase())
+      .filter(Boolean)
+      .slice(0, 8);
   }
 }

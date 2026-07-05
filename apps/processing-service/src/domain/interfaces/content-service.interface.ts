@@ -2,9 +2,15 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 
 export interface IContentService {
+  claimReelProcessingAttempt(data: {
+    reelId: string;
+    processingAttemptId: string;
+  }): Promise<boolean>;
+
   emitProcessingStarted(data: {
     reelId: string;
     status: 'PROCESSING';
+    processingAttemptId?: string;
     stage?: string;
     message?: string;
     progress?: number;
@@ -13,6 +19,7 @@ export interface IContentService {
   emitProcessingProgress(data: {
     reelId: string;
     status: 'PROCESSING';
+    processingAttemptId?: string;
     stage?: string;
     message?: string;
     progress?: number;
@@ -21,6 +28,7 @@ export interface IContentService {
   emitProcessingCompleted(data: {
     reelId: string;
     status: 'COMPLETED';
+    processingAttemptId?: string;
     title?: string;
     description?: string;
     tags?: string[];
@@ -37,8 +45,11 @@ export interface IContentService {
   emitProcessingFailed(data: {
     reelId: string;
     status: 'FAILED';
+    processingAttemptId?: string;
     stage?: string;
     message?: string;
     progress?: number;
+    errorCode?: string;
+    errorDetail?: string;
   }): Promise<void>;
 }

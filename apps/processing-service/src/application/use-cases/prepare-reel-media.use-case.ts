@@ -49,6 +49,7 @@ export class PrepareReelMediaUseCase {
   async execute(data: {
     reelId: string;
     mediaKey: string;
+    processingAttemptId?: string;
     inputPath: string;
     hlsOutputDir: string;
     thumbnailPath: string;
@@ -63,6 +64,7 @@ export class PrepareReelMediaUseCase {
       await this.contentService.emitProcessingStarted({
         reelId: data.reelId,
         status: 'PROCESSING',
+        processingAttemptId: data.processingAttemptId,
         stage: 'DOWNLOADING',
         message: 'Downloading source video',
         progress: currentProgress,
@@ -184,6 +186,7 @@ export class PrepareReelMediaUseCase {
 
   private async emitProgress(data: {
     reelId: string;
+    processingAttemptId?: string;
     stage: string;
     message: string;
     progress: number;
@@ -192,6 +195,7 @@ export class PrepareReelMediaUseCase {
       await this.contentService.emitProcessingProgress({
         reelId: data.reelId,
         status: 'PROCESSING',
+        processingAttemptId: data.processingAttemptId,
         stage: data.stage,
         message: data.message,
         progress: data.progress,

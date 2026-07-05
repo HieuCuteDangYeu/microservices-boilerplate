@@ -4,6 +4,7 @@ import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
+import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
@@ -59,6 +60,7 @@ export class ContentController {
     private readonly backfillReelChunksUseCase: BackfillReelChunksUseCase,
     private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
     private readonly reprocessReelUseCase: ReprocessReelUseCase,
+    private readonly claimReelProcessingAttemptUseCase: ClaimReelProcessingAttemptUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -81,6 +83,11 @@ export class ContentController {
       transcriptSegments: reel.transcriptSegments,
       createdAt: reel.createdAt,
       updatedAt: reel.updatedAt,
+      processingAttemptId: reel.processingAttemptId,
+      processingStartedAt: reel.processingStartedAt,
+      processingFailedAt: reel.processingFailedAt,
+      processingCompletedAt: reel.processingCompletedAt,
+      processingErrorCode: reel.processingErrorCode,
     };
   }
 
@@ -160,6 +167,7 @@ export class ContentController {
     data: {
       reelId: string;
       status: 'COMPLETED';
+      processingAttemptId?: string;
       title?: string;
       description?: string;
       tags?: string[];
@@ -188,19 +196,39 @@ export class ContentController {
         data.title,
         data.description,
         data.tags,
+        data.processingAttemptId,
       );
     } catch (err: unknown) {
       const error = err as Error;
+
       console.error(
-        `❌ [processing_completed] ${error.message} — rolling reel ${data.reelId} back to FAILED`,
+        `[processing_completed] ${error.message} — rolling reel ${data.reelId} back to FAILED`,
       );
 
       try {
-        await this.updateReelStatusUseCase.execute(data.reelId, 'FAILED');
-      } catch (fallbackErr) {
+        await this.updateReelStatusUseCase.execute(
+          data.reelId,
+          'FAILED',
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          'FAILED',
+          'Video processing failed',
+          data.progress,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          data.processingAttemptId,
+          'PROCESSING_COMPLETED_HANDLER_FAILED',
+          error.message,
+        );
+      } catch (fallbackErr: unknown) {
         const fallbackError = fallbackErr as Error;
+
         console.error(
-          `⚠️ [processing_completed] could not set FAILED either for reel ${data.reelId}: ${fallbackError.message}`,
+          `[processing_completed] could not set FAILED either for reel ${data.reelId}: ${fallbackError.message}`,
         );
       }
     }
@@ -215,6 +243,9 @@ export class ContentController {
       stage?: string;
       message?: string;
       progress?: number;
+      processingAttemptId?: string;
+      errorCode?: string;
+      errorDetail?: string;
     },
   ) {
     try {
@@ -228,6 +259,13 @@ export class ContentController {
         data.stage,
         data.message,
         data.progress,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        data.processingAttemptId,
+        data.errorCode,
+        data.errorDetail,
       );
     } catch (err: unknown) {
       const error = err as Error;
@@ -246,6 +284,7 @@ export class ContentController {
       stage?: string;
       message?: string;
       progress?: number;
+      processingAttemptId?: string;
     },
   ) {
     try {
@@ -259,6 +298,11 @@ export class ContentController {
         data.stage,
         data.message,
         data.progress,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        data.processingAttemptId,
       );
     } catch (err: unknown) {
       const error = err as Error;
@@ -277,6 +321,7 @@ export class ContentController {
       stage?: string;
       message?: string;
       progress?: number;
+      processingAttemptId?: string;
     },
   ) {
     try {
@@ -290,6 +335,11 @@ export class ContentController {
         data.stage,
         data.message,
         data.progress,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        data.processingAttemptId,
       );
     } catch (err: unknown) {
       const error = err as Error;
@@ -309,6 +359,30 @@ export class ContentController {
         message: 'Reel not found',
       });
     }
+  }
+
+  @MessagePattern('content.claim_reel_processing_attempt')
+  async claimReelProcessingAttempt(
+    @Payload()
+    data: {
+      reelId: string;
+      processingAttemptId: string;
+    },
+  ) {
+    if (
+      !data ||
+      typeof data.reelId !== 'string' ||
+      data.reelId.trim().length === 0 ||
+      typeof data.processingAttemptId !== 'string' ||
+      data.processingAttemptId.trim().length === 0
+    ) {
+      return false;
+    }
+
+    return await this.claimReelProcessingAttemptUseCase.execute({
+      reelId: data.reelId,
+      processingAttemptId: data.processingAttemptId,
+    });
   }
 
   @MessagePattern('content.reprocess_reel')

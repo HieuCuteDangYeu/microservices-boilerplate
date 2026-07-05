@@ -37,9 +37,28 @@ export class ContentServiceAdapter implements IContentService {
     return typeof error === 'string' ? error : 'Unknown error';
   }
 
+  async claimReelProcessingAttempt(data: {
+    reelId: string;
+    processingAttemptId: string;
+  }): Promise<boolean> {
+    try {
+      return await firstValueFrom(
+        this.messageBroker.send<boolean>(
+          'content.claim_reel_processing_attempt',
+          data,
+        ),
+      );
+    } catch (error: unknown) {
+      throw new Error(
+        `Failed to claim reel processing attempt: ${this.describeError(error)}`,
+      );
+    }
+  }
+
   async emitProcessingStarted(data: {
     reelId: string;
     status: 'PROCESSING';
+    processingAttemptId?: string;
     stage?: string;
     message?: string;
     progress?: number;
@@ -58,6 +77,7 @@ export class ContentServiceAdapter implements IContentService {
   async emitProcessingProgress(data: {
     reelId: string;
     status: 'PROCESSING';
+    processingAttemptId?: string;
     stage?: string;
     message?: string;
     progress?: number;
@@ -76,6 +96,7 @@ export class ContentServiceAdapter implements IContentService {
   async emitProcessingCompleted(data: {
     reelId: string;
     status: 'COMPLETED';
+    processingAttemptId?: string;
     transcript?: string;
     transcriptVtt?: string;
     transcriptSegments?: TranscriptSegment[];
@@ -102,9 +123,12 @@ export class ContentServiceAdapter implements IContentService {
   async emitProcessingFailed(data: {
     reelId: string;
     status: 'FAILED';
+    processingAttemptId?: string;
     stage?: string;
     message?: string;
     progress?: number;
+    errorCode?: string;
+    errorDetail?: string;
   }): Promise<void> {
     try {
       await firstValueFrom(

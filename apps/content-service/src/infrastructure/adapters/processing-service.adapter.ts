@@ -24,6 +24,7 @@ export class ProcessingServiceAdapter implements IProcessingService {
 
     if (typeof error === 'object' && error !== null) {
       const record = error as Record<string, unknown>;
+
       if (typeof record['message'] === 'string') {
         return record['message'];
       }
@@ -46,6 +47,7 @@ export class ProcessingServiceAdapter implements IProcessingService {
     reelId: string;
     mediaKey: string;
     userId: string;
+    processingAttemptId: string;
     title?: string;
     description?: string;
     tags: string[];

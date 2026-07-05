@@ -6,8 +6,12 @@ import {
 } from '@content/domain/errors/content.error';
 import type { IProcessingService } from '@content/domain/interfaces/processing-service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { Reel } from '../../domain/entities/reel.entity';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
 import type { IStorageService } from '../../domain/interfaces/storage.service.interface';
+
+const DEFAULT_STALE_PROCESSING_MS = 30 * 60 * 1000;
 
 @Injectable()
 export class ReprocessReelUseCase {
@@ -33,7 +37,7 @@ export class ReprocessReelUseCase {
       throw new ReelReprocessForbiddenError();
     }
 
-    if (reel.status === 'PENDING' || reel.status === 'PROCESSING') {
+    if (this.isActiveAndNotStale(reel)) {
       throw new ReelAlreadyProcessingError();
     }
 
@@ -47,16 +51,11 @@ export class ReprocessReelUseCase {
       throw new InvalidMediaFileError();
     }
 
-    const queuedReel = await this.contentRepository.updateReelStatus(
+    const processingAttemptId = randomUUID();
+
+    const queuedReel = await this.contentRepository.queueReelProcessingAttempt(
       reel.id,
-      'PENDING',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      'QUEUED',
-      'Queued for processing',
-      0,
+      processingAttemptId,
     );
 
     try {
@@ -64,6 +63,7 @@ export class ReprocessReelUseCase {
         reelId: reel.id,
         mediaKey: reel.mediaKey,
         userId: reel.userId,
+        processingAttemptId,
         title: reel.title,
         description: reel.description,
         tags: reel.tags,
@@ -82,12 +82,34 @@ export class ReprocessReelUseCase {
         undefined,
         undefined,
         undefined,
-        'FAILED',
+        'QUEUE_PUBLISH_FAILED',
         'Video processing failed',
         0,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        processingAttemptId,
+        'QUEUE_PUBLISH_FAILED',
+        message,
       );
     }
 
     return queuedReel;
+  }
+
+  private isActiveAndNotStale(reel: Reel): boolean {
+    if (reel.status !== 'PENDING' && reel.status !== 'PROCESSING') {
+      return false;
+    }
+
+    const anchor =
+      reel.processingStartedAt ?? reel.updatedAt ?? reel.createdAt ?? null;
+
+    if (!anchor) {
+      return false;
+    }
+
+    return Date.now() - anchor.getTime() < DEFAULT_STALE_PROCESSING_MS;
   }
 }

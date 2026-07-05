@@ -46,6 +46,12 @@ export class ContentRepository
     processingStage: true,
     processingMessage: true,
     processingProgress: true,
+    processingAttemptId: true,
+    processingStartedAt: true,
+    processingFailedAt: true,
+    processingCompletedAt: true,
+    processingErrorCode: true,
+    processingErrorDetail: true,
     createdAt: true,
     updatedAt: true,
   } as const;
@@ -125,6 +131,7 @@ export class ContentRepository
 
   private toDomain(record: Record<string, unknown>): Reel {
     const reel = new Reel();
+
     reel.id = record['id'] as string;
     reel.userId = record['userId'] as string;
     reel.mediaKey = record['mediaKey'] as string;
@@ -146,8 +153,21 @@ export class ContentRepository
       (record['processingMessage'] as string | null) ?? undefined;
     reel.processingProgress =
       (record['processingProgress'] as number | null) ?? undefined;
+    reel.processingAttemptId =
+      (record['processingAttemptId'] as string | null) ?? undefined;
+    reel.processingStartedAt =
+      (record['processingStartedAt'] as Date | null) ?? undefined;
+    reel.processingFailedAt =
+      (record['processingFailedAt'] as Date | null) ?? undefined;
+    reel.processingCompletedAt =
+      (record['processingCompletedAt'] as Date | null) ?? undefined;
+    reel.processingErrorCode =
+      (record['processingErrorCode'] as string | null) ?? undefined;
+    reel.processingErrorDetail =
+      (record['processingErrorDetail'] as string | null) ?? undefined;
     reel.createdAt = record['createdAt'] as Date;
     reel.updatedAt = record['updatedAt'] as Date;
+
     return reel;
   }
 
@@ -164,10 +184,65 @@ export class ContentRepository
         processingStage: reel.processingStage,
         processingMessage: reel.processingMessage,
         processingProgress: reel.processingProgress,
+        processingAttemptId: reel.processingAttemptId,
+        processingStartedAt: reel.processingStartedAt,
+        processingFailedAt: reel.processingFailedAt,
+        processingCompletedAt: reel.processingCompletedAt,
+        processingErrorCode: reel.processingErrorCode,
+        processingErrorDetail: reel.processingErrorDetail,
       },
     });
 
     return this.toDomain(savedRecord);
+  }
+
+  async queueReelProcessingAttempt(
+    reelId: string,
+    processingAttemptId: string,
+  ): Promise<Reel> {
+    const record = await this.reel.update({
+      where: { id: reelId },
+      data: {
+        status: 'PENDING',
+        processingStage: 'QUEUED',
+        processingMessage: 'Queued for processing',
+        processingProgress: 0,
+        processingAttemptId,
+        processingStartedAt: null,
+        processingFailedAt: null,
+        processingCompletedAt: null,
+        processingErrorCode: null,
+        processingErrorDetail: null,
+      },
+    });
+
+    return this.toDomain(record);
+  }
+
+  async claimProcessingAttempt(input: {
+    reelId: string;
+    processingAttemptId: string;
+  }): Promise<boolean> {
+    const result = await this.reel.updateMany({
+      where: {
+        id: input.reelId,
+        processingAttemptId: input.processingAttemptId,
+        status: 'PENDING',
+      },
+      data: {
+        status: 'PROCESSING',
+        processingStage: 'PROCESSING',
+        processingMessage: 'Video is being processed',
+        processingProgress: 10,
+        processingStartedAt: new Date(),
+        processingFailedAt: null,
+        processingCompletedAt: null,
+        processingErrorCode: null,
+        processingErrorDetail: null,
+      },
+    });
+
+    return result.count > 0;
   }
 
   async updateReelStatus(
@@ -184,8 +259,12 @@ export class ContentRepository
     title?: string,
     description?: string,
     tags?: string[],
+    expectedProcessingAttemptId?: string,
+    processingErrorCode?: string,
+    processingErrorDetail?: string,
   ): Promise<Reel> {
     const updatedRecord = await this.$transaction(async (tx) => {
+      const now = new Date();
       const data: Record<string, unknown> = { status };
 
       if (title !== undefined) data['title'] = title;
@@ -193,26 +272,77 @@ export class ContentRepository
       if (tags !== undefined) data['tags'] = tags;
       if (transcript !== undefined) data['transcript'] = transcript;
       if (transcriptVtt !== undefined) data['transcriptVtt'] = transcriptVtt;
+
       if (transcriptSegments !== undefined) {
         data['transcriptSegments'] = transcriptSegments;
       }
+
       if (thumbnailKey !== undefined) data['thumbnailKey'] = thumbnailKey;
+
       if (processingStage !== undefined) {
         data['processingStage'] = processingStage;
       }
+
       if (processingMessage !== undefined) {
         data['processingMessage'] = processingMessage;
       }
+
       if (processingProgress !== undefined) {
         data['processingProgress'] = processingProgress;
       }
 
-      const record = await tx.reel.update({
-        where: { id },
+      if (status === 'PROCESSING') {
+        data['processingStartedAt'] = now;
+        data['processingFailedAt'] = null;
+        data['processingCompletedAt'] = null;
+        data['processingErrorCode'] = null;
+        data['processingErrorDetail'] = null;
+      }
+
+      if (status === 'COMPLETED') {
+        data['processingCompletedAt'] = now;
+        data['processingFailedAt'] = null;
+        data['processingErrorCode'] = null;
+        data['processingErrorDetail'] = null;
+        data['processingProgress'] = processingProgress ?? 100;
+      }
+
+      if (status === 'FAILED') {
+        data['processingFailedAt'] = now;
+        data['processingErrorCode'] =
+          processingErrorCode ?? processingStage ?? 'FAILED';
+        data['processingErrorDetail'] = processingErrorDetail;
+      }
+
+      const where =
+        expectedProcessingAttemptId &&
+        expectedProcessingAttemptId.trim().length > 0
+          ? {
+              id,
+              processingAttemptId: expectedProcessingAttemptId,
+            }
+          : {
+              id,
+            };
+
+      const updateResult = await tx.reel.updateMany({
+        where,
         data,
       });
 
-      if (chunks) {
+      const record = await tx.reel.findUnique({
+        where: { id },
+      });
+
+      if (!record) {
+        throw new Error(`Reel ${id} not found`);
+      }
+
+      if (updateResult.count === 0) {
+        return record;
+      }
+
+      if (chunks && status === 'COMPLETED') {
         await tx.reelChunk.deleteMany({
           where: { reelId: id },
         });
@@ -233,14 +363,16 @@ export class ContentRepository
           const chunkVectorString = `[${chunk.embedding.join(',')}]`;
 
           await tx.$executeRaw`
-            UPDATE "ReelChunk"
-            SET embedding = ${chunkVectorString}::vector
-            WHERE id = ${created.id}
-          `;
+          UPDATE "ReelChunk"
+          SET embedding = ${chunkVectorString}::vector
+          WHERE id = ${created.id}
+        `;
         }
       }
 
-      return record;
+      return await tx.reel.findUniqueOrThrow({
+        where: { id },
+      });
     });
 
     return this.toDomain(updatedRecord);
