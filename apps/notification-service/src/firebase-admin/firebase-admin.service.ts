@@ -4,6 +4,8 @@ import { getMessaging, Messaging } from 'firebase-admin/messaging';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+const ANDROID_MESSAGE_CHANNEL_ID = 'velora_messages';
+
 type SendToTokenInput = {
   token: string;
   title: string;
@@ -54,6 +56,8 @@ export class FirebaseAdminService {
       android: {
         priority: 'high',
         notification: {
+          channelId: ANDROID_MESSAGE_CHANNEL_ID,
+          priority: 'max',
           sound: 'default',
         },
       },
