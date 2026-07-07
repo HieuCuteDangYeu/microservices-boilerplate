@@ -25,4 +25,4 @@ COPY --from=builder --chown=node:node /usr/src/app/dist ./dist
 
 USER node
 
-CMD ["node", "dist/apps/notification-service/apps/notification-service/src/main.js"]
+CMD ["node", "dist/apps/notification-service/main.js"]
