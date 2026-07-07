@@ -14,6 +14,7 @@ import {
   ReelChunkBackfillPage,
   ReelCursor,
   ReelListQuery,
+  ReelProcessingMediaMetadata,
   ReelProfileContextQuery,
   ReelProfileContextResult,
   ReelShareCreateInput,
@@ -52,6 +53,16 @@ export class ContentRepository
     processingCompletedAt: true,
     processingErrorCode: true,
     processingErrorDetail: true,
+    sourceDurationMs: true,
+    sourceWidth: true,
+    sourceHeight: true,
+    sourceFps: true,
+    sourceBitrateKbps: true,
+    sourceHasAudio: true,
+    sourceRotation: true,
+    encodedVariantCount: true,
+    encodedMaxHeight: true,
+    encodedFps: true,
     createdAt: true,
     updatedAt: true,
   } as const;
@@ -165,6 +176,22 @@ export class ContentRepository
       (record['processingErrorCode'] as string | null) ?? undefined;
     reel.processingErrorDetail =
       (record['processingErrorDetail'] as string | null) ?? undefined;
+    reel.sourceDurationMs =
+      (record['sourceDurationMs'] as number | null) ?? undefined;
+    reel.sourceWidth = (record['sourceWidth'] as number | null) ?? undefined;
+    reel.sourceHeight = (record['sourceHeight'] as number | null) ?? undefined;
+    reel.sourceFps = (record['sourceFps'] as number | null) ?? undefined;
+    reel.sourceBitrateKbps =
+      (record['sourceBitrateKbps'] as number | null) ?? undefined;
+    reel.sourceHasAudio =
+      (record['sourceHasAudio'] as boolean | null) ?? undefined;
+    reel.sourceRotation =
+      (record['sourceRotation'] as number | null) ?? undefined;
+    reel.encodedVariantCount =
+      (record['encodedVariantCount'] as number | null) ?? undefined;
+    reel.encodedMaxHeight =
+      (record['encodedMaxHeight'] as number | null) ?? undefined;
+    reel.encodedFps = (record['encodedFps'] as number | null) ?? undefined;
     reel.createdAt = record['createdAt'] as Date;
     reel.updatedAt = record['updatedAt'] as Date;
 
@@ -190,6 +217,16 @@ export class ContentRepository
         processingCompletedAt: reel.processingCompletedAt,
         processingErrorCode: reel.processingErrorCode,
         processingErrorDetail: reel.processingErrorDetail,
+        sourceDurationMs: reel.sourceDurationMs,
+        sourceWidth: reel.sourceWidth,
+        sourceHeight: reel.sourceHeight,
+        sourceFps: reel.sourceFps,
+        sourceBitrateKbps: reel.sourceBitrateKbps,
+        sourceHasAudio: reel.sourceHasAudio,
+        sourceRotation: reel.sourceRotation,
+        encodedVariantCount: reel.encodedVariantCount,
+        encodedMaxHeight: reel.encodedMaxHeight,
+        encodedFps: reel.encodedFps,
       },
     });
 
@@ -262,6 +299,7 @@ export class ContentRepository
     expectedProcessingAttemptId?: string,
     processingErrorCode?: string,
     processingErrorDetail?: string,
+    mediaMetadata?: ReelProcessingMediaMetadata,
   ): Promise<Reel> {
     const updatedRecord = await this.$transaction(async (tx) => {
       const now = new Date();
@@ -312,6 +350,48 @@ export class ContentRepository
         data['processingErrorCode'] =
           processingErrorCode ?? processingStage ?? 'FAILED';
         data['processingErrorDetail'] = processingErrorDetail;
+      }
+
+      if (mediaMetadata) {
+        if (mediaMetadata.sourceDurationMs !== undefined) {
+          data['sourceDurationMs'] = mediaMetadata.sourceDurationMs;
+        }
+
+        if (mediaMetadata.sourceWidth !== undefined) {
+          data['sourceWidth'] = mediaMetadata.sourceWidth;
+        }
+
+        if (mediaMetadata.sourceHeight !== undefined) {
+          data['sourceHeight'] = mediaMetadata.sourceHeight;
+        }
+
+        if (mediaMetadata.sourceFps !== undefined) {
+          data['sourceFps'] = mediaMetadata.sourceFps;
+        }
+
+        if (mediaMetadata.sourceBitrateKbps !== undefined) {
+          data['sourceBitrateKbps'] = mediaMetadata.sourceBitrateKbps;
+        }
+
+        if (mediaMetadata.sourceHasAudio !== undefined) {
+          data['sourceHasAudio'] = mediaMetadata.sourceHasAudio;
+        }
+
+        if (mediaMetadata.sourceRotation !== undefined) {
+          data['sourceRotation'] = mediaMetadata.sourceRotation;
+        }
+
+        if (mediaMetadata.encodedVariantCount !== undefined) {
+          data['encodedVariantCount'] = mediaMetadata.encodedVariantCount;
+        }
+
+        if (mediaMetadata.encodedMaxHeight !== undefined) {
+          data['encodedMaxHeight'] = mediaMetadata.encodedMaxHeight;
+        }
+
+        if (mediaMetadata.encodedFps !== undefined) {
+          data['encodedFps'] = mediaMetadata.encodedFps;
+        }
       }
 
       const where =

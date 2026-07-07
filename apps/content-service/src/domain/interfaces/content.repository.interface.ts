@@ -6,6 +6,19 @@ import { ReelShareLink } from '../entities/reel-share-link.entity';
 import { ReelShare } from '../entities/reel-share.entity';
 import { Reel } from '../entities/reel.entity';
 
+export interface ReelProcessingMediaMetadata {
+  sourceDurationMs?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  sourceFps?: number;
+  sourceBitrateKbps?: number;
+  sourceHasAudio?: boolean;
+  sourceRotation?: number;
+  encodedVariantCount?: number;
+  encodedMaxHeight?: number;
+  encodedFps?: number;
+}
+
 export interface ReelListQuery {
   userId?: string;
   viewerId?: string;
@@ -139,6 +152,7 @@ export interface IContentRepository {
     expectedProcessingAttemptId?: string,
     processingErrorCode?: string,
     processingErrorDetail?: string,
+    mediaMetadata?: ReelProcessingMediaMetadata,
   ): Promise<Reel>;
 
   findById(id: string): Promise<Reel | null>;

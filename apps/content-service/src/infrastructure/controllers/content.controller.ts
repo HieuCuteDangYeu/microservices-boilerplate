@@ -28,6 +28,7 @@ import {
 } from '@content/domain/errors/content.error';
 import {
   ReelListQuery,
+  ReelProcessingMediaMetadata,
   ReelUpdateData,
 } from '@content/domain/interfaces/content.repository.interface';
 import { Controller } from '@nestjs/common';
@@ -88,6 +89,16 @@ export class ContentController {
       processingFailedAt: reel.processingFailedAt,
       processingCompletedAt: reel.processingCompletedAt,
       processingErrorCode: reel.processingErrorCode,
+      sourceDurationMs: reel.sourceDurationMs,
+      sourceWidth: reel.sourceWidth,
+      sourceHeight: reel.sourceHeight,
+      sourceFps: reel.sourceFps,
+      sourceBitrateKbps: reel.sourceBitrateKbps,
+      sourceHasAudio: reel.sourceHasAudio,
+      sourceRotation: reel.sourceRotation,
+      encodedVariantCount: reel.encodedVariantCount,
+      encodedMaxHeight: reel.encodedMaxHeight,
+      encodedFps: reel.encodedFps,
     };
   }
 
@@ -179,6 +190,7 @@ export class ContentController {
       stage?: string;
       message?: string;
       progress?: number;
+      mediaMetadata?: ReelProcessingMediaMetadata;
     },
   ) {
     try {
@@ -197,6 +209,9 @@ export class ContentController {
         data.description,
         data.tags,
         data.processingAttemptId,
+        undefined,
+        undefined,
+        data.mediaMetadata,
       );
     } catch (err: unknown) {
       const error = err as Error;
@@ -246,6 +261,7 @@ export class ContentController {
       processingAttemptId?: string;
       errorCode?: string;
       errorDetail?: string;
+      mediaMetadata?: ReelProcessingMediaMetadata;
     },
   ) {
     try {
@@ -266,11 +282,13 @@ export class ContentController {
         data.processingAttemptId,
         data.errorCode,
         data.errorDetail,
+        data.mediaMetadata,
       );
     } catch (err: unknown) {
       const error = err as Error;
+
       console.error(
-        `❌ [processing_failed] ${error.message} — reel ${data.reelId} NOT updated to FAILED`,
+        `[processing_failed] ${error.message} — reel ${data.reelId} NOT updated to FAILED`,
       );
     }
   }
@@ -307,7 +325,7 @@ export class ContentController {
     } catch (err: unknown) {
       const error = err as Error;
       console.error(
-        `❌ [processing_started] ${error.message} — reel ${data.reelId} NOT updated to PROCESSING`,
+        `[processing_started] ${error.message} — reel ${data.reelId} NOT updated to PROCESSING`,
       );
     }
   }
@@ -344,7 +362,7 @@ export class ContentController {
     } catch (err: unknown) {
       const error = err as Error;
       console.error(
-        `❌ [processing_progress] ${error.message} — reel ${data.reelId} progress NOT updated`,
+        `[processing_progress] ${error.message} — reel ${data.reelId} progress NOT updated`,
       );
     }
   }

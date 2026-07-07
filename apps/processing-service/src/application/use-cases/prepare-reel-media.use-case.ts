@@ -1,9 +1,21 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { IContentService } from '../../domain/interfaces/content-service.interface';
+import type {
+  IContentService,
+  ReelProcessingMediaMetadata,
+} from '../../domain/interfaces/content-service.interface';
 import type { IMediaStorageService } from '../../domain/interfaces/media-storage.service.interface';
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
-import type { IVideoProcessingService } from '../../domain/interfaces/video-processing.service.interface';
+import type {
+  IVideoProcessingService,
+  TranscodeToHlsResult,
+  VideoMetadata,
+} from '../../domain/interfaces/video-processing.service.interface';
 import { formatProcessingError } from '../utils/format-processing-error';
+import { SelectReelEncodingProfileUseCase } from './select-reel-encoding-profile.use-case';
+import {
+  ReelSourceMediaValidationError,
+  ValidateReelSourceMediaUseCase,
+} from './validate-reel-source-media.use-case';
 import {
   ReelStreamValidationError,
   ValidateReelStreamUseCase,
@@ -12,6 +24,8 @@ import {
 export class PrepareReelMediaError extends Error {
   readonly stage: string;
   readonly publicMessage: string;
+  readonly errorCode: string;
+  readonly mediaMetadata?: ReelProcessingMediaMetadata;
 
   constructor(
     error: unknown,
@@ -19,6 +33,8 @@ export class PrepareReelMediaError extends Error {
     options: {
       stage?: string;
       publicMessage?: string;
+      errorCode?: string;
+      mediaMetadata?: ReelProcessingMediaMetadata;
     } = {},
   ) {
     const { message, stack } = formatProcessingError(error);
@@ -27,6 +43,8 @@ export class PrepareReelMediaError extends Error {
     this.stack = stack;
     this.stage = options.stage ?? 'FAILED';
     this.publicMessage = options.publicMessage ?? 'Video processing failed';
+    this.errorCode = options.errorCode ?? this.stage;
+    this.mediaMetadata = options.mediaMetadata;
   }
 }
 
@@ -44,6 +62,8 @@ export class PrepareReelMediaUseCase {
     @Inject('ITempFileService')
     private readonly tempFileService: ITempFileService,
     private readonly validateReelStreamUseCase: ValidateReelStreamUseCase,
+    private readonly validateReelSourceMediaUseCase: ValidateReelSourceMediaUseCase,
+    private readonly selectReelEncodingProfileUseCase: SelectReelEncodingProfileUseCase,
   ) {}
 
   async execute(data: {
@@ -55,10 +75,13 @@ export class PrepareReelMediaUseCase {
     thumbnailPath: string;
   }): Promise<{
     thumbnailKey: string;
+    mediaMetadata: ReelProcessingMediaMetadata;
   }> {
     let currentProgress = 10;
     let currentStage = 'DOWNLOADING';
     let currentPublicMessage = 'Video processing failed';
+    let currentErrorCode = 'PROCESSING_FAILED';
+    let mediaMetadata: ReelProcessingMediaMetadata | undefined;
 
     try {
       await this.contentService.emitProcessingStarted({
@@ -77,20 +100,59 @@ export class PrepareReelMediaUseCase {
 
       this.logger.log(`[Reel ${data.reelId}] Downloaded source video`);
 
-      currentProgress = 30;
-      currentStage = 'TRANSCODING';
+      currentProgress = 20;
+      currentStage = 'PROBING_SOURCE';
+      currentErrorCode = 'SOURCE_PROBE_FAILED';
+      currentPublicMessage =
+        'This video could not be processed. Please try another video.';
 
       await this.emitProgress({
         reelId: data.reelId,
+        processingAttemptId: data.processingAttemptId,
+        stage: currentStage,
+        message: 'Checking source video',
+        progress: currentProgress,
+      });
+
+      const sourceMetadata = await this.videoProcessingService.getVideoMetadata(
+        data.inputPath,
+      );
+
+      mediaMetadata = this.toSourceMetadata(sourceMetadata);
+
+      this.validateReelSourceMediaUseCase.execute(sourceMetadata);
+
+      const encodingProfile =
+        this.selectReelEncodingProfileUseCase.execute(sourceMetadata);
+
+      this.logger.log(
+        `[Reel ${data.reelId}] Selected encoding profile ${encodingProfile.profileName}: fps=${encodingProfile.outputFps}, variants=${encodingProfile.variants
+          .map((variant) => variant.name)
+          .join(',')}`,
+      );
+
+      currentProgress = 35;
+      currentStage = 'TRANSCODING';
+      currentErrorCode = 'TRANSCODING_FAILED';
+
+      await this.emitProgress({
+        reelId: data.reelId,
+        processingAttemptId: data.processingAttemptId,
         stage: currentStage,
         message: 'Transcoding video for streaming',
         progress: currentProgress,
       });
 
-      await this.videoProcessingService.transcodeToHls(
+      const transcodeResult = await this.videoProcessingService.transcodeToHls(
         data.inputPath,
         data.hlsOutputDir,
+        encodingProfile,
       );
+
+      mediaMetadata = {
+        ...mediaMetadata,
+        ...this.toEncodedMetadata(transcodeResult),
+      };
 
       this.logger.log(`[Reel ${data.reelId}] Transcoded to HLS`);
 
@@ -98,11 +160,13 @@ export class PrepareReelMediaUseCase {
 
       currentProgress = 60;
       currentStage = 'UPLOADING_STREAM';
+      currentErrorCode = 'STREAM_UPLOAD_FAILED';
 
       await this.mediaStorageService.deleteObjectsByPrefix(s3Prefix);
 
       await this.emitProgress({
         reelId: data.reelId,
+        processingAttemptId: data.processingAttemptId,
         stage: currentStage,
         message: 'Uploading streaming files',
         progress: currentProgress,
@@ -119,9 +183,11 @@ export class PrepareReelMediaUseCase {
 
       currentProgress = 75;
       currentStage = 'GENERATING_THUMBNAIL';
+      currentErrorCode = 'THUMBNAIL_FAILED';
 
       await this.emitProgress({
         reelId: data.reelId,
+        processingAttemptId: data.processingAttemptId,
         stage: currentStage,
         message: 'Generating reel thumbnail',
         progress: currentProgress,
@@ -145,11 +211,13 @@ export class PrepareReelMediaUseCase {
 
       currentProgress = 85;
       currentStage = 'VALIDATING_STREAM';
+      currentErrorCode = 'STREAM_VALIDATION_FAILED';
       currentPublicMessage =
         'Streaming files could not be prepared. Please try again.';
 
       await this.emitProgress({
         reelId: data.reelId,
+        processingAttemptId: data.processingAttemptId,
         stage: currentStage,
         message: 'Checking streaming files',
         progress: currentProgress,
@@ -161,27 +229,63 @@ export class PrepareReelMediaUseCase {
         thumbnailKey,
       });
 
-      currentProgress = 88;
-
       this.tempFileService.removeDirIfExists(data.hlsOutputDir);
       this.tempFileService.removeFileIfExists(data.thumbnailPath);
 
       return {
         thumbnailKey,
+        mediaMetadata,
       };
     } catch (error: unknown) {
+      if (error instanceof ReelSourceMediaValidationError) {
+        throw new PrepareReelMediaError(error, currentProgress, {
+          stage: error.errorCode,
+          errorCode: error.errorCode,
+          publicMessage: error.publicMessage,
+          mediaMetadata,
+        });
+      }
+
       if (error instanceof ReelStreamValidationError) {
         throw new PrepareReelMediaError(error, currentProgress, {
           stage: 'STREAM_VALIDATION_FAILED',
+          errorCode: 'STREAM_VALIDATION_FAILED',
           publicMessage: error.message,
+          mediaMetadata,
         });
       }
 
       throw new PrepareReelMediaError(error, currentProgress, {
         stage: currentStage,
+        errorCode: currentErrorCode,
         publicMessage: currentPublicMessage,
+        mediaMetadata,
       });
     }
+  }
+
+  private toSourceMetadata(
+    metadata: VideoMetadata,
+  ): ReelProcessingMediaMetadata {
+    return {
+      sourceDurationMs: metadata.durationMs,
+      sourceWidth: metadata.width,
+      sourceHeight: metadata.height,
+      sourceFps: metadata.fps,
+      sourceBitrateKbps: metadata.bitrateKbps,
+      sourceHasAudio: metadata.hasAudio,
+      sourceRotation: metadata.rotation,
+    };
+  }
+
+  private toEncodedMetadata(
+    result: TranscodeToHlsResult,
+  ): ReelProcessingMediaMetadata {
+    return {
+      encodedVariantCount: result.variantCount,
+      encodedMaxHeight: result.maxHeight,
+      encodedFps: result.outputFps,
+    };
   }
 
   private async emitProgress(data: {

@@ -1,7 +1,10 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
+import type {
+  IContentRepository,
+  ReelProcessingMediaMetadata,
+} from '../../domain/interfaces/content.repository.interface';
 
 @Injectable()
 export class UpdateReelStatusUseCase {
@@ -29,6 +32,7 @@ export class UpdateReelStatusUseCase {
     expectedProcessingAttemptId?: string,
     processingErrorCode?: string,
     processingErrorDetail?: string,
+    mediaMetadata?: ReelProcessingMediaMetadata,
   ) {
     let sanitizedTranscript = transcript;
     let sanitizedTranscriptVtt = transcriptVtt?.trim() || undefined;
@@ -110,6 +114,7 @@ export class UpdateReelStatusUseCase {
       expectedProcessingAttemptId,
       processingErrorCode,
       processingErrorDetail,
+      mediaMetadata,
     );
   }
 

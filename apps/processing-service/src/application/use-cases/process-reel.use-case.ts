@@ -1,6 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { IContentService } from '../../domain/interfaces/content-service.interface';
+import type {
+  IContentService,
+  ReelProcessingMediaMetadata,
+} from '../../domain/interfaces/content-service.interface';
 import type { IJobConcurrencyLimiterService } from '../../domain/interfaces/job-concurrency-limiter.service.interface';
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import { formatProcessingError } from '../utils/format-processing-error';
@@ -69,6 +72,7 @@ export class ProcessReelUseCase {
       let failedStage = 'FAILED';
       let failedMessage = 'Video processing failed';
       let failureDetail = '';
+      let failureMediaMetadata: ReelProcessingMediaMetadata | undefined;
 
       try {
         const mediaResult = await this.prepareReelMediaUseCase.execute({
@@ -122,6 +126,7 @@ export class ProcessReelUseCase {
           stage: 'READY',
           message: 'Video is ready to watch',
           progress: 100,
+          mediaMetadata: mediaResult.mediaMetadata,
         });
 
         this.logger.log(
@@ -142,6 +147,7 @@ export class ProcessReelUseCase {
           failedStage = error.stage;
           failedMessage = error.publicMessage;
           failureDetail = error.message;
+          failureMediaMetadata = error.mediaMetadata;
         }
 
         await this.emitFailed({
@@ -152,6 +158,7 @@ export class ProcessReelUseCase {
           message: failedMessage,
           errorCode: failedStage,
           errorDetail: failureDetail,
+          mediaMetadata: failureMediaMetadata,
         });
       } finally {
         this.tempFileService.removeDirIfExists(workspace.workDir);
@@ -203,6 +210,7 @@ export class ProcessReelUseCase {
     message: string;
     errorCode: string;
     errorDetail: string;
+    mediaMetadata?: ReelProcessingMediaMetadata;
   }): Promise<void> {
     try {
       await this.contentService.emitProcessingFailed({
@@ -214,6 +222,7 @@ export class ProcessReelUseCase {
         progress: data.progress,
         errorCode: data.errorCode,
         errorDetail: data.errorDetail,
+        mediaMetadata: data.mediaMetadata,
       });
     } catch (error: unknown) {
       const { message, stack } = formatProcessingError(error);

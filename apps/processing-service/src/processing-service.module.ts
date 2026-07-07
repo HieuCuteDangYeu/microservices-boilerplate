@@ -3,7 +3,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { EmbedReelChunksUseCase } from '@processing/application/use-cases/embed-reel-chunks.use-case';
 import { NormalizeReelMetadataUseCase } from '@processing/application/use-cases/normalize-reel-metadata.use-case';
+import { SelectReelEncodingProfileUseCase } from '@processing/application/use-cases/select-reel-encoding-profile.use-case';
 import { ValidateReelIndexUseCase } from '@processing/application/use-cases/validate-reel-index.use-case';
+import { ValidateReelSourceMediaUseCase } from '@processing/application/use-cases/validate-reel-source-media.use-case';
 import { ValidateReelStreamUseCase } from '@processing/application/use-cases/validate-reel-stream.use-case';
 import { AiServiceAdapter } from '@processing/infrastructure/adapters/ai-service.adapter';
 import { ContentServiceAdapter } from '@processing/infrastructure/adapters/content-service.adapter';
@@ -122,6 +124,8 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     EmbedReelChunksUseCase,
     NormalizeReelMetadataUseCase,
     ValidateReelIndexUseCase,
+    SelectReelEncodingProfileUseCase,
+    ValidateReelSourceMediaUseCase,
     {
       provide: 'IAiService',
       useClass: AiServiceAdapter,

@@ -23,6 +23,16 @@ export class Reel {
   processingCompletedAt?: Date;
   processingErrorCode?: string;
   processingErrorDetail?: string;
+  sourceDurationMs?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  sourceFps?: number;
+  sourceBitrateKbps?: number;
+  sourceHasAudio?: boolean;
+  sourceRotation?: number;
+  encodedVariantCount?: number;
+  encodedMaxHeight?: number;
+  encodedFps?: number;
   createdAt: Date;
   updatedAt: Date;
 }

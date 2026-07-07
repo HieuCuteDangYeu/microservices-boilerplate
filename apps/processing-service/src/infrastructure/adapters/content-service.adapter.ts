@@ -3,7 +3,10 @@ import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
-import type { IContentService } from '../../domain/interfaces/content-service.interface';
+import type {
+  IContentService,
+  ReelProcessingMediaMetadata,
+} from '../../domain/interfaces/content-service.interface';
 
 @Injectable()
 export class ContentServiceAdapter implements IContentService {
@@ -108,6 +111,7 @@ export class ContentServiceAdapter implements IContentService {
     title?: string;
     description?: string;
     tags?: string[];
+    mediaMetadata?: ReelProcessingMediaMetadata;
   }): Promise<void> {
     try {
       await firstValueFrom(
@@ -129,6 +133,7 @@ export class ContentServiceAdapter implements IContentService {
     progress?: number;
     errorCode?: string;
     errorDetail?: string;
+    mediaMetadata?: ReelProcessingMediaMetadata;
   }): Promise<void> {
     try {
       await firstValueFrom(

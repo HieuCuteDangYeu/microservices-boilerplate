@@ -1,6 +1,19 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 
+export interface ReelProcessingMediaMetadata {
+  sourceDurationMs?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  sourceFps?: number;
+  sourceBitrateKbps?: number;
+  sourceHasAudio?: boolean;
+  sourceRotation?: number;
+  encodedVariantCount?: number;
+  encodedMaxHeight?: number;
+  encodedFps?: number;
+}
+
 export interface IContentService {
   claimReelProcessingAttempt(data: {
     reelId: string;
@@ -40,6 +53,7 @@ export interface IContentService {
     stage?: string;
     message?: string;
     progress?: number;
+    mediaMetadata?: ReelProcessingMediaMetadata;
   }): Promise<void>;
 
   emitProcessingFailed(data: {
@@ -51,5 +65,6 @@ export interface IContentService {
     progress?: number;
     errorCode?: string;
     errorDetail?: string;
+    mediaMetadata?: ReelProcessingMediaMetadata;
   }): Promise<void>;
 }
