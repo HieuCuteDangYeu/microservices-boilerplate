@@ -40,6 +40,10 @@ export class NotificationServiceAdapter {
       return;
     }
 
+    const actorName = conversation.participants?.find(
+      (participant) => participant.id === actorUserId,
+    )?.name;
+
     if (!this.internalSecret) {
       this.logger.warn(
         'Skipping new-message notification because NOTIFICATION_INTERNAL_SECRET is missing',
@@ -63,8 +67,8 @@ export class NotificationServiceAdapter {
             actorUserId,
             conversationId: message.conversationId,
             messageId: message.id,
-            title: 'New message',
-            body: 'You have a new message from Velora.',
+            title: actorName?.trim() || 'New message',
+            body: this.buildNotificationBody(message),
           }),
         },
       );
@@ -87,5 +91,28 @@ export class NotificationServiceAdapter {
     this.logger.warn(
       `notification-service rejected message ${message.id} with status ${response.status}: ${responseText}`,
     );
+  }
+
+  private buildNotificationBody(message: Message) {
+    const content = message.content.trim();
+
+    if (content.length > 0) {
+      return content;
+    }
+
+    switch (message.type) {
+      case 'image':
+        return '[Image]';
+      case 'video':
+        return '[Video]';
+      case 'file':
+        return '[File]';
+      case 'reel':
+        return '[Reel]';
+      case 'call':
+        return '[Call]';
+      default:
+        return 'You have a new message.'
+    }
   }
 }
