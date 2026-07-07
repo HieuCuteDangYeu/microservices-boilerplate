@@ -3,6 +3,7 @@ import { Message } from './message.entity';
 export interface ChatParticipant {
   id: string;
   name?: string;
+  fullName?: string;
   avatar?: string;
   email?: string;
 }

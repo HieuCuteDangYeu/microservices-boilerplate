@@ -611,7 +611,7 @@ export class PrismaChatRepository implements IChatRepository {
       // Tạo Map để lookup cho nhanh
       const usersMap = new Map<string, ChatParticipant>();
       usersList.forEach((u) => {
-        if (u && u.id) usersMap.set(u.id, u);
+        if (u && u.id) usersMap.set(u.id, this.normalizeChatParticipant(u));
       });
 
       // 4. Map dữ liệu user vào Conversation
@@ -686,7 +686,7 @@ export class PrismaChatRepository implements IChatRepository {
       }
 
       usersList.forEach((u) => {
-        if (u && u.id) usersMap.set(u.id, u);
+        if (u && u.id) usersMap.set(u.id, this.normalizeChatParticipant(u));
       });
     } catch (error) {
       this.logger.error('Failed to fetch user details', error);
@@ -1571,8 +1571,9 @@ export class PrismaChatRepository implements IChatRepository {
       }
 
       const user = usersList.find((item) => item.id === userId);
-      if (user?.name?.trim()) {
-        return user.name.trim();
+      const name = this.getParticipantName(user);
+      if (name) {
+        return name;
       }
       if (user?.email?.trim()) {
         return user.email.split('@')[0];
@@ -1582,5 +1583,15 @@ export class PrismaChatRepository implements IChatRepository {
     }
 
     return 'User';
+  }
+
+  private normalizeChatParticipant(user: ChatParticipant): ChatParticipant {
+    const name = this.getParticipantName(user);
+
+    return name ? { ...user, name } : user;
+  }
+
+  private getParticipantName(user?: ChatParticipant) {
+    return user?.name?.trim() || user?.fullName?.trim();
   }
 }
