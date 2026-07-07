@@ -175,6 +175,8 @@ services:
         condition: service_healthy
     expose:
       - '3015'
+    volumes:
+      - ./apps/notification-service/secrets/firebase-admin.json:/usr/src/app/apps/notification-service/secrets/firebase-admin.json:ro
     networks:
       - microservices-net
 
