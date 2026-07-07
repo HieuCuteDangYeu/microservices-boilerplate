@@ -14,6 +14,22 @@ export type CreateNotificationJobInput = {
   dataJson?: Prisma.InputJsonValue;
 };
 
+export type NotificationJobRecord = Prisma.NotificationJobGetPayload<{
+  select: {
+    id: true;
+    type: true;
+    recipientUserId: true;
+    actorUserId: true;
+    conversationId: true;
+    messageId: true;
+    title: true;
+    body: true;
+    status: true;
+    attemptCount: true;
+    nextAttemptAt: true;
+  };
+}>;
+
 @Injectable()
 export class NotificationJobsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -79,6 +95,42 @@ export class NotificationJobsService {
         nextAttemptAt: null,
         sentAt: null,
       },
+    });
+  }
+
+  async findRetryableJobs(limit: number): Promise<NotificationJobRecord[]> {
+    return this.prisma.notificationJob.findMany({
+      where: {
+        OR: [
+          {
+            status: 'pending',
+          },
+          {
+            status: 'failed',
+            nextAttemptAt: {
+              lte: new Date(),
+            },
+          },
+        ],
+        type: 'NEW_MESSAGE',
+      },
+      select: {
+        id: true,
+        type: true,
+        recipientUserId: true,
+        actorUserId: true,
+        conversationId: true,
+        messageId: true,
+        title: true,
+        body: true,
+        status: true,
+        attemptCount: true,
+        nextAttemptAt: true,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+      take: limit,
     });
   }
 }

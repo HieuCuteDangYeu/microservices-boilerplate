@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 
 import { FirebaseAdminService } from '../firebase-admin/firebase-admin.service';
-import { NotificationJobsService } from '../notification-jobs/notification-jobs.service';
+import {
+  NotificationJobRecord,
+  NotificationJobsService,
+} from '../notification-jobs/notification-jobs.service';
 import {
   ActivePushToken,
   PushTokensService,
@@ -33,6 +36,9 @@ type SendNotificationResult = {
   results: PushTokenSendResult[];
 };
 
+const MAX_NOTIFICATION_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 60_000;
+
 @Injectable()
 export class PushNotificationsService {
   constructor(
@@ -55,23 +61,33 @@ export class PushNotificationsService {
       },
     });
 
-    await this.notificationJobsService.markProcessing(job.id);
+    return this.processJob(job);
+  }
+
+  async retryJob(job: NotificationJobRecord) {
+    return this.processJob(job);
+  }
+
+  private async processJob(job: NotificationJobRecord) {
+    const processingJob = await this.notificationJobsService.markProcessing(
+      job.id,
+    );
 
     const tokens = await this.pushTokensService.findActiveByUserId(
-      input.recipientUserId,
+      processingJob.recipientUserId,
     );
 
     if (tokens.length === 0) {
       await this.notificationJobsService.markSkipped(
-        job.id,
+        processingJob.id,
         'No active FCM tokens for recipient user',
       );
 
       return {
-        jobId: job.id,
+        jobId: processingJob.id,
         status: 'skipped',
         sendResult: {
-          recipientUserId: input.recipientUserId,
+          recipientUserId: processingJob.recipientUserId,
           totalTokens: 0,
           sentCount: 0,
           failedCount: 0,
@@ -81,26 +97,27 @@ export class PushNotificationsService {
     }
 
     const results = await Promise.all(
-      tokens.map((token) => this.sendToToken(job.id, token, input)),
+      tokens.map((token) => this.sendToToken(processingJob, token)),
     );
 
     const sentCount = results.filter((result) => result.ok).length;
     const failedCount = results.length - sentCount;
 
     if (sentCount > 0) {
-      await this.notificationJobsService.markSent(job.id);
+      await this.notificationJobsService.markSent(processingJob.id);
     } else {
       await this.notificationJobsService.markFailed(
-        job.id,
+        processingJob.id,
         this.buildFailureSummary(results),
+        this.buildNextAttemptAt(processingJob.attemptCount),
       );
     }
 
     return {
-      jobId: job.id,
+      jobId: processingJob.id,
       status: sentCount > 0 ? 'sent' : 'failed',
       sendResult: {
-        recipientUserId: input.recipientUserId,
+        recipientUserId: processingJob.recipientUserId,
         totalTokens: tokens.length,
         sentCount,
         failedCount,
@@ -110,22 +127,21 @@ export class PushNotificationsService {
   }
 
   private async sendToToken(
-    jobId: string,
+    job: NotificationJobRecord,
     token: ActivePushToken,
-    input: SendNewMessageNotificationInput,
   ): Promise<PushTokenSendResult> {
     try {
       const messageId = await this.firebaseAdminService.sendToToken({
         token: token.token,
-        title: input.title,
-        body: input.body,
+        title: job.title,
+        body: job.body,
         data: {
           type: 'NEW_MESSAGE',
-          notificationJobId: jobId,
-          recipientUserId: input.recipientUserId,
-          actorUserId: input.actorUserId,
-          conversationId: input.conversationId,
-          messageId: input.messageId,
+          notificationJobId: job.id,
+          recipientUserId: job.recipientUserId,
+          actorUserId: job.actorUserId,
+          conversationId: job.conversationId,
+          messageId: job.messageId,
         },
       });
 
@@ -188,5 +204,13 @@ export class PushNotificationsService {
           `${result.tokenId}: ${result.errorCode ?? result.errorMessage ?? 'Unknown error'}`,
       )
       .join('; ');
+  }
+
+  private buildNextAttemptAt(attemptCount: number) {
+    if (attemptCount >= MAX_NOTIFICATION_ATTEMPTS) {
+      return undefined;
+    }
+
+    return new Date(Date.now() + RETRY_DELAY_MS);
   }
 }

@@ -1,4 +1,12 @@
-import { Body, Controller, NotFoundException, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Headers,
+  InternalServerErrorException,
+  NotFoundException,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseAdminService } from './firebase-admin.service';
 
@@ -20,7 +28,22 @@ export class DevPushController {
   ) {}
 
   @Post('send-test')
-  async sendTest(@Body() body: SendTestPushBody) {
+  async sendTest(
+    @Headers('x-internal-secret') internalSecret: string | undefined,
+    @Body() body: SendTestPushBody,
+  ) {
+    const expectedSecret = process.env.NOTIFICATION_INTERNAL_SECRET;
+
+    if (!expectedSecret) {
+      throw new InternalServerErrorException(
+        'Missing NOTIFICATION_INTERNAL_SECRET',
+      );
+    }
+
+    if (!internalSecret || internalSecret !== expectedSecret) {
+      throw new UnauthorizedException('Invalid x-internal-secret');
+    }
+
     const pushToken = await this.prisma.pushToken.findFirst({
       where: {
         provider: 'fcm',

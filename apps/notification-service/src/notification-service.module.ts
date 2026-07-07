@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { FirebaseAdminModule } from 'apps/notification-service/src/firebase-admin/firebase-admin.module';
 import { NotificationJobsModule } from 'apps/notification-service/src/notification-jobs/notification-jobs.module';
 import { PushNotificationsModule } from 'apps/notification-service/src/push-notifications/push-notifications.module';
@@ -8,6 +9,7 @@ import { PushTokensModule } from 'apps/notification-service/src/push-tokens/push
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     PrismaModule,
     PushTokensModule,
     NotificationJobsModule,
