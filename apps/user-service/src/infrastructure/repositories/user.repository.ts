@@ -1,3 +1,4 @@
+import { BOT_USER_ID } from '@common/constants/seed.constants';
 import { UserResponse } from '@common/user/interfaces/find-all-users.types';
 import { Injectable } from '@nestjs/common';
 import { Prisma, User as PrismaUser } from '@prisma/user-client';
@@ -130,9 +131,15 @@ export class UserRepository implements IUserRepository {
   }
 
   async searchPublicUsers(params: SearchPublicUsersParams): Promise<User[]> {
+    const excludedUserIds = [BOT_USER_ID];
+
+    if (params.excludeUserId) {
+      excludedUserIds.push(params.excludeUserId);
+    }
+
     const users = await this.prisma.user.findMany({
       where: {
-        id: params.excludeUserId ? { not: params.excludeUserId } : undefined,
+        id: { notIn: excludedUserIds },
         username: { not: null },
         OR: [
           { username: { contains: params.query.toLowerCase() } },
