@@ -8,6 +8,7 @@ import { GatewayKeyController } from '@gateway/conversation/key.controller';
 import { MessageController } from '@gateway/conversation/message.controller';
 import { FriendController } from '@gateway/friends/friend.controller';
 import { MediaController } from '@gateway/media/media.controller';
+import { NotificationController } from '@gateway/notifications/notification.controller';
 import { PaymentController } from '@gateway/payment/payment.controller';
 import { SearchController } from '@gateway/search/search.controller';
 import { UserController } from '@gateway/users/user.controller';
@@ -72,6 +73,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     ContentController,
     PublicReelShareController,
     SearchController,
+    NotificationController,
   ],
   providers: [JwtAuthGuard, ReelAuthorService],
 })

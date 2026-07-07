@@ -137,6 +137,16 @@
         "tsConfigPath": "apps/user-service/tsconfig.app.json",
         "webpack": false
       }
+    },
+    "notification-service": {
+      "type": "application",
+      "root": "apps/notification-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/notification-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/notification-service/tsconfig.app.json",
+        "webpack": false
+      }
     }
   }
 }

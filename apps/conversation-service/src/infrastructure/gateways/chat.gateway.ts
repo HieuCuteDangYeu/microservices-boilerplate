@@ -21,6 +21,7 @@ import {
   type MessageMedia,
 } from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
+import { NotificationServiceAdapter } from '../adapters/notification-service.adapter';
 import { ChatMapper } from '../repositories/chat.mapper';
 
 interface PresencePayload {
@@ -40,6 +41,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly sendMessageUseCase: SendMessageUseCase,
     private readonly triggerBotReplyUseCase: TriggerBotReplyUseCase,
+    private readonly notificationService: NotificationServiceAdapter,
     @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
     @Inject('AUTH_SERVICE_RMQ') private readonly authClient: ClientProxy,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
@@ -174,6 +176,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               ChatMapper.conversationToDto(conversation),
             );
         }
+
+        void this.notificationService.notifyNewMessage(
+          conversation,
+          savedMessage,
+          senderId,
+        );
 
         void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
           async (result) => {

@@ -38,6 +38,7 @@
       "@prisma/friend-client": ["node_modules/@prisma/friend-client"],
       "@prisma/mail-client": ["node_modules/@prisma/mail-client"],
       "@prisma/media-client": ["node_modules/@prisma/media-client"],
+      "@prisma/notification-client": ["node_modules/@prisma/notification-client"],
       "@prisma/payment-client": ["node_modules/@prisma/payment-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@processing/*": ["apps/processing-service/src/*"],

@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/@prisma/notification-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("NOTIFICATION_DATABASE_URL")
+}
+
+model PushToken {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  provider    String
+  platform    String
+  token       String
+  deviceId    String?  @map("device_id")
+  appVersion  String?  @map("app_version")
+  isActive    Boolean  @default(true) @map("is_active")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, token])
+  @@index([userId, isActive])
+  @@index([provider, platform])
+  @@index([lastSeenAt])
+  @@map("push_tokens")
+}
+
+model NotificationJob {
+  id              String    @id @default(uuid())
+  type            String
+  recipientUserId String    @map("recipient_user_id")
+  actorUserId     String?   @map("actor_user_id")
+  conversationId  String?   @map("conversation_id")
+  messageId       String?   @map("message_id")
+  title           String
+  body            String
+  dataJson        Json?     @map("data_json")
+  status          String    @default("pending")
+  attemptCount    Int       @default(0) @map("attempt_count")
+  nextAttemptAt   DateTime? @map("next_attempt_at")
+  lastError       String?   @map("last_error")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  sentAt          DateTime? @map("sent_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([recipientUserId, createdAt])
+  @@index([type, createdAt])
+  @@index([conversationId])
+  @@map("notification_jobs")
+}

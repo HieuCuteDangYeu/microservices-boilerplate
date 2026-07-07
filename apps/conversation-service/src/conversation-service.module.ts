@@ -16,6 +16,7 @@ import { GetUserConversationsUseCase } from 'apps/conversation-service/src/appli
 import { ProcessBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/process-bot-reply.use-case';
 import { TriggerBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/trigger-bot-reply.use-case';
 import { AiServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/ai-service.adapter';
+import { NotificationServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/notification-service.adapter';
 import { UserServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/user-service.adapter';
 import { ConversationMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/conversation.controller';
 import { KeyMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/key.controller';
@@ -119,6 +120,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
       provide: 'IAiService',
       useClass: AiServiceAdapter,
     },
+    NotificationServiceAdapter,
 
     // --- REDIS CLIENT (Để lưu cache tin nhắn - Giống Auth Service) ---
     {
