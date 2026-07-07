@@ -162,6 +162,22 @@ services:
     networks:
       - microservices-net
 
+  notification-service:
+    image: ${DOCKERHUB_USERNAME}/notification-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/notification-service/Dockerfile
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    expose:
+      - '3015'
+    networks:
+      - microservices-net
+
   ai-service:
     image: ${DOCKERHUB_USERNAME}/ai-service:latest
     build:
