@@ -122,6 +122,17 @@ export interface ReelViewEventInput {
   skipped?: boolean;
 }
 
+export interface ReelSearchQuery {
+  query: string;
+  viewerId?: string;
+  limit?: number;
+}
+
+export interface ReelSearchResult {
+  reel: Reel;
+  score: number;
+}
+
 export interface IContentRepository {
   createReel(reel: Partial<Reel>): Promise<Reel>;
 
@@ -198,6 +209,8 @@ export interface IContentRepository {
     userId: string,
     chunks: ReelChunkIndexInput[],
   ): Promise<void>;
+
+  searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]>;
 
   listReels(query: ReelListQuery): Promise<{
     items: Reel[];

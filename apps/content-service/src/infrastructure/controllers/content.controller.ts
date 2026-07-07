@@ -15,6 +15,7 @@ import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
+import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
@@ -62,6 +63,7 @@ export class ContentController {
     private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
     private readonly reprocessReelUseCase: ReprocessReelUseCase,
     private readonly claimReelProcessingAttemptUseCase: ClaimReelProcessingAttemptUseCase,
+    private readonly searchPublicReelsUseCase: SearchPublicReelsUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -574,6 +576,35 @@ export class ContentController {
         message: `Get Profile Reel Context Error: ${err.message}`,
       });
     }
+  }
+
+  @MessagePattern('content.search_reels')
+  async searchReels(
+    @Payload()
+    data: {
+      query: string;
+      viewerId?: string;
+      limit?: number;
+    },
+  ) {
+    if (
+      !data ||
+      typeof data.query !== 'string' ||
+      data.query.trim().length === 0
+    ) {
+      return [];
+    }
+
+    const results = await this.searchPublicReelsUseCase.execute({
+      query: data.query,
+      viewerId: data.viewerId,
+      limit: data.limit,
+    });
+
+    return results.map((result) => ({
+      ...this.toSerializable(result.reel),
+      searchScore: result.score,
+    }));
   }
 
   @MessagePattern('content.list_reels')

@@ -17,6 +17,8 @@ import {
   ReelProcessingMediaMetadata,
   ReelProfileContextQuery,
   ReelProfileContextResult,
+  ReelSearchQuery,
+  ReelSearchResult,
   ReelShareCreateInput,
   ReelShareLinkCreateInput,
   ReelShareLinkWithReel,
@@ -725,6 +727,171 @@ export class ContentRepository
     ORDER BY score DESC, distance ASC NULLS LAST
     LIMIT ${finalLimit};
   `;
+  }
+
+  async searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]> {
+    const searchText = query.query.trim();
+
+    if (searchText.length === 0) {
+      return [];
+    }
+
+    const limit = Math.min(Math.max(query.limit ?? 12, 1), 30);
+
+    const rows = await this.$queryRaw<
+      {
+        id: string;
+        score: number;
+      }[]
+    >`
+    WITH chunk_scores AS (
+      SELECT
+        rc."reelId" AS id,
+        MAX(
+          ts_rank_cd(
+            to_tsvector('simple', coalesce(rc.text, '')),
+            plainto_tsquery('simple', ${searchText})
+          )
+        )::float AS "chunkRank",
+        MAX(
+          CASE
+            WHEN rc.text ILIKE '%' || ${searchText} || '%' THEN 0.35
+            ELSE 0
+          END
+        )::float AS "chunkPhraseScore"
+      FROM "ReelChunk" rc
+      GROUP BY rc."reelId"
+    ),
+
+    scored AS (
+      SELECT
+        r.id,
+        (
+          (
+            ts_rank_cd(
+              to_tsvector(
+                'simple',
+                coalesce(r.title, '') || ' ' || coalesce(r.description, '')
+              ),
+              plainto_tsquery('simple', ${searchText})
+            )
+          ) * 0.42
+
+          +
+
+          (
+            CASE
+              WHEN lower(coalesce(r.title, '')) = lower(${searchText}) THEN 1.0
+              WHEN lower(coalesce(r.title, '')) LIKE lower(${searchText}) || '%' THEN 0.9
+              WHEN r.title ILIKE '%' || ${searchText} || '%' THEN 0.65
+              ELSE 0
+            END
+          ) * 0.28
+
+          +
+
+          (
+            CASE
+              WHEN EXISTS (
+                SELECT 1
+                FROM unnest(r.tags) AS tag(value)
+                WHERE tag.value ILIKE ${searchText}
+              ) THEN 0.8
+              WHEN EXISTS (
+                SELECT 1
+                FROM unnest(r.tags) AS tag(value)
+                WHERE tag.value ILIKE '%' || ${searchText} || '%'
+              ) THEN 0.55
+              ELSE 0
+            END
+          ) * 0.18
+
+          +
+
+          (
+            GREATEST(
+              COALESCE(cs."chunkRank", 0),
+              COALESCE(cs."chunkPhraseScore", 0)
+            )
+          ) * 0.32
+
+          +
+
+          (
+            1.0 / (
+              1.0 +
+              (
+                GREATEST(
+                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r."createdAt")) / 86400.0,
+                  0.0
+                ) / 30.0
+              )
+            )
+          ) * 0.08
+
+          +
+
+          (
+            LEAST(
+              LN(COALESCE(r."viewCount", 0)::float + 1.0) / LN(1001.0),
+              1.0
+            )
+          ) * 0.07
+        )::float AS score
+      FROM "Reel" r
+      LEFT JOIN chunk_scores cs ON cs.id = r.id
+      WHERE r.status = 'COMPLETED'
+        AND r.visibility = 'public'
+        AND (
+          to_tsvector(
+            'simple',
+            coalesce(r.title, '') || ' ' || coalesce(r.description, '')
+          ) @@ plainto_tsquery('simple', ${searchText})
+          OR r.title ILIKE '%' || ${searchText} || '%'
+          OR r.description ILIKE '%' || ${searchText} || '%'
+          OR EXISTS (
+            SELECT 1
+            FROM unnest(r.tags) AS tag(value)
+            WHERE tag.value ILIKE '%' || ${searchText} || '%'
+          )
+          OR COALESCE(cs."chunkRank", 0) > 0
+          OR COALESCE(cs."chunkPhraseScore", 0) > 0
+        )
+    )
+
+    SELECT id, score
+    FROM scored
+    WHERE score > 0
+    ORDER BY score DESC, id ASC
+    LIMIT ${limit};
+  `;
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const scoreById = new Map(rows.map((row) => [row.id, row.score]));
+    const ids = rows.map((row) => row.id);
+
+    const records = await this.reel.findMany({
+      where: {
+        id: { in: ids },
+        status: 'COMPLETED',
+        visibility: 'public',
+      },
+      select: this.reelListSelect,
+    });
+
+    return records
+      .map((record) => {
+        const reel = this.toDomain(record);
+
+        return {
+          reel,
+          score: scoreById.get(reel.id) ?? 0,
+        };
+      })
+      .sort((left, right) => right.score - left.score);
   }
 
   async listReels(query: ReelListQuery): Promise<{

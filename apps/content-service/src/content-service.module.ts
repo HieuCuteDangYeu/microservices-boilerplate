@@ -11,6 +11,7 @@ import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
+import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
 import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
@@ -91,6 +92,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     TrackReelEventsUseCase,
     ReprocessReelUseCase,
     ClaimReelProcessingAttemptUseCase,
+    SearchPublicReelsUseCase,
     {
       provide: 'IContentRepository',
       useClass: ContentRepository,

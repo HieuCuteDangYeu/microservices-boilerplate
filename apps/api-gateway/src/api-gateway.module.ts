@@ -9,6 +9,7 @@ import { MessageController } from '@gateway/conversation/message.controller';
 import { FriendController } from '@gateway/friends/friend.controller';
 import { MediaController } from '@gateway/media/media.controller';
 import { PaymentController } from '@gateway/payment/payment.controller';
+import { SearchController } from '@gateway/search/search.controller';
 import { UserController } from '@gateway/users/user.controller';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -70,6 +71,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     GatewayKeyController,
     ContentController,
     PublicReelShareController,
+    SearchController,
   ],
   providers: [JwtAuthGuard, ReelAuthorService],
 })
