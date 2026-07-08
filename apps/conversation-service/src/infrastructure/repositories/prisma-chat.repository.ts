@@ -24,9 +24,9 @@ import {
 } from '../../domain/entities/message.entity';
 import {
   IChatRepository,
-  type MarkMessagesAsSeenResult,
   type AnchorMessageExpansion,
   type AnchorMessageWindow,
+  type MarkMessagesAsSeenResult,
   type MediaProcessingSyncResult,
 } from '../../domain/interfaces/chat.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1068,6 +1068,17 @@ export class PrismaChatRepository implements IChatRepository {
     const durationMs = (value as Record<string, unknown>).durationMs;
     const status = (value as Record<string, unknown>).status;
     const failureReason = (value as Record<string, unknown>).failureReason;
+    const reelId = (value as Record<string, unknown>).reelId;
+    const reelOwnerId = (value as Record<string, unknown>).reelOwnerId;
+    const reelOwnerUsername = (value as Record<string, unknown>)
+      .reelOwnerUsername;
+    const reelOwnerAvatarUrl = (value as Record<string, unknown>)
+      .reelOwnerAvatarUrl;
+    const reelTitle = (value as Record<string, unknown>).reelTitle;
+    const reelDescription = (value as Record<string, unknown>).reelDescription;
+    const reelTags = this.normalizeStringArray(
+      (value as Record<string, unknown>).reelTags,
+    );
 
     return {
       ...(typeof fileKey === 'string' ? { fileKey } : {}),
@@ -1082,7 +1093,24 @@ export class PrismaChatRepository implements IChatRepository {
         ? { status }
         : {}),
       ...(typeof failureReason === 'string' ? { failureReason } : {}),
+      ...(typeof reelId === 'string' ? { reelId } : {}),
+      ...(typeof reelOwnerId === 'string' ? { reelOwnerId } : {}),
+      ...(typeof reelOwnerUsername === 'string' ? { reelOwnerUsername } : {}),
+      ...(typeof reelOwnerAvatarUrl === 'string' ? { reelOwnerAvatarUrl } : {}),
+      ...(typeof reelTitle === 'string' ? { reelTitle } : {}),
+      ...(typeof reelDescription === 'string' ? { reelDescription } : {}),
+      ...(reelTags !== undefined ? { reelTags } : {}),
     };
+  }
+
+  private normalizeStringArray(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value.filter(
+      (item): item is string => typeof item === 'string' && item.length > 0,
+    );
   }
 
   private normalizeReplyPreview(
@@ -1102,7 +1130,7 @@ export class PrismaChatRepository implements IChatRepository {
     if (
       typeof senderName !== 'string' ||
       typeof content !== 'string' ||
-      !['text', 'image', 'video', 'file', 'call'].includes(String(type))
+      !['text', 'image', 'video', 'file', 'call', 'reel'].includes(String(type))
     ) {
       return undefined;
     }
@@ -1335,6 +1363,10 @@ export class PrismaChatRepository implements IChatRepository {
 
     const replyTargetMedia = this.normalizeMedia(replyTarget.media);
     const senderName = await this.getUserPreviewName(replyTarget.senderId);
+    const isReelLikeReply = this.isReelLikeMessage(
+      replyTarget.type,
+      replyTargetMedia,
+    );
 
     if (replyTarget.isRecalled) {
       return this.buildTextOnlyReplyPreview({
@@ -1343,13 +1375,16 @@ export class PrismaChatRepository implements IChatRepository {
     }
 
     const thumbnailUri =
-      replyTarget.type === 'video'
+      isReelLikeReply || replyTarget.type === 'video'
         ? replyTargetMedia?.thumbnailUrl
         : (replyTargetMedia?.thumbnailUrl ?? replyTargetMedia?.fileUrl);
 
     return {
       senderName,
-      content: this.getReplyPreviewContent(replyTarget),
+      content: this.getReplyPreviewContent({
+        ...replyTarget,
+        media: replyTargetMedia,
+      }),
       ...(thumbnailUri ? { thumbnailUri } : {}),
       ...(replyTargetMedia?.width
         ? { mediaWidth: replyTargetMedia.width }
@@ -1357,7 +1392,7 @@ export class PrismaChatRepository implements IChatRepository {
       ...(replyTargetMedia?.height
         ? { mediaHeight: replyTargetMedia.height }
         : {}),
-      type: this.getReplyPreviewType(replyTarget.type),
+      type: this.getReplyPreviewType(replyTarget.type, replyTargetMedia),
     };
   }
 
@@ -1436,6 +1471,18 @@ export class PrismaChatRepository implements IChatRepository {
       patch.status === 'failed'
         ? (patch.failureReason ?? current?.failureReason)
         : patch.failureReason;
+    const reelId = patch.reelId ?? current?.reelId;
+    const reelOwnerId = patch.reelOwnerId ?? current?.reelOwnerId;
+    const reelOwnerUsername =
+      patch.reelOwnerUsername ?? current?.reelOwnerUsername;
+    const reelOwnerAvatarUrl =
+      patch.reelOwnerAvatarUrl ?? current?.reelOwnerAvatarUrl;
+    const reelTitle = patch.reelTitle ?? current?.reelTitle;
+    const reelDescription = patch.reelDescription ?? current?.reelDescription;
+    const reelTags =
+      patch.reelTags !== undefined
+        ? this.normalizeStringArray(patch.reelTags)
+        : current?.reelTags;
 
     if (!fileUrl) {
       throw new InternalServerErrorException(
@@ -1469,6 +1516,13 @@ export class PrismaChatRepository implements IChatRepository {
       ...((patch.status ?? current?.status)
         ? { status: patch.status ?? current?.status }
         : {}),
+      ...(reelId ? { reelId } : {}),
+      ...(reelOwnerId ? { reelOwnerId } : {}),
+      ...(reelOwnerUsername ? { reelOwnerUsername } : {}),
+      ...(reelOwnerAvatarUrl ? { reelOwnerAvatarUrl } : {}),
+      ...(reelTitle ? { reelTitle } : {}),
+      ...(reelDescription ? { reelDescription } : {}),
+      ...(reelTags !== undefined ? { reelTags } : {}),
     };
 
     if (failureReason) {
@@ -1514,9 +1568,29 @@ export class PrismaChatRepository implements IChatRepository {
     type: string;
     signalType: number;
     isRecalled: boolean;
+    media?: MessageMedia;
   }) {
     if (message.isRecalled) {
       return RECALLED_PREVIEW_CONTENT;
+    }
+
+    if (this.isReelLikeMessage(message.type, message.media)) {
+      if (message.media?.reelTitle?.trim()) {
+        return message.media.reelTitle.trim();
+      }
+
+      if (message.signalType === 0) {
+        try {
+          const decrypted = this.encryptionRepository.decrypt(message.content);
+          if (decrypted.trim()) {
+            return decrypted;
+          }
+        } catch {
+          // Fall through to the reel label when legacy content is unreadable.
+        }
+      }
+
+      return this.getAttachmentPreviewLabel('reel');
     }
 
     if (message.type !== 'text') {
@@ -1534,12 +1608,27 @@ export class PrismaChatRepository implements IChatRepository {
     }
   }
 
-  private getReplyPreviewType(type: string): MessageReplyPreview['type'] {
+  private getReplyPreviewType(
+    type: string,
+    media?: MessageMedia,
+  ): MessageReplyPreview['type'] {
+    if (this.isReelLikeMessage(type, media)) {
+      return 'reel';
+    }
+
     if (['image', 'video', 'file', 'call'].includes(type)) {
       return type as MessageReplyPreview['type'];
     }
 
     return 'text';
+  }
+
+  private isReelLikeMessage(type: string, media?: MessageMedia): boolean {
+    return (
+      type === 'reel' ||
+      media?.mimeType === 'application/vnd.velora.reel' ||
+      (typeof media?.reelId === 'string' && media.reelId.trim().length > 0)
+    );
   }
 
   private getAttachmentPreviewLabel(type: string) {
@@ -1548,6 +1637,7 @@ export class PrismaChatRepository implements IChatRepository {
       video: '[Video]',
       file: '[Tập tin]',
       call: '📞 Cuộc gọi',
+      reel: '[Reel]',
     };
 
     return typeMap[type] || 'Tin nhắn mới';

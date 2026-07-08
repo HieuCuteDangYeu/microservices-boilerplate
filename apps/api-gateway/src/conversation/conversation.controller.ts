@@ -60,25 +60,41 @@ export class ConversationController {
   private async enrichReelOwnersInMessageResponses(
     messages: MessageDto[],
   ): Promise<MessageDto[]> {
+    const reelIdsByIndex = new Map<number, string>();
     const reelOwnerIdsByIndex = new Map<number, string>();
 
-    await Promise.all(
-      messages.map(async (message, index) => {
-        if (message.type !== 'reel' || !message.media) {
-          return;
-        }
+    messages.forEach((message, index) => {
+      const media = this.getMediaRecord(message.media);
+      if (!media || !this.isReelLikeMessage(message)) {
+        return;
+      }
 
-        const media = message.media as Record<string, unknown>;
-        const reelOwnerId =
-          typeof media.reelOwnerId === 'string'
-            ? media.reelOwnerId
-            : await this.resolveReelOwnerId(media);
+      const reelId = this.getNonEmptyString(media.reelId);
+      const reelOwnerId = this.getNonEmptyString(media.reelOwnerId);
 
-        if (reelOwnerId) {
-          reelOwnerIdsByIndex.set(index, reelOwnerId);
-        }
-      }),
-    );
+      if (reelId) {
+        reelIdsByIndex.set(index, reelId);
+      }
+
+      if (reelOwnerId) {
+        reelOwnerIdsByIndex.set(index, reelOwnerId);
+      }
+    });
+
+    const reelsById = await this.loadReelMap([
+      ...new Set(reelIdsByIndex.values()),
+    ]);
+
+    for (const [index, reelId] of reelIdsByIndex.entries()) {
+      if (reelOwnerIdsByIndex.has(index)) {
+        continue;
+      }
+
+      const reelOwnerId = this.getNonEmptyString(reelsById.get(reelId)?.userId);
+      if (reelOwnerId) {
+        reelOwnerIdsByIndex.set(index, reelOwnerId);
+      }
+    }
 
     const authorsById = await this.reelAuthorService.loadAuthorMap([
       ...new Set(reelOwnerIdsByIndex.values()),
@@ -88,6 +104,9 @@ export class ConversationController {
       this.buildReelOwnerEnrichedMessageResponse(
         message,
         reelOwnerIdsByIndex.get(index) ?? null,
+        reelIdsByIndex.get(index)
+          ? (reelsById.get(reelIdsByIndex.get(index)!) ?? null)
+          : null,
         authorsById,
       ),
     );
@@ -106,56 +125,128 @@ export class ConversationController {
   private buildReelOwnerEnrichedMessageResponse(
     message: MessageDto,
     reelOwnerId: string | null,
+    reel: Reel | null,
     authorsById: Parameters<ReelAuthorService['resolveAuthor']>[0],
   ): MessageDto {
-    if (message.type !== 'reel' || !message.media) {
+    const media = this.getMediaRecord(message.media);
+    if (!media || !this.isReelLikeMessage(message)) {
       return message;
     }
 
-    const media = message.media as Record<string, unknown>;
-    const responseMedia = { ...media };
-    delete responseMedia.reelOwnerId;
-
-    if (!reelOwnerId) {
-      return {
-        ...message,
-        media: responseMedia as MessageDto['media'],
-      };
-    }
-
-    const author = this.reelAuthorService.resolveAuthor(
-      authorsById,
-      reelOwnerId,
-    );
+    const resolvedReelId = this.getNonEmptyString(media.reelId) ?? reel?.id;
+    const resolvedReelOwnerId =
+      reelOwnerId ?? this.getNonEmptyString(media.reelOwnerId);
+    const author = resolvedReelOwnerId
+      ? this.reelAuthorService.resolveAuthor(authorsById, resolvedReelOwnerId)
+      : null;
+    const reelTitle = this.getNonEmptyString(media.reelTitle) ?? reel?.title;
+    const reelDescription =
+      this.getNonEmptyString(media.reelDescription) ?? reel?.description;
+    const reelTags =
+      this.normalizeStringArray(media.reelTags) ??
+      this.normalizeStringArray(reel?.tags);
 
     return {
       ...message,
       media: {
-        ...responseMedia,
-        ...(author.username ? { reelOwnerUsername: author.username } : {}),
-        ...(author.avatarUrl ? { reelOwnerAvatarUrl: author.avatarUrl } : {}),
+        ...media,
+        ...(resolvedReelId ? { reelId: resolvedReelId } : {}),
+        ...(resolvedReelOwnerId ? { reelOwnerId: resolvedReelOwnerId } : {}),
+        ...(author?.username
+          ? { reelOwnerUsername: author.username }
+          : this.getNonEmptyString(media.reelOwnerUsername)
+            ? {
+                reelOwnerUsername: this.getNonEmptyString(
+                  media.reelOwnerUsername,
+                )!,
+              }
+            : {}),
+        ...(author?.avatarUrl
+          ? { reelOwnerAvatarUrl: author.avatarUrl }
+          : this.getNonEmptyString(media.reelOwnerAvatarUrl)
+            ? {
+                reelOwnerAvatarUrl: this.getNonEmptyString(
+                  media.reelOwnerAvatarUrl,
+                )!,
+              }
+            : {}),
+        ...(reelTitle ? { reelTitle } : {}),
+        ...(reelDescription ? { reelDescription } : {}),
+        ...(reelTags !== undefined ? { reelTags } : {}),
       } as MessageDto['media'],
     };
   }
 
-  private async resolveReelOwnerId(
-    media: Record<string, unknown>,
-  ): Promise<string | null> {
-    if (typeof media.reelId !== 'string' || media.reelId.trim().length === 0) {
+  private getMediaRecord(
+    media: MessageDto['media'] | undefined,
+  ): Record<string, unknown> | null {
+    if (!media || typeof media !== 'object' || Array.isArray(media)) {
       return null;
     }
 
-    try {
-      const reel = await lastValueFrom(
-        this.contentClient.send<Reel>('content.get_reel', {
-          reelId: media.reelId.trim(),
-        }),
-      );
+    return media;
+  }
 
-      return typeof reel?.userId === 'string' ? reel.userId : null;
-    } catch {
+  private isReelLikeMessage(
+    message: Pick<MessageDto, 'type' | 'media'>,
+  ): boolean {
+    const media = this.getMediaRecord(message.media);
+
+    return (
+      message.type === 'reel' ||
+      (media !== null &&
+        (this.getNonEmptyString(media.mimeType) ===
+          'application/vnd.velora.reel' ||
+          this.getNonEmptyString(media.reelId) !== null))
+    );
+  }
+
+  private getNonEmptyString(value: unknown): string | null {
+    if (typeof value !== 'string') {
       return null;
     }
+
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private normalizeStringArray(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value.filter(
+      (item): item is string =>
+        typeof item === 'string' && item.trim().length > 0,
+    );
+  }
+
+  private async loadReelMap(reelIds: string[]): Promise<Map<string, Reel>> {
+    const uniqueReelIds = [...new Set(reelIds.filter(Boolean))];
+
+    if (uniqueReelIds.length === 0) {
+      return new Map();
+    }
+
+    const reels = await Promise.all(
+      uniqueReelIds.map(async (reelId) => {
+        try {
+          const reel = await lastValueFrom(
+            this.contentClient.send<Reel | null>('content.get_reel', {
+              reelId,
+            }),
+          );
+
+          return reel ? ([reelId, reel] as const) : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return new Map(
+      reels.filter((entry): entry is readonly [string, Reel] => entry !== null),
+    );
   }
 
   @Post()
@@ -357,8 +448,11 @@ export class ConversationController {
         failureReason?: string;
         reelId?: string;
         reelOwnerId?: string;
+        reelOwnerUsername?: string;
+        reelOwnerAvatarUrl?: string;
         reelTitle?: string;
         reelDescription?: string;
+        reelTags?: string[];
       };
       signalType?: number;
       registrationId?: number;

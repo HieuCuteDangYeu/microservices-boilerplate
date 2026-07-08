@@ -110,6 +110,7 @@ export class ChatMapper {
     const reelOwnerAvatarUrl = record.reelOwnerAvatarUrl;
     const reelTitle = record.reelTitle;
     const reelDescription = record.reelDescription;
+    const reelTags = ChatMapper.toStringArray(record.reelTags);
 
     return {
       ...(typeof fileKey === 'string' ? { fileKey } : {}),
@@ -130,7 +131,18 @@ export class ChatMapper {
       ...(typeof reelOwnerAvatarUrl === 'string' ? { reelOwnerAvatarUrl } : {}),
       ...(typeof reelTitle === 'string' ? { reelTitle } : {}),
       ...(typeof reelDescription === 'string' ? { reelDescription } : {}),
+      ...(reelTags !== undefined ? { reelTags } : {}),
     };
+  }
+
+  private static toStringArray(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value.filter(
+      (item): item is string => typeof item === 'string' && item.length > 0,
+    );
   }
 
   private static toReplyPreview(

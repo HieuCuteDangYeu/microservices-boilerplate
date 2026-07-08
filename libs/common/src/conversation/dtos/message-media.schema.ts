@@ -23,6 +23,7 @@ export const MessageMediaSchema = z.object({
   reelOwnerAvatarUrl: z.string().min(1).optional(),
   reelTitle: z.string().min(1).optional(),
   reelDescription: z.string().min(1).optional(),
+  reelTags: z.array(z.string().min(1)).optional(),
 });
 
 export type MessageMediaDto = z.infer<typeof MessageMediaSchema>;

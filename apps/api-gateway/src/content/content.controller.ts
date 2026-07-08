@@ -84,7 +84,6 @@ export class ContentController {
     }
 
     const media = { ...(share.message.media as Record<string, unknown>) };
-    delete media.reelOwnerId;
 
     const authorsById = await this.reelAuthorService.loadAuthorMap([
       share.ownerId,
@@ -100,6 +99,10 @@ export class ContentController {
         ...share.message,
         media: {
           ...media,
+          reelOwnerId:
+            typeof media.reelOwnerId === 'string' && media.reelOwnerId.trim()
+              ? media.reelOwnerId
+              : share.ownerId,
           ...(author.username ? { reelOwnerUsername: author.username } : {}),
           ...(author.avatarUrl ? { reelOwnerAvatarUrl: author.avatarUrl } : {}),
         },

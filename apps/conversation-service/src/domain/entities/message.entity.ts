@@ -41,6 +41,7 @@ export interface MessageMedia {
   reelOwnerAvatarUrl?: string;
   reelTitle?: string;
   reelDescription?: string;
+  reelTags?: string[];
 }
 
 export interface RecallMessageResult {

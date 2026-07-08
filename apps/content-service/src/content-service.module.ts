@@ -20,6 +20,7 @@ import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-e
 import { ConversationMessageAdapter } from '@content/infrastructure/adapters/conversation-message.adapter';
 import { FriendSharePolicyAdapter } from '@content/infrastructure/adapters/friend-share-policy.adapter';
 import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
+import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -66,6 +67,7 @@ function createRmqClientRegistration(name: string, queue: string) {
       createRmqClientRegistration('PROCESSING_SERVICE', 'processing_queue'),
       createRmqClientRegistration('AI_SERVICE_RMQ', 'ai_queue'),
       createRmqClientRegistration('FRIEND_SERVICE_RMQ', 'friend_queue'),
+      createRmqClientRegistration('USER_SERVICE_RMQ', 'user_queue'),
       createRmqClientRegistration(
         'CONVERSATION_SERVICE_RMQ',
         'conversation_queue',
@@ -112,6 +114,10 @@ function createRmqClientRegistration(name: string, queue: string) {
     {
       provide: 'IFriendSharePolicyService',
       useClass: FriendSharePolicyAdapter,
+    },
+    {
+      provide: 'IUserService',
+      useClass: UserServiceAdapter,
     },
     {
       provide: 'IConversationMessageService',

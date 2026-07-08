@@ -1,9 +1,11 @@
 import { BOT_USER_ID } from '@common/constants/seed.constants';
+import { PublicUserProfile } from '@common/user/interfaces/public-user-profile.types';
 import type { Reel } from '@content/domain/entities/reel.entity';
 import type {
   CreatedConversationMessage,
   IConversationMessageService,
 } from '@content/domain/interfaces/conversation-message.service.interface';
+import type { IUserService } from '@content/domain/interfaces/user-service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
@@ -26,6 +28,8 @@ export class ConversationMessageAdapter implements IConversationMessageService {
   constructor(
     @Inject('CONVERSATION_SERVICE_RMQ')
     private readonly conversationClient: ClientProxy,
+    @Inject('IUserService')
+    private readonly userService: IUserService,
     private readonly configService: ConfigService,
   ) {
     this.cdnDomain = this.configService
@@ -66,6 +70,8 @@ export class ConversationMessageAdapter implements IConversationMessageService {
     senderId: string;
     reel: Reel;
   }): Promise<CreatedConversationMessage> {
+    const reelOwner = await this.loadReelOwnerProfile(input.reel.userId);
+
     const response = await firstValueFrom(
       this.conversationClient.send<{
         message: CreatedConversationMessage;
@@ -86,8 +92,15 @@ export class ConversationMessageAdapter implements IConversationMessageService {
           status: 'ready',
           reelId: input.reel.id,
           reelOwnerId: input.reel.userId,
+          ...(reelOwner?.username
+            ? { reelOwnerUsername: reelOwner.username }
+            : {}),
+          ...(reelOwner?.picture
+            ? { reelOwnerAvatarUrl: reelOwner.picture }
+            : {}),
           reelTitle: input.reel.title,
           reelDescription: input.reel.description,
+          reelTags: input.reel.tags ?? [],
         },
       }),
     );
@@ -127,5 +140,17 @@ export class ConversationMessageAdapter implements IConversationMessageService {
       extIndex !== -1 ? mediaKey.substring(0, extIndex) : mediaKey;
 
     return `${this.cdnDomain}/${folderPath}/master.m3u8`;
+  }
+
+  private async loadReelOwnerProfile(
+    userId: string,
+  ): Promise<PublicUserProfile | null> {
+    if (!userId.trim()) {
+      return null;
+    }
+
+    const profiles = await this.userService.findPublicUsersByIds([userId]);
+
+    return profiles.find((profile) => profile.id === userId) ?? null;
   }
 }
