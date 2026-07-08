@@ -146,7 +146,13 @@ export class ApnsVoipService {
     signer.update(unsignedToken);
     signer.end();
 
-    const signature = signer.sign(privateKey, 'base64url');
+    const signature = signer.sign(
+      {
+        key: privateKey,
+        dsaEncoding: 'ieee-p1363',
+      },
+      'base64url',
+    );
     const token = `${unsignedToken}.${signature}`;
 
     this.cachedJwt = {
