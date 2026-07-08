@@ -1,4 +1,7 @@
-import { BOT_USER_ID } from '@common/constants/seed.constants';
+import {
+  BOT_USER_ID,
+  DEFAULT_ADMIN_ID,
+} from '@common/constants/seed.constants';
 import { UserResponse } from '@common/user/interfaces/find-all-users.types';
 import { Injectable } from '@nestjs/common';
 import { Prisma, User as PrismaUser } from '@prisma/user-client';
@@ -131,7 +134,7 @@ export class UserRepository implements IUserRepository {
   }
 
   async searchPublicUsers(params: SearchPublicUsersParams): Promise<User[]> {
-    const excludedUserIds = [BOT_USER_ID];
+    const excludedUserIds = [BOT_USER_ID, DEFAULT_ADMIN_ID];
 
     if (params.excludeUserId) {
       excludedUserIds.push(params.excludeUserId);
