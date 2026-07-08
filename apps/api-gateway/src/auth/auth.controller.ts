@@ -1,6 +1,7 @@
 import { ConfirmAccountDto } from '@common/auth/dtos/confirm-account.dto';
 import { ForgotPasswordDto } from '@common/auth/dtos/forgot-password.dto';
 import { LoginDto } from '@common/auth/dtos/login.dto';
+import { LogoutDto } from '@common/auth/dtos/logout.dto';
 import { RegisterDto } from '@common/auth/dtos/register.dto';
 import { ResendVerificationDto } from '@common/auth/dtos/resend-verification.dto';
 import { ResetPasswordDto } from '@common/auth/dtos/reset-password.dto';
@@ -11,6 +12,7 @@ import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { ConfigService } from '@nestjs/config';
 import {
   Body,
   Controller,
@@ -25,15 +27,28 @@ import {
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Response as ExpressResponse } from 'express';
 import { catchError, lastValueFrom } from 'rxjs';
+
+type LogoutResponse = {
+  message: string;
+  userId?: string;
+};
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
+  private readonly notificationServiceUrl: string;
+
   constructor(
     @Inject('AUTH_SERVICE') private readonly authClient: ClientProxy,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.notificationServiceUrl = (
+      this.configService.get<string>('NOTIFICATION_SERVICE_URL') ||
+      'http://localhost:3015'
+    ).replace(/\/$/, '');
+  }
 
   @Post('register')
   @ApiOperation({ summary: 'Register a new user' })
@@ -51,7 +66,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Login and set HTTP-only cookies' })
   async login(
     @Body() dto: LoginDto,
-    @Res({ passthrough: true }) response: Response,
+    @Res({ passthrough: true }) response: ExpressResponse,
   ) {
     const tokens = await lastValueFrom(
       this.authClient.send<TokenResponse>('auth.login', dto).pipe(
@@ -132,7 +147,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token using cookie' })
   async refresh(
     @Req() request: AuthenticatedRequest,
-    @Res({ passthrough: true }) response: Response,
+    @Res({ passthrough: true }) response: ExpressResponse,
   ) {
     const incomingRefreshToken = request.cookies['refresh_token'];
 
@@ -168,19 +183,51 @@ export class AuthController {
   @Post('logout')
   @ApiOperation({ summary: 'Logout and clear cookies' })
   async logout(
+    @Body() dto: LogoutDto | undefined,
     @Req() request: AuthenticatedRequest,
-    @Res({ passthrough: true }) response: Response,
+    @Res({ passthrough: true }) response: ExpressResponse,
   ) {
     const refreshToken = request.cookies['refresh_token'];
+    let logoutResult: LogoutResponse | null = null;
+    const pushToken = dto?.pushToken?.trim();
 
     if (refreshToken) {
-      await lastValueFrom(
-        this.authClient.send('auth.logout', { refreshToken }).pipe(
-          catchError(() => {
-            return [null];
-          }),
-        ),
+      logoutResult = await lastValueFrom(
+        this.authClient
+          .send<LogoutResponse>('auth.logout', { refreshToken })
+          .pipe(
+            catchError((error) => {
+              if (pushToken) {
+                this.handleMicroserviceError(error);
+              }
+
+              return [null];
+            }),
+          ),
       );
+    } else if (pushToken) {
+      throw new HttpException(
+        'No refresh token found for push token cleanup',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    if (pushToken) {
+      if (!logoutResult?.userId) {
+        throw new HttpException(
+          'Unable to resolve user for push token cleanup',
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
+
+      await this.forwardToNotificationService({
+        path: '/notifications/push-tokens/deactivate',
+        userId: logoutResult.userId,
+        body: {
+          provider: 'fcm',
+          token: pushToken,
+        },
+      });
     }
 
     response.clearCookie('access_token', {
@@ -194,7 +241,7 @@ export class AuthController {
       secure: process.env.NODE_ENV === 'production',
     });
 
-    return { message: 'Logged out successfully' };
+    return { message: logoutResult?.message ?? 'Logged out successfully' };
   }
 
   @Post('google/verify')
@@ -203,7 +250,7 @@ export class AuthController {
   })
   async verifyGoogleToken(
     @Body() dto: VerifyGoogleTokenDto,
-    @Res({ passthrough: true }) response: Response,
+    @Res({ passthrough: true }) response: ExpressResponse,
   ) {
     const tokens = await lastValueFrom(
       this.authClient.send<TokenResponse>('auth.verify_google_token', dto).pipe(
@@ -219,7 +266,7 @@ export class AuthController {
   }
 
   private setCookies(
-    response: Response,
+    response: ExpressResponse,
     accessToken: string,
     refreshToken: string,
   ) {
@@ -258,5 +305,63 @@ export class AuthController {
         .send<{ message: string }>('auth.reset_password', dto)
         .pipe(catchError((err) => this.handleMicroserviceError(err))),
     );
+  }
+
+  private async forwardToNotificationService({
+    path,
+    userId,
+    body,
+  }: {
+    path: string;
+    userId: string;
+    body: unknown;
+  }) {
+    let response: Response;
+
+    try {
+      response = await fetch(`${this.notificationServiceUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      throw new HttpException(
+        `Notification service unavailable: ${message}`,
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const responseBody = await this.readResponseBody(response);
+
+    if (!response.ok) {
+      throw new HttpException(responseBody, response.status);
+    }
+
+    return responseBody;
+  }
+
+  private async readResponseBody(
+    response: Response,
+  ): Promise<string | Record<string, any>> {
+    const contentType = response.headers.get('content-type') ?? '';
+
+    if (!contentType.includes('application/json')) {
+      return response.text();
+    }
+
+    const data: unknown = await response.json();
+
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return data as Record<string, any>;
+    }
+
+    return {
+      message: data,
+    };
   }
 }
