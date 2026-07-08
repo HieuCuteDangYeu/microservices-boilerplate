@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { buildCallLifecycleMetadata } from './call-lifecycle-payload';
 import { ICallEventPublisher } from '../../domain/interfaces/call-event.publisher.interface';
 import { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
 import { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
@@ -51,6 +52,7 @@ export class RejectCallUseCase {
       targetUserId: session.targetUserId,
       userId,
       callType: session.callType,
+      ...buildCallLifecycleMetadata(session, now),
       reason,
       at: now.toISOString(),
     });

@@ -11,8 +11,13 @@ export interface CallLifecyclePayload {
   conversationId: string;
   initiatorId: string;
   targetUserId: string;
+  recipientUserId: string;
   userId: string;
   callType: CallType;
+  initiatorDisplayName: string;
+  initiatorAvatarUrl?: string;
+  ringTimeoutMs: number;
+  expiresAt: string;
   reason?: string;
   at: string;
 }

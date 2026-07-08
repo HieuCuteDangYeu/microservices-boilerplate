@@ -13,6 +13,10 @@ export class CallSession {
   conversationId!: string;
   initiatorId!: string;
   targetUserId!: string;
+  initiatorDisplayName?: string;
+  initiatorAvatarUrl?: string;
+  ringTimeoutMs?: number;
+  expiresAt?: Date;
   callType!: CallType;
   status!: CallSessionStatus;
   participantIds!: string[];
@@ -27,6 +31,7 @@ export class CallSession {
     this.updatedAt = this.toDate(partial.updatedAt) ?? new Date();
     this.answeredAt = this.toDate(partial.answeredAt);
     this.endedAt = this.toDate(partial.endedAt);
+    this.expiresAt = this.toDate(partial.expiresAt);
     this.participantIds = partial.participantIds ?? [];
   }
 

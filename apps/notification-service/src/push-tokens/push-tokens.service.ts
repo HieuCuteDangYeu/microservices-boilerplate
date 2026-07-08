@@ -3,16 +3,30 @@ import { Prisma } from '@prisma/notification-client';
 
 import { PrismaService } from '../prisma/prisma.service';
 
-export type RegisterPushTokenInput = {
-  provider: 'fcm';
-  platform: 'ios' | 'android';
-  token: string;
-  deviceId?: string;
-  appVersion?: string;
-};
+export type PushProvider = 'fcm' | 'apns_voip';
+export type PushPlatform = 'ios' | 'android';
+export type PushDeliveryEnvironment = 'development' | 'production';
+
+export type RegisterPushTokenInput =
+  | {
+      provider: 'fcm';
+      platform: PushPlatform;
+      token: string;
+      deviceId?: string;
+      appVersion?: string;
+    }
+  | {
+      provider: 'apns_voip';
+      platform: 'ios';
+      token: string;
+      deviceId?: string;
+      appVersion?: string;
+      bundleId: string;
+      deliveryEnvironment: PushDeliveryEnvironment;
+    };
 
 export type DeactivatePushTokenInput = {
-  provider: 'fcm';
+  provider: PushProvider;
   token: string;
 };
 
@@ -23,6 +37,8 @@ export type ActivePushToken = Prisma.PushTokenGetPayload<{
     provider: true;
     platform: true;
     token: true;
+    bundleId: true;
+    deliveryEnvironment: true;
   };
 }>;
 
@@ -45,6 +61,9 @@ export class PushTokensService {
         token: input.token,
         deviceId: input.deviceId,
         appVersion: input.appVersion,
+        bundleId: input.provider === 'apns_voip' ? input.bundleId : null,
+        deliveryEnvironment:
+          input.provider === 'apns_voip' ? input.deliveryEnvironment : null,
         isActive: true,
         lastSeenAt: new Date(),
       },
@@ -53,6 +72,9 @@ export class PushTokensService {
         platform: input.platform,
         deviceId: input.deviceId,
         appVersion: input.appVersion,
+        bundleId: input.provider === 'apns_voip' ? input.bundleId : null,
+        deliveryEnvironment:
+          input.provider === 'apns_voip' ? input.deliveryEnvironment : null,
         isActive: true,
         lastSeenAt: new Date(),
       },
@@ -74,11 +96,18 @@ export class PushTokensService {
     });
   }
 
-  async findActiveByUserId(userId: string): Promise<ActivePushToken[]> {
+  async findActiveByUserId(
+    userId: string,
+    filters?: {
+      provider?: PushProvider;
+      platform?: PushPlatform;
+    },
+  ): Promise<ActivePushToken[]> {
     return this.prisma.pushToken.findMany({
       where: {
         userId,
-        provider: 'fcm',
+        ...(filters?.provider ? { provider: filters.provider } : {}),
+        ...(filters?.platform ? { platform: filters.platform } : {}),
         isActive: true,
       },
       select: {
@@ -87,6 +116,8 @@ export class PushTokensService {
         provider: true,
         platform: true,
         token: true,
+        bundleId: true,
+        deliveryEnvironment: true,
       },
       orderBy: {
         updatedAt: 'desc',

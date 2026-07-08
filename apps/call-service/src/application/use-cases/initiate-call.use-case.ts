@@ -27,6 +27,9 @@ interface ConversationDetailResponse {
   participants?: Array<{
     id?: string;
     userId?: string;
+    name?: string;
+    fullName?: string;
+    avatar?: string;
   }>;
   isGroup?: boolean;
 }
@@ -39,6 +42,10 @@ export interface InitiateCallResult {
 
 @Injectable()
 export class InitiateCallUseCase {
+  private readonly ringTimeoutMs = Number(
+    process.env.CALL_NO_ANSWER_TIMEOUT_MS || 30000,
+  );
+
   constructor(
     @Inject('ICallSessionRepository')
     private readonly sessionRepository: ICallSessionRepository,
@@ -96,11 +103,25 @@ export class InitiateCallUseCase {
 
     await this.mediaEngine.createRoom(callId);
 
+    const initiatorDisplay = conversation.participants?.find(
+      (participant) =>
+        participant.id === initiatorId || participant.userId === initiatorId,
+    );
+    const initiatorDisplayName =
+      initiatorDisplay?.name?.trim() ||
+      initiatorDisplay?.fullName?.trim() ||
+      'Incoming call';
+    const expiresAt = new Date(now.getTime() + this.ringTimeoutMs);
+
     const session = new CallSession({
       callId,
       conversationId,
       initiatorId,
       targetUserId: resolvedTargetUserId,
+      initiatorDisplayName,
+      initiatorAvatarUrl: initiatorDisplay?.avatar?.trim() || undefined,
+      ringTimeoutMs: this.ringTimeoutMs,
+      expiresAt,
       callType,
       status: 'initiated',
       participantIds: [initiatorId],
@@ -126,8 +147,13 @@ export class InitiateCallUseCase {
       conversationId,
       initiatorId,
       targetUserId: resolvedTargetUserId,
+      recipientUserId: resolvedTargetUserId,
       userId: initiatorId,
       callType,
+      initiatorDisplayName,
+      initiatorAvatarUrl: session.initiatorAvatarUrl,
+      ringTimeoutMs: this.ringTimeoutMs,
+      expiresAt: expiresAt.toISOString(),
       at: now.toISOString(),
     });
 

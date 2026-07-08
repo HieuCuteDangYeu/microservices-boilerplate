@@ -1,4 +1,5 @@
 import { AuthController } from '@gateway/auth/auth.controller';
+import { CallController } from '@gateway/calls/call.controller';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import { ContentController } from '@gateway/content/content.controller';
 import { PublicReelShareController } from '@gateway/content/public-reel-share.controller';
@@ -59,6 +60,7 @@ function createRmqClientRegistration(name: string, queue: string) {
       createRmqClientRegistration('CONTENT_SERVICE', 'content_queue'),
       createRmqClientRegistration('AI_SERVICE', 'ai_queue'),
       createRmqClientRegistration('FRIEND_SERVICE', 'friend_queue'),
+      createRmqClientRegistration('CALL_SERVICE', 'call_queue'),
     ]),
   ],
   controllers: [
@@ -74,6 +76,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     PublicReelShareController,
     SearchController,
     NotificationController,
+    CallController,
   ],
   providers: [JwtAuthGuard, ReelAuthorService],
 })

@@ -261,6 +261,15 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       conversationId: result.session.conversationId,
       initiatorId: result.session.initiatorId,
       targetUserId: result.session.targetUserId,
+      recipientUserId: result.session.targetUserId,
+      initiatorDisplayName:
+        result.session.initiatorDisplayName ?? 'Incoming call',
+      initiatorAvatarUrl: result.session.initiatorAvatarUrl,
+      ringTimeoutMs:
+        result.session.ringTimeoutMs ?? this.noAnswerTimeoutMs,
+      expiresAt:
+        result.session.expiresAt?.toISOString() ??
+        new Date(Date.now() + this.noAnswerTimeoutMs).toISOString(),
       callType: result.session.callType,
     });
 
