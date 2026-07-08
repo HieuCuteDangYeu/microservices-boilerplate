@@ -5,10 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { buildCallLifecycleMetadata } from './call-lifecycle-payload';
+import type { CallSession } from '../../domain/entities/call-session.entity';
 import { ICallEventPublisher } from '../../domain/interfaces/call-event.publisher.interface';
 import { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
 import { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
 import { ICallStateRepository } from '../../domain/interfaces/call-state.repository.interface';
+
+export interface RejectCallResult {
+  session: CallSession;
+  reason: string;
+}
 
 @Injectable()
 export class RejectCallUseCase {
@@ -26,7 +32,7 @@ export class RejectCallUseCase {
     callId: string,
     userId: string,
     reason = 'rejected',
-  ): Promise<void> {
+  ): Promise<RejectCallResult> {
     const session = await this.sessionRepository.findByCallId(callId);
     if (!session) {
       throw new NotFoundException('Call not found');
@@ -60,5 +66,7 @@ export class RejectCallUseCase {
     await this.mediaEngine.closeRoom(callId);
     await this.stateRepository.clearCallState(callId);
     await this.sessionRepository.delete(callId);
+
+    return { session, reason };
   }
 }

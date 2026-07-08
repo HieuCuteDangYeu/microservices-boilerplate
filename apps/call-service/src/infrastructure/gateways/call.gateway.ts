@@ -30,7 +30,11 @@ import { RejectCallUseCase } from '../../application/use-cases/reject-call.use-c
 import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
 import type { CallSession } from '../../domain/entities/call-session.entity';
-import type { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
+import type {
+  ActiveProducerResult,
+  ICallMediaEngine,
+  RouterRtpCapabilitiesResult,
+} from '../../domain/interfaces/call-media.engine.interface';
 import type { ICallSessionRepository } from '../../domain/interfaces/call-session.repository.interface';
 import type { ICallStateRepository } from '../../domain/interfaces/call-state.repository.interface';
 import { CallWsExceptionFilter } from './call-ws-exception.filter';
@@ -82,6 +86,15 @@ type ConsumePayload = {
 type ResumeConsumerPayload = {
   callId: string;
   consumerId: string;
+};
+
+type CallJoinedSocketPayload = {
+  callId: string;
+  role: 'host' | 'guest';
+  session: CallSession;
+  rtpCapabilities: RouterRtpCapabilitiesResult;
+  activeProducers: ActiveProducerResult[];
+  noAnswerTimeoutMs?: number;
 };
 
 @WebSocketGateway({
@@ -210,11 +223,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           'disconnected',
         );
         if (result.shouldEmitPeerLeft) {
-          this.server.to(callId).emit('peer_left', {
-            callId,
-            userId,
-            reason: 'disconnected',
-          });
+          this.emitPeerLeft(callId, userId, 'disconnected');
         }
         this.emitCallEnded(result.session, result.endedReason);
       } catch (error) {
@@ -251,10 +260,11 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: result.role,
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
+      activeProducers: [],
       ...(result.session.callType === 'VOICE'
         ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
         : {}),
-    });
+    } satisfies CallJoinedSocketPayload);
 
     this.server.to(result.session.targetUserId).emit('incoming_call', {
       callId: result.session.callId,
@@ -295,15 +305,21 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await client.join(payload.callId);
     this.trackCallId(client, payload.callId);
 
+    const activeProducers = await this.mediaEngine.listActiveProducers(
+      payload.callId,
+      userId,
+    );
+
     client.emit('call_joined', {
       callId: payload.callId,
       role: result.role,
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
+      activeProducers,
       ...(result.session.callType === 'VOICE'
         ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
         : {}),
-    });
+    } satisfies CallJoinedSocketPayload);
 
     if (result.shouldEmitNewPeer) {
       client.to(payload.callId).emit('new_peer', {
@@ -356,22 +372,23 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.trackCallId(client, payload.callId);
     this.clearPendingDisconnect(payload.callId, userId);
 
+    const activePeerProducers = await this.mediaEngine.listActiveProducers(
+      payload.callId,
+      userId,
+    );
+
     client.emit('call_rejoined', {
       callId: payload.callId,
       role: result.role,
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
+      activeProducers: activePeerProducers,
     });
 
     client.to(payload.callId).emit('peer_reconnected', {
       callId: payload.callId,
       userId,
     });
-
-    const activePeerProducers = await this.mediaEngine.listActiveProducers(
-      payload.callId,
-      userId,
-    );
 
     activePeerProducers.forEach((producer) => {
       client.emit('new_producer', {
@@ -531,11 +548,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.clearPendingDisconnect(payload.callId, userId);
     this.untrackCallId(client, payload.callId);
     if (result.shouldEmitPeerLeft) {
-      this.server.to(payload.callId).emit('peer_left', {
-        callId: payload.callId,
-        userId,
-        reason: result.endedReason,
-      });
+      this.emitPeerLeft(payload.callId, userId, result.endedReason);
     }
     this.emitCallEnded(result.session, result.endedReason);
   }
@@ -548,7 +561,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userId = await this.resolveUserId(client);
     if (!userId) return;
 
-    await this.rejectCallUseCase.execute(
+    const result = await this.rejectCallUseCase.execute(
       payload.callId,
       userId,
       payload.reason,
@@ -557,28 +570,33 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.clearPendingDisconnect(payload.callId, userId);
     this.untrackCallId(client, payload.callId);
 
-    client.to(payload.callId).emit('call_rejected', {
-      callId: payload.callId,
-      userId,
-      reason: payload.reason ?? 'rejected',
-    });
+    this.server
+      .to([result.session.callId, result.session.initiatorId, result.session.targetUserId])
+      .emit('call_rejected', {
+        callId: result.session.callId,
+        userId,
+        reason: result.reason,
+      });
   }
 
   private emitCallEnded(session: CallSession, reason: string): void {
     this.clearPendingUnansweredCall(session.callId);
     this.clearPendingDisconnect(session.callId, session.initiatorId);
     this.clearPendingDisconnect(session.callId, session.targetUserId);
-    this.server.to(session.callId).emit('call_ended', {
-      callId: session.callId,
-      reason,
-    });
-
-    if (!session.participantIds.includes(session.targetUserId)) {
-      this.server.to(session.targetUserId).emit('call_ended', {
+    this.server
+      .to([session.callId, session.initiatorId, session.targetUserId])
+      .emit('call_ended', {
         callId: session.callId,
         reason,
       });
-    }
+  }
+
+  private emitPeerLeft(callId: string, userId: string, reason: string): void {
+    this.server.to(callId).emit('peer_left', {
+      callId,
+      userId,
+      reason,
+    });
   }
 
   private scheduleDisconnectFinalization(callId: string, userId: string): void {
@@ -608,11 +626,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
             'disconnected',
           );
           if (result.shouldEmitPeerLeft) {
-            this.server.to(callId).emit('peer_left', {
-              callId,
-              userId,
-              reason: 'disconnected',
-            });
+            this.emitPeerLeft(callId, userId, 'disconnected');
           }
           this.emitCallEnded(result.session, result.endedReason);
         } catch (error) {

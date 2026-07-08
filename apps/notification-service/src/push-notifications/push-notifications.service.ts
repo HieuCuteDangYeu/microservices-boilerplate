@@ -59,6 +59,8 @@ type SendNotificationResult = {
   results: PushTokenSendResult[];
 };
 
+type VoipDeliveryEnvironment = 'development' | 'production';
+
 const MAX_MESSAGE_NOTIFICATION_ATTEMPTS = 3;
 const MAX_CALL_NOTIFICATION_ATTEMPTS = 2;
 const MESSAGE_RETRY_DELAY_MS = 60_000;
@@ -121,11 +123,15 @@ export class PushNotificationsService {
     const uniqueRecipientIds = [...new Set(input.recipientUserIds)];
     const tokens = (
       await Promise.all(
-        uniqueRecipientIds.map((userId) =>
+        uniqueRecipientIds.flatMap((userId) => [
           this.pushTokensService.findActiveByUserId(userId, {
             provider: 'fcm',
           }),
-        ),
+          this.pushTokensService.findActiveByUserId(userId, {
+            provider: 'apns_voip',
+            platform: 'ios',
+          }),
+        ]),
       )
     ).flat();
 
@@ -377,18 +383,12 @@ export class PushNotificationsService {
     payload: IncomingCallPayload,
   ): Promise<PushTokenSendResult> {
     try {
-      if (
-        !token.bundleId ||
-        (token.deliveryEnvironment !== 'development' &&
-          token.deliveryEnvironment !== 'production')
-      ) {
-        throw new Error('Missing bundleId or deliveryEnvironment for APNs VoIP token');
-      }
+      const voipMetadata = this.readVoipTokenMetadata(token);
 
       await this.apnsVoipService.sendVoipPush({
         token: token.token,
-        bundleId: token.bundleId,
-        deliveryEnvironment: token.deliveryEnvironment,
+        bundleId: voipMetadata.bundleId,
+        deliveryEnvironment: voipMetadata.deliveryEnvironment,
         expiresAt: job.expiresAt ?? undefined,
         payload: {
           aps: {
@@ -423,6 +423,17 @@ export class PushNotificationsService {
     token: ActivePushToken,
     input: SendCallStateUpdateInput,
   ): Promise<PushTokenSendResult> {
+    if (token.provider === 'apns_voip') {
+      return this.sendCallStateUpdateToVoipToken(token, input);
+    }
+
+    return this.sendCallStateUpdateToFcmToken(token, input);
+  }
+
+  private async sendCallStateUpdateToFcmToken(
+    token: ActivePushToken,
+    input: SendCallStateUpdateInput,
+  ): Promise<PushTokenSendResult> {
     try {
       const messageId = await this.firebaseAdminService.sendToToken({
         token: token.token,
@@ -448,6 +459,60 @@ export class PushNotificationsService {
     } catch (error) {
       return this.buildFailedTokenResult(token, error);
     }
+  }
+
+  private async sendCallStateUpdateToVoipToken(
+    token: ActivePushToken,
+    input: SendCallStateUpdateInput,
+  ): Promise<PushTokenSendResult> {
+    try {
+      const voipMetadata = this.readVoipTokenMetadata(token);
+
+      await this.apnsVoipService.sendVoipPush({
+        token: token.token,
+        bundleId: voipMetadata.bundleId,
+        deliveryEnvironment: voipMetadata.deliveryEnvironment,
+        expiresAt: new Date(Date.now() + 30_000),
+        payload: {
+          aps: {
+            'content-available': 1,
+          },
+          type: 'CALL_STATE_UPDATE',
+          callId: input.callId,
+          conversationId: input.conversationId,
+          status: input.status,
+          reason: input.reason,
+          at: input.at,
+        },
+      });
+
+      return {
+        tokenId: token.id,
+        provider: token.provider,
+        platform: token.platform,
+        ok: true,
+      };
+    } catch (error) {
+      return this.buildFailedTokenResult(token, error);
+    }
+  }
+
+  private readVoipTokenMetadata(token: ActivePushToken): {
+    bundleId: string;
+    deliveryEnvironment: VoipDeliveryEnvironment;
+  } {
+    if (
+      !token.bundleId ||
+      (token.deliveryEnvironment !== 'development' &&
+        token.deliveryEnvironment !== 'production')
+    ) {
+      throw new Error('Missing bundleId or deliveryEnvironment for APNs VoIP token');
+    }
+
+    return {
+      bundleId: token.bundleId,
+      deliveryEnvironment: token.deliveryEnvironment,
+    };
   }
 
   private async buildFailedTokenResult(
