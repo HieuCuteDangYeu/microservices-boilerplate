@@ -14,11 +14,13 @@ import { RejectCallUseCase } from './application/use-cases/reject-call.use-case'
 import { AnswerCallUseCase } from './application/use-cases/answer-call.use-case';
 import { ResumeConsumerUseCase } from './application/use-cases/resume-consumer.use-case';
 import { CallGateway } from './infrastructure/gateways/call.gateway';
+import { CallStateController } from './infrastructure/controllers/call-state.controller';
 import { RedisCallStateRepository } from './infrastructure/repositories/redis-call-state.repository';
 import { RedisCallSessionRepository } from './infrastructure/repositories/redis-call-session.repository';
 import { RabbitCallEventPublisher } from './infrastructure/publishers/rabbit-call-event.publisher';
 import { MediasoupCallMediaEngine } from './infrastructure/engines/mediasoup-call.engine';
 import { CallEventsSubscriber } from './infrastructure/subscribers/call-events.subscriber';
+import { NotificationServiceAdapter } from './infrastructure/adapters/notification-service.adapter';
 
 @Module({
   imports: [
@@ -71,7 +73,7 @@ import { CallEventsSubscriber } from './infrastructure/subscribers/call-events.s
       },
     ]),
   ],
-  controllers: [CallEventsSubscriber],
+  controllers: [CallEventsSubscriber, CallStateController],
   providers: [
     CallGateway,
     InitiateCallUseCase,
@@ -88,6 +90,7 @@ import { CallEventsSubscriber } from './infrastructure/subscribers/call-events.s
     RedisCallStateRepository,
     RabbitCallEventPublisher,
     MediasoupCallMediaEngine,
+    NotificationServiceAdapter,
     {
       provide: 'ICallSessionRepository',
       useExisting: RedisCallSessionRepository,

@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { buildCallLifecycleMetadata } from './call-lifecycle-payload';
 import { CallSession } from '../../domain/entities/call-session.entity';
 import { ICallEventPublisher } from '../../domain/interfaces/call-event.publisher.interface';
 import { ICallMediaEngine } from '../../domain/interfaces/call-media.engine.interface';
@@ -61,6 +62,7 @@ export class LeaveCallUseCase {
       targetUserId: session.targetUserId,
       userId,
       callType: session.callType,
+      ...buildCallLifecycleMetadata(session, now),
       reason: endedReason,
       at: now.toISOString(),
     });

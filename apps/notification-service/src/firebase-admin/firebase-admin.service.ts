@@ -8,9 +8,14 @@ const ANDROID_MESSAGE_CHANNEL_ID = 'velora_messages';
 
 type SendToTokenInput = {
   token: string;
-  title: string;
-  body: string;
+  title?: string;
+  body?: string;
   data?: Record<string, string | number | boolean | null | undefined>;
+  androidChannelId?: string;
+  androidSound?: string;
+  includeNotification?: boolean;
+  apnsContentAvailable?: boolean;
+  apnsSound?: string;
 };
 
 @Injectable()
@@ -46,25 +51,41 @@ export class FirebaseAdminService {
         .map(([key, value]) => [key, String(value)]),
     );
 
+    const shouldIncludeNotification =
+      input.includeNotification !== false &&
+      Boolean(input.title?.trim()) &&
+      Boolean(input.body?.trim());
+
     return this.messaging.send({
       token: input.token,
-      notification: {
-        title: input.title,
-        body: input.body,
-      },
+      ...(shouldIncludeNotification
+        ? {
+            notification: {
+              title: input.title,
+              body: input.body,
+            },
+          }
+        : {}),
       data,
       android: {
         priority: 'high',
-        notification: {
-          channelId: ANDROID_MESSAGE_CHANNEL_ID,
-          priority: 'max',
-          sound: 'default',
-        },
+        ...(shouldIncludeNotification
+          ? {
+              notification: {
+                channelId: input.androidChannelId ?? ANDROID_MESSAGE_CHANNEL_ID,
+                priority: 'max',
+                sound: input.androidSound ?? 'default',
+              },
+            }
+          : {}),
       },
       apns: {
         payload: {
           aps: {
-            sound: 'default',
+            ...(input.apnsContentAvailable ? { 'content-available': 1 } : {}),
+            ...(shouldIncludeNotification || input.apnsSound
+              ? { sound: input.apnsSound ?? 'default' }
+              : {}),
           },
         },
       },

@@ -10,18 +10,35 @@ import { z } from 'zod';
 
 import { PushTokensService } from './push-tokens.service';
 
-const registerPushTokenSchema = z.object({
-  provider: z.literal('fcm'),
-  platform: z.enum(['ios', 'android']),
-  token: z.string().min(10),
-  deviceId: z.string().optional(),
-  appVersion: z.string().optional(),
-});
+const registerPushTokenSchema = z.discriminatedUnion('provider', [
+  z.object({
+    provider: z.literal('fcm'),
+    platform: z.enum(['ios', 'android']),
+    token: z.string().min(10),
+    deviceId: z.string().optional(),
+    appVersion: z.string().optional(),
+  }),
+  z.object({
+    provider: z.literal('apns_voip'),
+    platform: z.literal('ios'),
+    token: z.string().min(10),
+    deviceId: z.string().optional(),
+    appVersion: z.string().optional(),
+    bundleId: z.string().min(1),
+    deliveryEnvironment: z.enum(['development', 'production']),
+  }),
+]);
 
-const deactivatePushTokenSchema = z.object({
-  provider: z.literal('fcm'),
-  token: z.string().min(10),
-});
+const deactivatePushTokenSchema = z.discriminatedUnion('provider', [
+  z.object({
+    provider: z.literal('fcm'),
+    token: z.string().min(10),
+  }),
+  z.object({
+    provider: z.literal('apns_voip'),
+    token: z.string().min(10),
+  }),
+]);
 
 @Controller('notifications/push-tokens')
 export class PushTokensController {

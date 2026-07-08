@@ -150,8 +150,7 @@ export class AuthController {
 
   @MessagePattern('auth.logout')
   async logout(@Payload() data: { refreshToken: string }) {
-    await this.logoutUseCase.execute(data.refreshToken);
-    return { message: 'Logged out successfully' };
+    return await this.logoutUseCase.execute(data.refreshToken);
   }
 
   @MessagePattern('auth.login_google')

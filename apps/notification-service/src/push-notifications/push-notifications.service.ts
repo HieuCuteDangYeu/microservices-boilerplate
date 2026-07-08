@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/notification-client';
 
+import { ApnsVoipService } from '../firebase-admin/apns-voip.service';
 import { FirebaseAdminService } from '../firebase-admin/firebase-admin.service';
 import {
   NotificationJobRecord,
@@ -19,8 +21,30 @@ export type SendNewMessageNotificationInput = {
   body: string;
 };
 
+export type SendIncomingCallNotificationInput = {
+  recipientUserId: string;
+  initiatorId: string;
+  conversationId: string;
+  callId: string;
+  callType: 'VOICE' | 'VIDEO';
+  initiatorDisplayName: string;
+  initiatorAvatarUrl?: string;
+  ringTimeoutMs: number;
+  expiresAt: string;
+};
+
+export type SendCallStateUpdateInput = {
+  recipientUserIds: string[];
+  conversationId: string;
+  callId: string;
+  status: 'active' | 'rejected' | 'ended' | 'cancelled';
+  reason?: string;
+  at: string;
+};
+
 type PushTokenSendResult = {
   tokenId: string;
+  provider: string;
   platform: string;
   ok: boolean;
   messageId?: string;
@@ -29,15 +53,16 @@ type PushTokenSendResult = {
 };
 
 type SendNotificationResult = {
-  recipientUserId: string;
   totalTokens: number;
   sentCount: number;
   failedCount: number;
   results: PushTokenSendResult[];
 };
 
-const MAX_NOTIFICATION_ATTEMPTS = 3;
-const RETRY_DELAY_MS = 60_000;
+const MAX_MESSAGE_NOTIFICATION_ATTEMPTS = 3;
+const MAX_CALL_NOTIFICATION_ATTEMPTS = 2;
+const MESSAGE_RETRY_DELAY_MS = 60_000;
+const CALL_RETRY_DELAY_MS = 3_000;
 
 @Injectable()
 export class PushNotificationsService {
@@ -45,6 +70,7 @@ export class PushNotificationsService {
     private readonly notificationJobsService: NotificationJobsService,
     private readonly pushTokensService: PushTokensService,
     private readonly firebaseAdminService: FirebaseAdminService,
+    private readonly apnsVoipService: ApnsVoipService,
   ) {}
 
   async sendNewMessage(input: SendNewMessageNotificationInput) {
@@ -64,17 +90,92 @@ export class PushNotificationsService {
     return this.processJob(job);
   }
 
+  async sendIncomingCall(input: SendIncomingCallNotificationInput) {
+    const expiresAt = new Date(input.expiresAt);
+    const job = await this.notificationJobsService.createJob({
+      type: 'INCOMING_CALL',
+      recipientUserId: input.recipientUserId,
+      actorUserId: input.initiatorId,
+      conversationId: input.conversationId,
+      callId: input.callId,
+      title: input.initiatorDisplayName,
+      body: 'Incoming voice call',
+      expiresAt,
+      dataJson: {
+        type: 'INCOMING_CALL',
+        callId: input.callId,
+        callType: input.callType,
+        recipientUserId: input.recipientUserId,
+        initiatorId: input.initiatorId,
+        initiatorDisplayName: input.initiatorDisplayName,
+        initiatorAvatarUrl: input.initiatorAvatarUrl,
+        ringTimeoutMs: input.ringTimeoutMs,
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+
+    return this.processJob(job);
+  }
+
+  async sendCallStateUpdate(input: SendCallStateUpdateInput) {
+    const uniqueRecipientIds = [...new Set(input.recipientUserIds)];
+    const tokens = (
+      await Promise.all(
+        uniqueRecipientIds.map((userId) =>
+          this.pushTokensService.findActiveByUserId(userId, {
+            provider: 'fcm',
+          }),
+        ),
+      )
+    ).flat();
+
+    if (tokens.length === 0) {
+      return {
+        status: 'skipped',
+        sendResult: {
+          totalTokens: 0,
+          sentCount: 0,
+          failedCount: 0,
+          results: [],
+        } satisfies SendNotificationResult,
+      };
+    }
+
+    const results = await Promise.all(
+      tokens.map((token) => this.sendCallStateUpdateToToken(token, input)),
+    );
+
+    return {
+      status: results.some((result) => result.ok) ? 'sent' : 'failed',
+      sendResult: this.buildSendResult(results),
+    };
+  }
+
   async retryJob(job: NotificationJobRecord) {
     return this.processJob(job);
   }
 
   private async processJob(job: NotificationJobRecord) {
+    switch (job.type) {
+      case 'NEW_MESSAGE':
+        return this.processNewMessageJob(job);
+      case 'INCOMING_CALL':
+        return this.processIncomingCallJob(job);
+      default:
+        throw new Error(`Unsupported notification job type: ${job.type}`);
+    }
+  }
+
+  private async processNewMessageJob(job: NotificationJobRecord) {
     const processingJob = await this.notificationJobsService.markProcessing(
       job.id,
     );
 
     const tokens = await this.pushTokensService.findActiveByUserId(
       processingJob.recipientUserId,
+      {
+        provider: 'fcm',
+      },
     );
 
     if (tokens.length === 0) {
@@ -87,7 +188,6 @@ export class PushNotificationsService {
         jobId: processingJob.id,
         status: 'skipped',
         sendResult: {
-          recipientUserId: processingJob.recipientUserId,
           totalTokens: 0,
           sentCount: 0,
           failedCount: 0,
@@ -97,36 +197,114 @@ export class PushNotificationsService {
     }
 
     const results = await Promise.all(
-      tokens.map((token) => this.sendToToken(processingJob, token)),
+      tokens.map((token) => this.sendNewMessageToToken(processingJob, token)),
     );
 
-    const sentCount = results.filter((result) => result.ok).length;
-    const failedCount = results.length - sentCount;
+    const sendResult = this.buildSendResult(results);
 
-    if (sentCount > 0) {
+    if (sendResult.sentCount > 0) {
       await this.notificationJobsService.markSent(processingJob.id);
     } else {
       await this.notificationJobsService.markFailed(
         processingJob.id,
         this.buildFailureSummary(results),
-        this.buildNextAttemptAt(processingJob.attemptCount),
+        this.buildNextAttemptAt(processingJob),
       );
     }
 
     return {
       jobId: processingJob.id,
-      status: sentCount > 0 ? 'sent' : 'failed',
-      sendResult: {
-        recipientUserId: processingJob.recipientUserId,
-        totalTokens: tokens.length,
-        sentCount,
-        failedCount,
-        results,
-      } satisfies SendNotificationResult,
+      status: sendResult.sentCount > 0 ? 'sent' : 'failed',
+      sendResult,
     };
   }
 
-  private async sendToToken(
+  private async processIncomingCallJob(job: NotificationJobRecord) {
+    const processingJob = await this.notificationJobsService.markProcessing(
+      job.id,
+    );
+
+    if (
+      processingJob.expiresAt &&
+      processingJob.expiresAt.getTime() <= Date.now()
+    ) {
+      await this.notificationJobsService.markSkipped(
+        processingJob.id,
+        'Incoming call expired before delivery',
+      );
+
+      return {
+        jobId: processingJob.id,
+        status: 'skipped',
+        sendResult: {
+          totalTokens: 0,
+          sentCount: 0,
+          failedCount: 0,
+          results: [],
+        } satisfies SendNotificationResult,
+      };
+    }
+
+    const [androidTokens, voipTokens] = await Promise.all([
+      this.pushTokensService.findActiveByUserId(processingJob.recipientUserId, {
+        provider: 'fcm',
+        platform: 'android',
+      }),
+      this.pushTokensService.findActiveByUserId(processingJob.recipientUserId, {
+        provider: 'apns_voip',
+        platform: 'ios',
+      }),
+    ]);
+
+    const tokens = [...androidTokens, ...voipTokens];
+
+    if (tokens.length === 0) {
+      await this.notificationJobsService.markSkipped(
+        processingJob.id,
+        'No active incoming-call delivery tokens for recipient user',
+      );
+
+      return {
+        jobId: processingJob.id,
+        status: 'skipped',
+        sendResult: {
+          totalTokens: 0,
+          sentCount: 0,
+          failedCount: 0,
+          results: [],
+        } satisfies SendNotificationResult,
+      };
+    }
+
+    const payload = this.readIncomingCallPayload(processingJob);
+    const results = await Promise.all(
+      tokens.map((token) =>
+        token.provider === 'apns_voip'
+          ? this.sendIncomingCallToVoipToken(processingJob, token, payload)
+          : this.sendIncomingCallToAndroidToken(processingJob, token, payload),
+      ),
+    );
+
+    const sendResult = this.buildSendResult(results);
+
+    if (sendResult.sentCount > 0) {
+      await this.notificationJobsService.markSent(processingJob.id);
+    } else {
+      await this.notificationJobsService.markFailed(
+        processingJob.id,
+        this.buildFailureSummary(results),
+        this.buildNextAttemptAt(processingJob),
+      );
+    }
+
+    return {
+      jobId: processingJob.id,
+      status: sendResult.sentCount > 0 ? 'sent' : 'failed',
+      sendResult,
+    };
+  }
+
+  private async sendNewMessageToToken(
     job: NotificationJobRecord,
     token: ActivePushToken,
   ): Promise<PushTokenSendResult> {
@@ -147,32 +325,159 @@ export class PushNotificationsService {
 
       return {
         tokenId: token.id,
+        provider: token.provider,
         platform: token.platform,
         ok: true,
         messageId,
       };
     } catch (error) {
-      const errorCode = this.readErrorCode(error);
-      const errorMessage = this.readErrorMessage(error);
+      return this.buildFailedTokenResult(token, error);
+    }
+  }
 
-      if (this.shouldDeactivateToken(errorCode)) {
-        await this.pushTokensService.deactivateById(token.id);
-      }
+  private async sendIncomingCallToAndroidToken(
+    job: NotificationJobRecord,
+    token: ActivePushToken,
+    payload: IncomingCallPayload,
+  ): Promise<PushTokenSendResult> {
+    try {
+      const messageId = await this.firebaseAdminService.sendToToken({
+        token: token.token,
+        includeNotification: false,
+        data: {
+          type: 'INCOMING_CALL',
+          notificationJobId: job.id,
+          recipientUserId: job.recipientUserId,
+          conversationId: job.conversationId,
+          callId: job.callId,
+          actorUserId: job.actorUserId,
+          callType: payload.callType,
+          initiatorDisplayName: payload.initiatorDisplayName,
+          initiatorAvatarUrl: payload.initiatorAvatarUrl,
+          ringTimeoutMs: payload.ringTimeoutMs,
+          expiresAt: payload.expiresAt,
+        },
+      });
 
       return {
         tokenId: token.id,
+        provider: token.provider,
         platform: token.platform,
-        ok: false,
-        errorCode,
-        errorMessage,
+        ok: true,
+        messageId,
       };
+    } catch (error) {
+      return this.buildFailedTokenResult(token, error);
     }
+  }
+
+  private async sendIncomingCallToVoipToken(
+    job: NotificationJobRecord,
+    token: ActivePushToken,
+    payload: IncomingCallPayload,
+  ): Promise<PushTokenSendResult> {
+    try {
+      if (
+        !token.bundleId ||
+        (token.deliveryEnvironment !== 'development' &&
+          token.deliveryEnvironment !== 'production')
+      ) {
+        throw new Error('Missing bundleId or deliveryEnvironment for APNs VoIP token');
+      }
+
+      await this.apnsVoipService.sendVoipPush({
+        token: token.token,
+        bundleId: token.bundleId,
+        deliveryEnvironment: token.deliveryEnvironment,
+        expiresAt: job.expiresAt ?? undefined,
+        payload: {
+          aps: {
+            'content-available': 1,
+          },
+          type: 'INCOMING_CALL',
+          notificationJobId: job.id,
+          recipientUserId: job.recipientUserId,
+          conversationId: job.conversationId,
+          callId: job.callId,
+          actorUserId: job.actorUserId,
+          callType: payload.callType,
+          initiatorDisplayName: payload.initiatorDisplayName,
+          initiatorAvatarUrl: payload.initiatorAvatarUrl,
+          ringTimeoutMs: payload.ringTimeoutMs,
+          expiresAt: payload.expiresAt,
+        },
+      });
+
+      return {
+        tokenId: token.id,
+        provider: token.provider,
+        platform: token.platform,
+        ok: true,
+      };
+    } catch (error) {
+      return this.buildFailedTokenResult(token, error);
+    }
+  }
+
+  private async sendCallStateUpdateToToken(
+    token: ActivePushToken,
+    input: SendCallStateUpdateInput,
+  ): Promise<PushTokenSendResult> {
+    try {
+      const messageId = await this.firebaseAdminService.sendToToken({
+        token: token.token,
+        includeNotification: false,
+        apnsContentAvailable: token.platform === 'ios',
+        data: {
+          type: 'CALL_STATE_UPDATE',
+          callId: input.callId,
+          conversationId: input.conversationId,
+          status: input.status,
+          reason: input.reason,
+          at: input.at,
+        },
+      });
+
+      return {
+        tokenId: token.id,
+        provider: token.provider,
+        platform: token.platform,
+        ok: true,
+        messageId,
+      };
+    } catch (error) {
+      return this.buildFailedTokenResult(token, error);
+    }
+  }
+
+  private async buildFailedTokenResult(
+    token: ActivePushToken,
+    error: unknown,
+  ): Promise<PushTokenSendResult> {
+    const errorCode = this.readErrorCode(error);
+    const errorMessage = this.readErrorMessage(error);
+
+    if (this.shouldDeactivateToken(errorCode)) {
+      await this.pushTokensService.deactivateById(token.id);
+    }
+
+    return {
+      tokenId: token.id,
+      provider: token.provider,
+      platform: token.platform,
+      ok: false,
+      errorCode,
+      errorMessage,
+    };
   }
 
   private shouldDeactivateToken(errorCode?: string) {
     return (
       errorCode === 'messaging/registration-token-not-registered' ||
-      errorCode === 'messaging/invalid-registration-token'
+      errorCode === 'messaging/invalid-registration-token' ||
+      errorCode === 'apns/BadDeviceToken' ||
+      errorCode === 'apns/DeviceTokenNotForTopic' ||
+      errorCode === 'apns/Unregistered'
     );
   }
 
@@ -206,11 +511,88 @@ export class PushNotificationsService {
       .join('; ');
   }
 
-  private buildNextAttemptAt(attemptCount: number) {
-    if (attemptCount >= MAX_NOTIFICATION_ATTEMPTS) {
-      return undefined;
+  private buildNextAttemptAt(job: NotificationJobRecord) {
+    switch (job.type) {
+      case 'NEW_MESSAGE':
+        if (job.attemptCount >= MAX_MESSAGE_NOTIFICATION_ATTEMPTS) {
+          return undefined;
+        }
+
+        return new Date(Date.now() + MESSAGE_RETRY_DELAY_MS);
+      case 'INCOMING_CALL': {
+        if (
+          job.attemptCount >= MAX_CALL_NOTIFICATION_ATTEMPTS ||
+          !job.expiresAt
+        ) {
+          return undefined;
+        }
+
+        const nextAttemptAt = new Date(Date.now() + CALL_RETRY_DELAY_MS);
+
+        if (nextAttemptAt.getTime() >= job.expiresAt.getTime()) {
+          return undefined;
+        }
+
+        return nextAttemptAt;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private buildSendResult(results: PushTokenSendResult[]): SendNotificationResult {
+    const sentCount = results.filter((result) => result.ok).length;
+
+    return {
+      totalTokens: results.length,
+      sentCount,
+      failedCount: results.length - sentCount,
+      results,
+    };
+  }
+
+  private readIncomingCallPayload(job: NotificationJobRecord): IncomingCallPayload {
+    const data = this.readDataJson(job.dataJson);
+
+    return {
+      callType:
+        data.callType === 'VIDEO'
+          ? 'VIDEO'
+          : 'VOICE',
+      initiatorDisplayName:
+        typeof data.initiatorDisplayName === 'string' &&
+        data.initiatorDisplayName.trim()
+          ? data.initiatorDisplayName
+          : job.title,
+      initiatorAvatarUrl:
+        typeof data.initiatorAvatarUrl === 'string' &&
+        data.initiatorAvatarUrl.trim()
+          ? data.initiatorAvatarUrl
+          : undefined,
+      ringTimeoutMs:
+        typeof data.ringTimeoutMs === 'number' && Number.isFinite(data.ringTimeoutMs)
+          ? data.ringTimeoutMs
+          : 30_000,
+      expiresAt:
+        typeof data.expiresAt === 'string' && data.expiresAt.trim()
+          ? data.expiresAt
+          : (job.expiresAt?.toISOString() ?? new Date().toISOString()),
+    };
+  }
+
+  private readDataJson(dataJson: Prisma.JsonValue | null): Record<string, unknown> {
+    if (dataJson && typeof dataJson === 'object' && !Array.isArray(dataJson)) {
+      return dataJson as Record<string, unknown>;
     }
 
-    return new Date(Date.now() + RETRY_DELAY_MS);
+    return {};
   }
 }
+
+type IncomingCallPayload = {
+  callType: 'VOICE' | 'VIDEO';
+  initiatorDisplayName: string;
+  initiatorAvatarUrl?: string;
+  ringTimeoutMs: number;
+  expiresAt: string;
+};

@@ -4,14 +4,16 @@ import { Prisma } from '@prisma/notification-client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type CreateNotificationJobInput = {
-  type: 'NEW_MESSAGE';
+  type: 'NEW_MESSAGE' | 'INCOMING_CALL';
   recipientUserId: string;
   actorUserId?: string;
   conversationId?: string;
   messageId?: string;
+  callId?: string;
   title: string;
   body: string;
   dataJson?: Prisma.InputJsonValue;
+  expiresAt?: Date;
 };
 
 export type NotificationJobRecord = Prisma.NotificationJobGetPayload<{
@@ -22,8 +24,11 @@ export type NotificationJobRecord = Prisma.NotificationJobGetPayload<{
     actorUserId: true;
     conversationId: true;
     messageId: true;
+    callId: true;
     title: true;
     body: true;
+    dataJson: true;
+    expiresAt: true;
     status: true;
     attemptCount: true;
     nextAttemptAt: true;
@@ -42,9 +47,11 @@ export class NotificationJobsService {
         actorUserId: input.actorUserId,
         conversationId: input.conversationId,
         messageId: input.messageId,
+        callId: input.callId,
         title: input.title,
         body: input.body,
         dataJson: input.dataJson,
+        expiresAt: input.expiresAt,
         status: 'pending',
       },
     });
@@ -99,20 +106,37 @@ export class NotificationJobsService {
   }
 
   async findRetryableJobs(limit: number): Promise<NotificationJobRecord[]> {
+    const now = new Date();
+
     return this.prisma.notificationJob.findMany({
       where: {
-        OR: [
+        AND: [
           {
-            status: 'pending',
+            OR: [
+              {
+                status: 'pending',
+              },
+              {
+                status: 'failed',
+                nextAttemptAt: {
+                  lte: now,
+                },
+              },
+            ],
           },
           {
-            status: 'failed',
-            nextAttemptAt: {
-              lte: new Date(),
-            },
+            OR: [
+              {
+                expiresAt: null,
+              },
+              {
+                expiresAt: {
+                  gt: now,
+                },
+              },
+            ],
           },
         ],
-        type: 'NEW_MESSAGE',
       },
       select: {
         id: true,
@@ -121,8 +145,11 @@ export class NotificationJobsService {
         actorUserId: true,
         conversationId: true,
         messageId: true,
+        callId: true,
         title: true,
         body: true,
+        dataJson: true,
+        expiresAt: true,
         status: true,
         attemptCount: true,
         nextAttemptAt: true,

@@ -10,7 +10,7 @@ export class LogoutUseCase {
     private readonly roleCache: IUserRoleRepository,
   ) {}
 
-  async execute(token: string): Promise<void> {
+  async execute(token: string): Promise<{ message: string; userId?: string }> {
     const storedToken = await this.authRepository.findRefreshToken(token);
 
     if (storedToken) {
@@ -21,6 +21,13 @@ export class LogoutUseCase {
       if (storedToken.userId) {
         await this.roleCache.invalidateUserRoles(storedToken.userId);
       }
+
+      return {
+        message: 'Logged out successfully',
+        userId: storedToken.userId ?? undefined,
+      };
     }
+
+    return { message: 'Logged out successfully' };
   }
 }
