@@ -36,6 +36,7 @@ export class NotificationServiceAdapter {
       await this.post('/notifications/internal/incoming-call', {
         recipientUserId: payload.recipientUserId,
         initiatorId: payload.initiatorId,
+        targetUserId: payload.targetUserId,
         conversationId: payload.conversationId,
         callId: payload.callId,
         callType: payload.callType,

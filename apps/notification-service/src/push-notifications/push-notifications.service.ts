@@ -24,6 +24,7 @@ export type SendNewMessageNotificationInput = {
 export type SendIncomingCallNotificationInput = {
   recipientUserId: string;
   initiatorId: string;
+  targetUserId: string;
   conversationId: string;
   callId: string;
   callType: 'VOICE' | 'VIDEO';
@@ -109,6 +110,7 @@ export class PushNotificationsService {
         callType: input.callType,
         recipientUserId: input.recipientUserId,
         initiatorId: input.initiatorId,
+        targetUserId: input.targetUserId,
         initiatorDisplayName: input.initiatorDisplayName,
         initiatorAvatarUrl: input.initiatorAvatarUrl,
         ringTimeoutMs: input.ringTimeoutMs,
@@ -350,6 +352,8 @@ export class PushNotificationsService {
           type: 'INCOMING_CALL',
           notificationJobId: job.id,
           recipientUserId: job.recipientUserId,
+          initiatorId: payload.initiatorId,
+          targetUserId: payload.targetUserId,
           conversationId: job.conversationId,
           callId: job.callId,
           actorUserId: job.actorUserId,
@@ -393,6 +397,8 @@ export class PushNotificationsService {
           type: 'INCOMING_CALL',
           notificationJobId: job.id,
           recipientUserId: job.recipientUserId,
+          initiatorId: payload.initiatorId,
+          targetUserId: payload.targetUserId,
           conversationId: job.conversationId,
           callId: job.callId,
           actorUserId: job.actorUserId,
@@ -569,6 +575,14 @@ export class PushNotificationsService {
     const data = this.readDataJson(job.dataJson);
 
     return {
+      initiatorId:
+        typeof data.initiatorId === 'string' && data.initiatorId.trim()
+          ? data.initiatorId
+          : (job.actorUserId ?? ''),
+      targetUserId:
+        typeof data.targetUserId === 'string' && data.targetUserId.trim()
+          ? data.targetUserId
+          : job.recipientUserId,
       callType:
         data.callType === 'VIDEO'
           ? 'VIDEO'
@@ -604,6 +618,8 @@ export class PushNotificationsService {
 }
 
 type IncomingCallPayload = {
+  initiatorId: string;
+  targetUserId: string;
   callType: 'VOICE' | 'VIDEO';
   initiatorDisplayName: string;
   initiatorAvatarUrl?: string;

@@ -23,6 +23,7 @@ const newMessageNotificationSchema = z.object({
 const incomingCallNotificationSchema = z.object({
   recipientUserId: z.string().uuid(),
   initiatorId: z.string().min(1),
+  targetUserId: z.string().min(1),
   conversationId: z.string().min(1),
   callId: z.string().min(1),
   callType: z.enum(['VOICE', 'VIDEO']),
