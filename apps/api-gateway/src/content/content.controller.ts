@@ -3,6 +3,7 @@ import { CreateReelShareLinkDto } from '@common/content/dtos/create-reel-share-l
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { GetReelContextQueryDto } from '@common/content/dtos/get-reel-context.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
+import { RecommendedReelsQueryDto } from '@common/content/dtos/recommended-reels-query.dto';
 import { ShareReelDto } from '@common/content/dtos/share-reel.dto';
 import { TrackReelEventsDto } from '@common/content/dtos/track-reel-events.dto';
 import { UpdateReelDto } from '@common/content/dtos/update-reel.dto';
@@ -184,6 +185,32 @@ export class ContentController {
     );
 
     return { success: true };
+  }
+
+  @Get('reels/recommended')
+  @ApiOperation({ summary: 'Get personalized recommended reels' })
+  async getRecommendedReels(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: RecommendedReelsQueryDto,
+  ): Promise<PaginatedReels<ReelFeedListItem>> {
+    const result = await lastValueFrom(
+      this.contentClient
+        .send<{
+          items: Reel[];
+          nextCursor: string | null;
+        }>('content.get_recommended_reels', {
+          viewerId: request.user!.id,
+          limit: query.limit,
+          cursor: query.cursor,
+          excludeRecentlySeen: query.excludeRecentlySeen,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return {
+      items: await this.enrichFeedItems(result.items),
+      nextCursor: result.nextCursor,
+    };
   }
 
   @Get('reels/:id')

@@ -8,6 +8,7 @@ import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-case
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
+import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
@@ -47,6 +48,7 @@ export class ContentController {
   constructor(
     private readonly createReelUseCase: CreateReelUseCase,
     private readonly listReelsUseCase: ListReelsUseCase,
+    private readonly getRecommendedReelsUseCase: GetRecommendedReelsUseCase,
     private readonly getReelUseCase: GetReelUseCase,
     private readonly getProfileReelContextUseCase: GetProfileReelContextUseCase,
     private readonly incrementReelViewUseCase: IncrementReelViewUseCase,
@@ -607,20 +609,71 @@ export class ContentController {
     }));
   }
 
+  @MessagePattern('content.get_recommended_reels')
+  async getRecommendedReels(
+    @Payload()
+    data: {
+      viewerId: string;
+      limit?: number;
+      cursor?: { createdAt: string; id: string };
+      excludeRecentlySeen?: boolean;
+    },
+  ) {
+    if (
+      !data ||
+      typeof data.viewerId !== 'string' ||
+      data.viewerId.trim().length === 0
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for recommended reels',
+      });
+    }
+
+    try {
+      const result = await this.getRecommendedReelsUseCase.execute({
+        viewerId: data.viewerId.trim(),
+        limit: data.limit,
+        cursor: data.cursor
+          ? {
+              createdAt: new Date(data.cursor.createdAt),
+              id: data.cursor.id,
+            }
+          : undefined,
+        excludeRecentlySeen: data.excludeRecentlySeen,
+      });
+
+      return {
+        items: result.items.map((item) => this.toSerializable(item)),
+        nextCursor: this.serializeCursor(result.nextCursor),
+      };
+    } catch (error: unknown) {
+      const err = error as Error;
+
+      throw new RpcException({
+        statusCode: 500,
+        message: `Recommended Reels Error: ${err.message}`,
+      });
+    }
+  }
+
   @MessagePattern('content.list_reels')
   async listReels(
     @Payload()
     data: {
       userId?: string;
+      viewerId?: string;
       visibility?: 'public' | 'private';
       limit?: number;
       cursor?: { createdAt: string; id: string };
       onlyPublished?: boolean;
+      ranked?: boolean;
     },
   ) {
     try {
       const query: ReelListQuery = {
         userId: data.userId,
+        viewerId: data.viewerId,
         visibility: data.visibility,
         limit: data.limit ?? 20,
         cursor: data.cursor
@@ -630,6 +683,7 @@ export class ContentController {
             }
           : undefined,
         onlyPublished: data.onlyPublished,
+        ranked: data.ranked,
       };
 
       const result = await this.listReelsUseCase.execute(query);

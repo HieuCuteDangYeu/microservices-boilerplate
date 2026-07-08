@@ -10,6 +10,7 @@ import { PrismaClient } from '@prisma/content-client';
 import { Reel } from '../../domain/entities/reel.entity';
 import {
   IContentRepository,
+  RecommendedReelsQuery,
   ReelChunkBackfillCursor,
   ReelChunkBackfillPage,
   ReelCursor,
@@ -892,6 +893,376 @@ export class ContentRepository
         };
       })
       .sort((left, right) => right.score - left.score);
+  }
+
+  private normalizeRecommendationTag(tag: string): string {
+    return tag.trim().toLowerCase().replace(/^#/, '');
+  }
+
+  private stableRecommendationNoise(id: string): number {
+    let hash = 0;
+
+    for (let index = 0; index < id.length; index += 1) {
+      hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
+    }
+
+    return (hash % 1000) / 1000;
+  }
+
+  private getReelAgeHours(createdAt: Date): number {
+    return Math.max(0, (Date.now() - createdAt.getTime()) / (1000 * 60 * 60));
+  }
+
+  private isPositiveRecommendationEvent(event: {
+    eventType: string;
+    percentageWatched?: number | null;
+    completed?: boolean | null;
+    replayed?: boolean | null;
+  }): boolean {
+    return (
+      event.eventType === 'COMPLETE' ||
+      event.eventType === 'REPLAY' ||
+      event.completed === true ||
+      event.replayed === true ||
+      (event.percentageWatched ?? 0) >= 70
+    );
+  }
+
+  private isNegativeRecommendationEvent(event: {
+    eventType: string;
+    skipped?: boolean | null;
+    percentageWatched?: number | null;
+  }): boolean {
+    return (
+      event.eventType === 'SKIP' ||
+      event.skipped === true ||
+      ((event.percentageWatched ?? 100) < 15 &&
+        (event.eventType === 'WATCH_END' ||
+          event.eventType === 'WATCH_PROGRESS'))
+    );
+  }
+
+  async listRecommendedReels(query: RecommendedReelsQuery): Promise<{
+    items: Reel[];
+    nextCursor: ReelCursor | null;
+  }> {
+    const viewerId = query.viewerId?.trim();
+
+    if (!viewerId) {
+      return {
+        items: [],
+        nextCursor: null,
+      };
+    }
+
+    const limit = Math.min(Math.max(query.limit ?? 20, 1), 50);
+    const candidateLimit = Math.min(Math.max(limit * 10, 80), 300);
+
+    const where: Record<string, unknown> = {
+      visibility: 'public',
+      status: 'COMPLETED',
+    };
+
+    if (query.cursor) {
+      where['OR'] = [
+        { createdAt: { lt: query.cursor.createdAt } },
+        {
+          createdAt: query.cursor.createdAt,
+          id: { gt: query.cursor.id },
+        },
+      ];
+    }
+
+    const candidateRecords = await this.reel.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: candidateLimit + 1,
+      select: this.reelListSelect,
+    });
+
+    const hasMore = candidateRecords.length > candidateLimit;
+    const pageCandidates = candidateRecords.slice(0, candidateLimit);
+
+    if (pageCandidates.length === 0) {
+      return {
+        items: [],
+        nextCursor: null,
+      };
+    }
+
+    const candidateIds = pageCandidates.map((record) => record.id);
+    const eventSince = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const recentSince = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [candidateEvents, profileEvents] = await Promise.all([
+      this.reelViewEvent.findMany({
+        where: {
+          userId: viewerId,
+          reelId: { in: candidateIds },
+          createdAt: { gte: eventSince },
+        },
+        select: {
+          reelId: true,
+          eventType: true,
+          watchMs: true,
+          percentageWatched: true,
+          skipped: true,
+          completed: true,
+          replayed: true,
+          createdAt: true,
+        },
+      }),
+
+      this.reelViewEvent.findMany({
+        where: {
+          userId: viewerId,
+          createdAt: { gte: eventSince },
+          OR: [
+            { eventType: { in: ['COMPLETE', 'REPLAY', 'WATCH_END'] } },
+            { completed: true },
+            { replayed: true },
+            { percentageWatched: { gte: 70 } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+        select: {
+          eventType: true,
+          percentageWatched: true,
+          skipped: true,
+          completed: true,
+          replayed: true,
+          reel: {
+            select: {
+              userId: true,
+              tags: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const statsByReel = new Map<
+      string,
+      {
+        impressionCount: number;
+        skipCount: number;
+        completeCount: number;
+        replayCount: number;
+        totalWatchMs: number;
+        maxPercentageWatched: number;
+        latestSeenAt: number;
+        recentlySeen: boolean;
+      }
+    >();
+
+    for (const event of candidateEvents) {
+      const current = statsByReel.get(event.reelId) ?? {
+        impressionCount: 0,
+        skipCount: 0,
+        completeCount: 0,
+        replayCount: 0,
+        totalWatchMs: 0,
+        maxPercentageWatched: 0,
+        latestSeenAt: 0,
+        recentlySeen: false,
+      };
+
+      if (
+        event.eventType === 'IMPRESSION' ||
+        event.eventType === 'WATCH_START'
+      ) {
+        current.impressionCount += 1;
+      }
+
+      if (this.isNegativeRecommendationEvent(event)) {
+        current.skipCount += 1;
+      }
+
+      if (event.eventType === 'COMPLETE' || event.completed === true) {
+        current.completeCount += 1;
+      }
+
+      if (event.eventType === 'REPLAY' || event.replayed === true) {
+        current.replayCount += 1;
+      }
+
+      current.totalWatchMs += event.watchMs ?? 0;
+      current.maxPercentageWatched = Math.max(
+        current.maxPercentageWatched,
+        event.percentageWatched ?? 0,
+      );
+      current.latestSeenAt = Math.max(
+        current.latestSeenAt,
+        event.createdAt.getTime(),
+      );
+      current.recentlySeen =
+        current.recentlySeen || event.createdAt >= recentSince;
+
+      statsByReel.set(event.reelId, current);
+    }
+
+    const tagAffinity = new Map<string, number>();
+    const creatorAffinity = new Map<string, number>();
+
+    for (const event of profileEvents) {
+      if (!this.isPositiveRecommendationEvent(event)) {
+        continue;
+      }
+
+      const reel = event.reel;
+
+      if (!reel) {
+        continue;
+      }
+
+      const eventWeight =
+        event.eventType === 'REPLAY' || event.replayed === true
+          ? 1.5
+          : event.eventType === 'COMPLETE' || event.completed === true
+            ? 1.2
+            : 1.0;
+
+      creatorAffinity.set(
+        reel.userId,
+        (creatorAffinity.get(reel.userId) ?? 0) + eventWeight,
+      );
+
+      for (const rawTag of reel.tags ?? []) {
+        const tag = this.normalizeRecommendationTag(rawTag);
+
+        if (!tag) {
+          continue;
+        }
+
+        tagAffinity.set(tag, (tagAffinity.get(tag) ?? 0) + eventWeight);
+      }
+    }
+
+    const maxTagAffinity = Math.max(1, ...Array.from(tagAffinity.values()));
+    const maxCreatorAffinity = Math.max(
+      1,
+      ...Array.from(creatorAffinity.values()),
+    );
+
+    const scored = pageCandidates
+      .map((record) => {
+        const reel = this.toDomain(record);
+        const stats = statsByReel.get(reel.id);
+        const ageHours = this.getReelAgeHours(reel.createdAt);
+
+        const freshnessScore = 1 / (1 + ageHours / 72);
+
+        const popularityScore = Math.min(
+          Math.log(Number(reel.viewCount ?? 0) + 1) / Math.log(5000),
+          1,
+        );
+
+        const tagScore = Math.min(
+          1,
+          (reel.tags ?? []).reduce((sum, rawTag) => {
+            const tag = this.normalizeRecommendationTag(rawTag);
+            return sum + (tagAffinity.get(tag) ?? 0);
+          }, 0) / maxTagAffinity,
+        );
+
+        const creatorScore = Math.min(
+          1,
+          (creatorAffinity.get(reel.userId) ?? 0) / maxCreatorAffinity,
+        );
+
+        const replayBoost = stats?.replayCount
+          ? Math.min(0.25, stats.replayCount * 0.08)
+          : 0;
+
+        const watchBoost = stats?.maxPercentageWatched
+          ? Math.min(0.15, stats.maxPercentageWatched / 1000)
+          : 0;
+
+        const impressionPenalty = stats?.impressionCount
+          ? Math.min(0.22, stats.impressionCount * 0.06)
+          : 0;
+
+        const skipPenalty = stats?.skipCount
+          ? Math.min(0.55, stats.skipCount * 0.18)
+          : 0;
+
+        const completePenalty = stats?.completeCount
+          ? Math.min(0.32, stats.completeCount * 0.12)
+          : 0;
+
+        const recentPenalty = stats?.recentlySeen ? 0.45 : 0;
+
+        const diversityNoise = this.stableRecommendationNoise(reel.id);
+
+        const score =
+          freshnessScore * 0.3 +
+          popularityScore * 0.18 +
+          tagScore * 0.25 +
+          creatorScore * 0.1 +
+          diversityNoise * 0.07 +
+          replayBoost +
+          watchBoost -
+          impressionPenalty -
+          skipPenalty -
+          completePenalty -
+          recentPenalty;
+
+        return {
+          reel,
+          score,
+          recentlySeen: stats?.recentlySeen === true,
+        };
+      })
+      .filter((item) => {
+        if (query.excludeRecentlySeen === false) {
+          return true;
+        }
+
+        return !item.recentlySeen;
+      });
+
+    const fallbackScored =
+      scored.length >= limit
+        ? scored
+        : pageCandidates.map((record) => {
+            const reel = this.toDomain(record);
+            const ageHours = this.getReelAgeHours(reel.createdAt);
+            const freshnessScore = 1 / (1 + ageHours / 72);
+            const popularityScore = Math.min(
+              Math.log(Number(reel.viewCount ?? 0) + 1) / Math.log(5000),
+              1,
+            );
+
+            return {
+              reel,
+              score:
+                freshnessScore * 0.58 +
+                popularityScore * 0.32 +
+                this.stableRecommendationNoise(reel.id) * 0.1,
+            };
+          });
+
+    fallbackScored.sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return right.reel.createdAt.getTime() - left.reel.createdAt.getTime();
+    });
+
+    const chronologicalLastRecord = pageCandidates[pageCandidates.length - 1];
+
+    return {
+      items: fallbackScored.slice(0, limit).map((item) => item.reel),
+      nextCursor:
+        hasMore && chronologicalLastRecord
+          ? {
+              createdAt: chronologicalLastRecord.createdAt,
+              id: chronologicalLastRecord.id,
+            }
+          : null,
+    };
   }
 
   async listReels(query: ReelListQuery): Promise<{

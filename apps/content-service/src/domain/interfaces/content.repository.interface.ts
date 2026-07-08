@@ -29,6 +29,13 @@ export interface ReelListQuery {
   ranked?: boolean;
 }
 
+export interface RecommendedReelsQuery {
+  viewerId: string;
+  limit?: number;
+  cursor?: ReelCursor;
+  excludeRecentlySeen?: boolean;
+}
+
 export interface ReelUpdateData {
   title?: string;
   description?: string;
@@ -211,6 +218,11 @@ export interface IContentRepository {
   ): Promise<void>;
 
   searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]>;
+
+  listRecommendedReels(query: RecommendedReelsQuery): Promise<{
+    items: Reel[];
+    nextCursor: ReelCursor | null;
+  }>;
 
   listReels(query: ReelListQuery): Promise<{
     items: Reel[];

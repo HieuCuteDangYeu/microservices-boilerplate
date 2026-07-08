@@ -65,6 +65,7 @@ model Reel {
   @@index([status])
   @@index([processingAttemptId])
   @@index([status, processingStartedAt])
+  @@index([status, visibility, createdAt(sort: Desc)])
 }
 
 model ReelChunk {
