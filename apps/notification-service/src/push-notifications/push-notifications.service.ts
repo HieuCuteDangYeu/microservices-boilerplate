@@ -123,15 +123,11 @@ export class PushNotificationsService {
     const uniqueRecipientIds = [...new Set(input.recipientUserIds)];
     const tokens = (
       await Promise.all(
-        uniqueRecipientIds.flatMap((userId) => [
+        uniqueRecipientIds.map((userId) =>
           this.pushTokensService.findActiveByUserId(userId, {
             provider: 'fcm',
           }),
-          this.pushTokensService.findActiveByUserId(userId, {
-            provider: 'apns_voip',
-            platform: 'ios',
-          }),
-        ]),
+        ),
       )
     ).flat();
 
@@ -423,17 +419,6 @@ export class PushNotificationsService {
     token: ActivePushToken,
     input: SendCallStateUpdateInput,
   ): Promise<PushTokenSendResult> {
-    if (token.provider === 'apns_voip') {
-      return this.sendCallStateUpdateToVoipToken(token, input);
-    }
-
-    return this.sendCallStateUpdateToFcmToken(token, input);
-  }
-
-  private async sendCallStateUpdateToFcmToken(
-    token: ActivePushToken,
-    input: SendCallStateUpdateInput,
-  ): Promise<PushTokenSendResult> {
     try {
       const messageId = await this.firebaseAdminService.sendToToken({
         token: token.token,
@@ -455,42 +440,6 @@ export class PushNotificationsService {
         platform: token.platform,
         ok: true,
         messageId,
-      };
-    } catch (error) {
-      return this.buildFailedTokenResult(token, error);
-    }
-  }
-
-  private async sendCallStateUpdateToVoipToken(
-    token: ActivePushToken,
-    input: SendCallStateUpdateInput,
-  ): Promise<PushTokenSendResult> {
-    try {
-      const voipMetadata = this.readVoipTokenMetadata(token);
-
-      await this.apnsVoipService.sendVoipPush({
-        token: token.token,
-        bundleId: voipMetadata.bundleId,
-        deliveryEnvironment: voipMetadata.deliveryEnvironment,
-        expiresAt: new Date(Date.now() + 30_000),
-        payload: {
-          aps: {
-            'content-available': 1,
-          },
-          type: 'CALL_STATE_UPDATE',
-          callId: input.callId,
-          conversationId: input.conversationId,
-          status: input.status,
-          reason: input.reason,
-          at: input.at,
-        },
-      });
-
-      return {
-        tokenId: token.id,
-        provider: token.provider,
-        platform: token.platform,
-        ok: true,
       };
     } catch (error) {
       return this.buildFailedTokenResult(token, error);
