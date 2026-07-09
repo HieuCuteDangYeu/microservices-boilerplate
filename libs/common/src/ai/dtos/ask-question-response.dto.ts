@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+export const AiRecommendedReelAuthorSchema = z.object({
+  id: z.string(),
+  username: z.string().nullable().optional(),
+  displayName: z.string().nullable().optional(),
+  avatarUrl: z.string().nullable().optional(),
+  isVerified: z.boolean().nullable().optional(),
+});
+
 export const AiRecommendedReelSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -11,18 +19,10 @@ export const AiRecommendedReelSchema = z.object({
   visibility: z.enum(['public', 'private']),
   viewCount: z.number().default(0),
   thumbnailKey: z.string().optional(),
-  streamUrl: z.string().optional(),
   thumbnailUrl: z.string().optional(),
+  streamUrl: z.string().optional(),
   createdAt: z.string(),
-  author: z
-    .object({
-      id: z.string(),
-      username: z.string().nullable(),
-      displayName: z.string().nullable(),
-      avatarUrl: z.string().nullable(),
-      isVerified: z.boolean().nullable(),
-    })
-    .optional(),
+  author: AiRecommendedReelAuthorSchema.optional(),
 });
 
 export const AskQuestionResponseSchema = z.object({

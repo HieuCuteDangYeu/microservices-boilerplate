@@ -17,6 +17,7 @@ import {
 } from '../../domain/entities/conversation.entity';
 import {
   Message,
+  MessageMetadata,
   type MessageMedia,
   type MessageReactionMap,
   type MessageReplyPreview,
@@ -51,6 +52,7 @@ interface CachedMessage {
   type: string;
   signalType: number;
   content: string;
+  metadata?: MessageMetadata;
   media?: MessageMedia;
   createdAt: string;
   isRecalled?: boolean;

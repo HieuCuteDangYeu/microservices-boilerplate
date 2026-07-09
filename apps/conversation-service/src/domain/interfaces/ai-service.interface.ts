@@ -1,4 +1,4 @@
-import { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
+import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 

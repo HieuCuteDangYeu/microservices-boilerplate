@@ -1,7 +1,7 @@
 import type {
   IContentService,
   TranscriptMatch,
-} from '@ai/domain/interfaces/content.service.interface';
+} from '@ai/domain/interfaces/content-service.interface';
 import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type {
   RagChatRouteDecision,

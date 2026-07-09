@@ -6,7 +6,7 @@ import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-
 import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
-import type { IContentService } from '@ai/domain/interfaces/content.service.interface';
+import type { IContentService } from '@ai/domain/interfaces/content-service.interface';
 import type {
   IRagChatWorkflow,
   RagChatWorkflowInput,
@@ -59,6 +59,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     private readonly createNoContextAnswerUseCase: CreateNoContextAnswerUseCase,
     private readonly buildRagCitationsUseCase: BuildRagCitationsUseCase,
     private readonly saveRagTraceUseCase: SaveRagTraceUseCase,
+
     @Inject('IContentService')
     private readonly contentService: IContentService,
   ) {}
@@ -75,6 +76,8 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       memory: input.memory,
       retrievedChunks: [],
       rerankedChunks: [],
+      recommendedReels: [],
+      suggestedQueries: [],
       citations: [],
       retryCount: 0,
       retrievalRetryCount: 0,
@@ -137,72 +140,11 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
       .addEdge('memorySelectorNode', 'finalAnswerNode')
       .addEdge('finalAnswerNode', 'reelRecommendationNode')
+      .addEdge('noContextAnswerNode', 'reelRecommendationNode')
       .addEdge('reelRecommendationNode', 'citationNode')
-      .addEdge('noContextAnswerNode', 'citationNode')
       .addEdge('citationNode', END)
 
       .compile();
-  }
-
-  private createReelRecommendationNode(nodeTimings: Record<string, number>) {
-    return async (
-      state: RagChatWorkflowState,
-    ): Promise<Partial<RagChatWorkflowState>> => {
-      const query = state.userMessage.trim();
-
-      if (!this.shouldRecommendReels(state)) {
-        return {
-          recommendedReels: [],
-          suggestedQueries: [],
-        };
-      }
-
-      const recommendedReels = await this.timed(
-        'reelRecommendationNode',
-        nodeTimings,
-        () =>
-          this.contentService.searchPublicReels({
-            query,
-            viewerId: state.userId,
-            limit: 8,
-          }),
-      );
-
-      return {
-        recommendedReels,
-        suggestedQueries: this.buildSuggestedQueries(query),
-      };
-    };
-  }
-
-  private shouldRecommendReels(state: RagChatWorkflowState): boolean {
-    const message = state.userMessage.toLowerCase();
-
-    if (
-      message.includes('recommend') ||
-      message.includes('find') ||
-      message.includes('show') ||
-      message.includes('reels') ||
-      message.includes('videos')
-    ) {
-      return true;
-    }
-
-    return state.route?.intent === 'REEL_VIDEO_QUESTION';
-  }
-
-  private buildSuggestedQueries(query: string): string[] {
-    const normalized = query.replace(/\s+/g, ' ').trim();
-
-    if (!normalized) {
-      return ['AI reels', 'food reels', 'gym motivation'];
-    }
-
-    return [
-      `${normalized} reels`,
-      `more like ${normalized}`,
-      `${normalized} creators`,
-    ].slice(0, 3);
   }
 
   private createQueryRouterNode(nodeTimings: Record<string, number>) {
@@ -217,7 +159,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       );
 
       this.logger.debug(
-        `[RagGraph] route intent=${route.intent} retrieval=${route.needsRetrieval}`,
+        `[RagGraph] route intent=${route.intent} retrieval=${route.needsRetrieval} recommendation=${route.recommendationAction.type}`,
       );
 
       return { route };
@@ -325,6 +267,69 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     };
   }
 
+  private createReelRecommendationNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const action = state.route?.recommendationAction;
+
+      if (!action || action.type === 'NONE') {
+        return {
+          recommendedReels: [],
+          suggestedQueries: [],
+        };
+      }
+
+      if (action.type === 'SUGGEST_QUERIES') {
+        return {
+          recommendedReels: [],
+          suggestedQueries: action.suggestedQueries ?? [],
+        };
+      }
+
+      const query = action.query?.trim() || state.userMessage.trim();
+
+      const recommendedReels = await this.timed(
+        'reelRecommendationNode',
+        nodeTimings,
+        async () => {
+          const searchResults = query
+            ? await this.contentService.searchPublicReels({
+                query,
+                viewerId: state.userId,
+                limit: 8,
+              })
+            : [];
+
+          const uniqueSearchResults =
+            this.dedupeRecommendedReels(searchResults);
+
+          if (
+            uniqueSearchResults.length >= action.minRelevantItems ||
+            !action.allowPersonalizedFallback
+          ) {
+            return uniqueSearchResults.slice(0, 8);
+          }
+
+          const fallback = await this.contentService.getRecommendedReels({
+            viewerId: state.userId,
+            limit: 8,
+          });
+
+          return this.dedupeRecommendedReels([
+            ...uniqueSearchResults,
+            ...fallback,
+          ]).slice(0, 8);
+        },
+      );
+
+      return {
+        recommendedReels,
+        suggestedQueries: [],
+      };
+    };
+  }
+
   private createCitationNode(nodeTimings: Record<string, number>) {
     return async (
       state: RagChatWorkflowState,
@@ -335,6 +340,22 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
       return { citations };
     };
+  }
+
+  private dedupeRecommendedReels(
+    reels: NonNullable<RagChatWorkflowState['recommendedReels']>,
+  ): NonNullable<RagChatWorkflowState['recommendedReels']> {
+    const map = new Map<string, (typeof reels)[number]>();
+
+    for (const reel of reels) {
+      if (!reel?.id || map.has(reel.id)) {
+        continue;
+      }
+
+      map.set(reel.id, reel);
+    }
+
+    return [...map.values()];
   }
 
   private routeAfterQueryRouter = (

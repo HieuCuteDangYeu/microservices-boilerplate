@@ -1,21 +1,60 @@
 import {
   IContentService,
   PublicReelSearchInput,
+  RecommendedReelsInput,
   TranscriptMatch,
-} from '@ai/domain/interfaces/content.service.interface';
-import { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
+} from '@ai/domain/interfaces/content-service.interface';
+import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
+
+interface RawReelAuthor {
+  id: string;
+  username?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  isVerified?: boolean | null;
+}
+
+interface RawContentReel {
+  id: string;
+  userId: string;
+  mediaKey: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  visibility: 'public' | 'private';
+  viewCount?: number | bigint;
+  thumbnailKey?: string;
+  thumbnailUrl?: string;
+  streamUrl?: string;
+  createdAt: string | Date;
+  author?: RawReelAuthor;
+}
+
+interface RecommendedReelsRpcResponse {
+  items?: RawContentReel[];
+  nextCursor?: string | null;
+}
 
 @Injectable()
 export class ContentServiceAdapter implements IContentService {
   private readonly logger = new Logger(ContentServiceAdapter.name);
+  private readonly cdnDomain: string;
 
   constructor(
-    @Inject('CONTENT_RMQ') private readonly contentClient: ClientProxy,
-  ) {}
+    @Inject('CONTENT_RMQ')
+    private readonly contentClient: ClientProxy,
+    private readonly configService: ConfigService,
+  ) {
+    this.cdnDomain = (
+      this.configService.get<string>('R2_PUBLIC_DOMAIN') ?? ''
+    ).replace(/\/$/, '');
+  }
 
   async searchReelContext(
     input: ReelContextSearchRequest,
@@ -31,9 +70,11 @@ export class ContentServiceAdapter implements IContentService {
       return Array.isArray(results) ? results : [];
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
+
       this.logger.error(
         `ContentServiceAdapter.searchReelContext failed: ${msg}. Returning empty context.`,
       );
+
       return [];
     }
   }
@@ -49,14 +90,14 @@ export class ContentServiceAdapter implements IContentService {
 
     try {
       const results = await firstValueFrom(
-        this.contentClient.send<AiRecommendedReel[]>('content.search_reels', {
+        this.contentClient.send<RawContentReel[]>('content.search_reels', {
           query,
           viewerId: input.viewerId,
           limit: input.limit,
         }),
       );
 
-      return Array.isArray(results) ? results : [];
+      return this.normalizeReels(results);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
 
@@ -66,5 +107,94 @@ export class ContentServiceAdapter implements IContentService {
 
       return [];
     }
+  }
+
+  async getRecommendedReels(
+    input: RecommendedReelsInput,
+  ): Promise<AiRecommendedReel[]> {
+    try {
+      const result = await firstValueFrom(
+        this.contentClient.send<RecommendedReelsRpcResponse>(
+          'content.get_recommended_reels',
+          {
+            viewerId: input.viewerId,
+            limit: input.limit,
+            excludeRecentlySeen: true,
+          },
+        ),
+      );
+
+      return this.normalizeReels(result.items ?? []);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+
+      this.logger.error(
+        `ContentServiceAdapter.getRecommendedReels failed: ${msg}. Returning empty reels.`,
+      );
+
+      return [];
+    }
+  }
+
+  private normalizeReels(reels: RawContentReel[]): AiRecommendedReel[] {
+    return reels
+      .filter((reel) => reel.id.length > 0)
+      .map((reel) => this.normalizeReel(reel));
+  }
+
+  private normalizeReel(reel: RawContentReel): AiRecommendedReel {
+    const streamUrl =
+      reel.streamUrl ??
+      (this.cdnDomain && reel.mediaKey
+        ? this.buildStreamUrl(reel.mediaKey)
+        : undefined);
+
+    const thumbnailUrl =
+      reel.thumbnailUrl ??
+      (this.cdnDomain && reel.thumbnailKey
+        ? `${this.cdnDomain}/${reel.thumbnailKey}`
+        : undefined);
+
+    return {
+      id: reel.id,
+      userId: reel.userId,
+      mediaKey: reel.mediaKey,
+      title: reel.title,
+      description: reel.description,
+      tags: reel.tags ?? [],
+      status: reel.status,
+      visibility: reel.visibility,
+      viewCount:
+        typeof reel.viewCount === 'bigint'
+          ? Number(reel.viewCount)
+          : (reel.viewCount ?? 0),
+      thumbnailKey: reel.thumbnailKey,
+      thumbnailUrl,
+      streamUrl,
+      createdAt: this.toIsoDate(reel.createdAt),
+      author: reel.author,
+    };
+  }
+
+  private toIsoDate(value: string | Date): string {
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    const parsed = new Date(value);
+
+    if (Number.isNaN(parsed.getTime())) {
+      return new Date().toISOString();
+    }
+
+    return parsed.toISOString();
+  }
+
+  private buildStreamUrl(mediaKey: string): string {
+    const extIndex = mediaKey.lastIndexOf('.');
+    const folderPath =
+      extIndex !== -1 ? mediaKey.substring(0, extIndex) : mediaKey;
+
+    return `${this.cdnDomain}/${folderPath}/master.m3u8`;
   }
 }

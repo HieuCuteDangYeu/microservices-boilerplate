@@ -152,8 +152,8 @@ export class AiController {
 
       return {
         answer: result.answer,
-        recommendedReels: result.recommendedReels,
-        suggestedQueries: result.suggestedQueries,
+        recommendedReels: result.recommendedReels ?? [],
+        suggestedQueries: result.suggestedQueries ?? [],
       };
     } catch (err: unknown) {
       const error = err as Error;

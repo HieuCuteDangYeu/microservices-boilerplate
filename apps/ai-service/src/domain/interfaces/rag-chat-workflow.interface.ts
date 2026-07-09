@@ -1,4 +1,4 @@
-import { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
+import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import type { ConversationMemoryContext } from '@common/ai/interfaces/conversation-memory.interface';
 import type { RelevantUserMemoriesContext } from '@common/ai/interfaces/user-memory.interface';
@@ -28,6 +28,25 @@ export type RagRequiredEvidence =
   | 'CONVERSATION_MEMORY'
   | 'USER_MEMORY';
 
+export type RagRecommendationAction =
+  | {
+      type: 'NONE';
+      reason: string;
+    }
+  | {
+      type: 'RECOMMEND_REELS';
+      query?: string;
+      minRelevantItems: number;
+      allowPersonalizedFallback: boolean;
+      reason: string;
+    }
+  | {
+      type: 'SUGGEST_QUERIES';
+      query?: string;
+      suggestedQueries: string[];
+      reason: string;
+    };
+
 export interface RagChatRouteDecision {
   intent: RagChatIntent;
   needsRetrieval: boolean;
@@ -37,6 +56,8 @@ export interface RagChatRouteDecision {
 
   reelQuestionType: RagReelQuestionType;
   requiredEvidence: RagRequiredEvidence[];
+
+  recommendationAction: RagRecommendationAction;
 
   reason: string;
 }
