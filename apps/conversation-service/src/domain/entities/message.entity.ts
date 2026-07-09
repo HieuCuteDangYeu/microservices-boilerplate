@@ -1,3 +1,4 @@
+import { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import { ReadStatus } from './read-status.entity';
 
 export interface MessageReaction {
@@ -50,6 +51,12 @@ export interface RecallMessageResult {
   previewContent: string;
 }
 
+export interface MessageMetadata {
+  kind?: 'velora_ai_reel_recommendations';
+  recommendedReels?: AiRecommendedReel[];
+  suggestedQueries?: string[];
+}
+
 export class Message {
   id!: string;
   conversationId!: string;
@@ -58,6 +65,7 @@ export class Message {
   signalType!: number;
   content!: string;
   media?: MessageMedia;
+  metadata?: MessageMetadata;
   registrationId?: number;
   type!: string;
   createdAt!: Date;

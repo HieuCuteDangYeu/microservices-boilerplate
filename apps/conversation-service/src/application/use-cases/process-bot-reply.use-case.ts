@@ -55,6 +55,19 @@ export class ProcessBotReplyUseCase {
           signalType: 0,
           type: 'text',
           createdAt: new Date(),
+          metadata:
+            result.recommendedReels && result.recommendedReels.length > 0
+              ? {
+                  kind: 'velora_ai_reel_recommendations',
+                  recommendedReels: result.recommendedReels,
+                  suggestedQueries: result.suggestedQueries ?? [],
+                }
+              : result.suggestedQueries && result.suggestedQueries.length > 0
+                ? {
+                    kind: 'velora_ai_reel_recommendations',
+                    suggestedQueries: result.suggestedQueries,
+                  }
+                : undefined,
         });
 
         botReply = await this.chatRepository.createMessage(botMessage);

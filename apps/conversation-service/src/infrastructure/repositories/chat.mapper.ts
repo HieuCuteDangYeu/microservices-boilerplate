@@ -6,6 +6,7 @@ import {
 import { Conversation } from '../../domain/entities/conversation.entity';
 import {
   Message,
+  MessageMetadata,
   type MessageMedia,
   type MessageReactionMap,
   type MessageReplyPreview,
@@ -16,6 +17,7 @@ export class ChatMapper {
   static toDomain(
     prismaMsg: PrismaMessage & {
       media?: Prisma.JsonValue | null;
+      metadata?: Prisma.JsonValue | null;
       readBy?: MessageReadStatus[];
       replyPreview?: Prisma.JsonValue | null;
       reactions?: Prisma.JsonValue | null;
@@ -30,6 +32,7 @@ export class ChatMapper {
       signalType: prismaMsg.signalType,
       content: prismaMsg.content,
       media: ChatMapper.toMedia(prismaMsg.media),
+      metadata: ChatMapper.toMetadata(prismaMsg.metadata),
       registrationId: prismaMsg.registrationId ?? undefined,
       createdAt: prismaMsg.createdAt,
       isRecalled: prismaMsg.isRecalled,
@@ -43,6 +46,16 @@ export class ChatMapper {
         : [],
       reactions: ChatMapper.toReactionMap(prismaMsg.reactions),
     });
+  }
+
+  private static toMetadata(
+    value: Prisma.JsonValue | null | undefined,
+  ): MessageMetadata | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value;
   }
 
   private static toReactionMap(
@@ -185,6 +198,7 @@ export class ChatMapper {
       clientMessageId: domain.clientMessageId,
       content: domain.content,
       media: domain.media,
+      metadata: domain.metadata,
       type: domain.type,
       signalType: domain.signalType,
       createdAt: domain.createdAt.toISOString(),

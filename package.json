@@ -54,7 +54,7 @@
     "migrate:friend": "cd apps/friend-service && prisma migrate dev",
     "migrate:auth": "cd apps/auth-service && prisma migrate dev",
     "migrate:payment": "cd apps/payment-service && prisma migrate dev",
-    "migrate:conversation": "cd apps/conversation-service && prisma migrate dev",
+    "migrate:conversation": "cd apps/conversation-service && prisma db push",
     "migrate:content": "cd apps/content-service && prisma migrate dev",
     "migrate:ai": "cd apps/ai-service && prisma migrate dev",
     "migrate:notification": "cd apps/notification-service && prisma migrate dev",

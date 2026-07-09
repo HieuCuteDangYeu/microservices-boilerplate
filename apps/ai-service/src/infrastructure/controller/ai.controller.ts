@@ -134,14 +134,14 @@ export class AiController {
     }
 
     try {
-      const answer: string = await this.streamChatUseCase.execute({
+      const result = await this.streamChatUseCase.execute({
         message: data.message,
         userId: data.userId,
         conversationId: data.conversationId,
         memory: data.memory,
       });
 
-      if (!answer || answer.trim() === '') {
+      if (!result.answer || result.answer.trim() === '') {
         return {
           error: {
             code: 'NO_CONTENT',
@@ -150,7 +150,11 @@ export class AiController {
         };
       }
 
-      return { answer };
+      return {
+        answer: result.answer,
+        recommendedReels: result.recommendedReels,
+        suggestedQueries: result.suggestedQueries,
+      };
     } catch (err: unknown) {
       const error = err as Error;
       console.error(`[StreamQuestion] ${error.message}`);

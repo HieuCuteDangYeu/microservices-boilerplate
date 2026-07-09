@@ -2,8 +2,15 @@ import type {
   IRagChatWorkflow,
   RagChatWorkflowInput,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+import { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import { Inject, Injectable } from '@nestjs/common';
+
+export interface StreamChatResult {
+  answer: string;
+  recommendedReels?: AiRecommendedReel[];
+  suggestedQueries?: string[];
+}
 
 @Injectable()
 export class StreamChatUseCase {
@@ -17,7 +24,7 @@ export class StreamChatUseCase {
     userId: string;
     conversationId: string;
     memory?: AiChatMemoryContext;
-  }): Promise<string> {
+  }): Promise<StreamChatResult> {
     const result = await this.ragChatWorkflow.execute({
       message: input.message,
       userId: input.userId,
@@ -25,6 +32,10 @@ export class StreamChatUseCase {
       memory: input.memory,
     } satisfies RagChatWorkflowInput);
 
-    return result.answer;
+    return {
+      answer: result.answer,
+      recommendedReels: result.recommendedReels,
+      suggestedQueries: result.suggestedQueries,
+    };
   }
 }

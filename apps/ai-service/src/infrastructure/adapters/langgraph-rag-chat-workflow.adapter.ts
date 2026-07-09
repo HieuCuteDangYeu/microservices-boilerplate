@@ -6,6 +6,7 @@ import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-
 import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
+import type { IContentService } from '@ai/domain/interfaces/content.service.interface';
 import type {
   IRagChatWorkflow,
   RagChatWorkflowInput,
@@ -13,7 +14,7 @@ import type {
   RagChatWorkflowState,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { END, START, StateGraph, StateSchema } from '@langchain/langgraph';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { z } from 'zod/v4';
 
 const RagChatStateSchema = new StateSchema({
@@ -27,6 +28,9 @@ const RagChatStateSchema = new StateSchema({
 
   retrievedChunks: z.array(z.any()).default([]),
   rerankedChunks: z.array(z.any()).default([]),
+
+  recommendedReels: z.array(z.any()).default([]),
+  suggestedQueries: z.array(z.string()).default([]),
 
   contextSufficiency: z.any().optional(),
 
@@ -55,6 +59,8 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     private readonly createNoContextAnswerUseCase: CreateNoContextAnswerUseCase,
     private readonly buildRagCitationsUseCase: BuildRagCitationsUseCase,
     private readonly saveRagTraceUseCase: SaveRagTraceUseCase,
+    @Inject('IContentService')
+    private readonly contentService: IContentService,
   ) {}
 
   async execute(input: RagChatWorkflowInput): Promise<RagChatWorkflowResult> {
@@ -82,6 +88,8 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       return {
         answer: result.answer?.trim() ?? '',
         citations: result.citations ?? [],
+        recommendedReels: result.recommendedReels ?? [],
+        suggestedQueries: result.suggestedQueries ?? [],
       };
     } finally {
       await this.saveRagTraceUseCase.execute({
@@ -106,6 +114,10 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         'noContextAnswerNode',
         this.createNoContextAnswerNode(nodeTimings),
       )
+      .addNode(
+        'reelRecommendationNode',
+        this.createReelRecommendationNode(nodeTimings),
+      )
       .addNode('citationNode', this.createCitationNode(nodeTimings))
 
       .addEdge(START, 'queryRouterNode')
@@ -124,11 +136,73 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       )
 
       .addEdge('memorySelectorNode', 'finalAnswerNode')
-      .addEdge('finalAnswerNode', 'citationNode')
+      .addEdge('finalAnswerNode', 'reelRecommendationNode')
+      .addEdge('reelRecommendationNode', 'citationNode')
       .addEdge('noContextAnswerNode', 'citationNode')
       .addEdge('citationNode', END)
 
       .compile();
+  }
+
+  private createReelRecommendationNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const query = state.userMessage.trim();
+
+      if (!this.shouldRecommendReels(state)) {
+        return {
+          recommendedReels: [],
+          suggestedQueries: [],
+        };
+      }
+
+      const recommendedReels = await this.timed(
+        'reelRecommendationNode',
+        nodeTimings,
+        () =>
+          this.contentService.searchPublicReels({
+            query,
+            viewerId: state.userId,
+            limit: 8,
+          }),
+      );
+
+      return {
+        recommendedReels,
+        suggestedQueries: this.buildSuggestedQueries(query),
+      };
+    };
+  }
+
+  private shouldRecommendReels(state: RagChatWorkflowState): boolean {
+    const message = state.userMessage.toLowerCase();
+
+    if (
+      message.includes('recommend') ||
+      message.includes('find') ||
+      message.includes('show') ||
+      message.includes('reels') ||
+      message.includes('videos')
+    ) {
+      return true;
+    }
+
+    return state.route?.intent === 'REEL_VIDEO_QUESTION';
+  }
+
+  private buildSuggestedQueries(query: string): string[] {
+    const normalized = query.replace(/\s+/g, ' ').trim();
+
+    if (!normalized) {
+      return ['AI reels', 'food reels', 'gym motivation'];
+    }
+
+    return [
+      `${normalized} reels`,
+      `more like ${normalized}`,
+      `${normalized} creators`,
+    ].slice(0, 3);
   }
 
   private createQueryRouterNode(nodeTimings: Record<string, number>) {

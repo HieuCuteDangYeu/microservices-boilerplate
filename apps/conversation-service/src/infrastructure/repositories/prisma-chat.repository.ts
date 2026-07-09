@@ -160,6 +160,9 @@ export class PrismaChatRepository implements IChatRepository {
           media: message.media
             ? (message.media as unknown as Prisma.InputJsonValue)
             : null,
+          metadata: message.metadata
+            ? (message.metadata as unknown as Prisma.InputJsonValue)
+            : null,
           registrationId: message.registrationId,
           senderId: message.senderId,
           isRecalled: false,
@@ -1320,6 +1323,7 @@ export class PrismaChatRepository implements IChatRepository {
           signalType: true;
           content: true;
           media: true;
+          metadata: true;
           registrationId: true;
           isRecalled: true;
           recalledAt: true;

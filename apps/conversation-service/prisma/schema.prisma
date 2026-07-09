@@ -60,6 +60,7 @@ model Message {
 
   content String
   media   Json?
+  metadata Json?
 
   registrationId Int? // ID thiết bị người gửi
   senderId       String

@@ -37,7 +37,11 @@ export class AiServiceAdapter implements IAiService {
         return { answer: null, error: response.error };
       }
 
-      return { answer: response.answer ?? null };
+      return {
+        answer: response.answer ?? null,
+        recommendedReels: response.recommendedReels,
+        suggestedQueries: response.suggestedQueries,
+      };
     } catch (error: unknown) {
       if (isRpcError(error)) {
         return {

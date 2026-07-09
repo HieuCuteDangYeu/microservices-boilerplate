@@ -1,3 +1,4 @@
+import { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import type { ConversationMemoryContext } from '@common/ai/interfaces/conversation-memory.interface';
 import type { RelevantUserMemoriesContext } from '@common/ai/interfaces/user-memory.interface';
@@ -100,6 +101,8 @@ export interface RagChatWorkflowInput {
 export interface RagChatWorkflowResult {
   answer: string;
   citations?: RagCitation[];
+  recommendedReels?: AiRecommendedReel[];
+  suggestedQueries?: string[];
 }
 
 export interface RagChatWorkflowState {
@@ -113,6 +116,9 @@ export interface RagChatWorkflowState {
 
   retrievedChunks: ReelContextSearchResult[];
   rerankedChunks: ReelContextSearchResult[];
+
+  recommendedReels?: AiRecommendedReel[];
+  suggestedQueries?: string[];
 
   contextSufficiency?: RagContextSufficiencyResult;
 
