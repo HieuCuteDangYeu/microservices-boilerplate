@@ -329,6 +329,7 @@ export class PrismaChatRepository implements IChatRepository {
               signalType: plain.signalType,
               content: plain.content,
               media: this.normalizeMedia(plain.media),
+              metadata: this.normalizeMetadata(plain.metadata),
               createdAt: new Date(plain.createdAt),
               isRecalled: plain.isRecalled,
               recalledAt: plain.recalledAt
@@ -337,15 +338,11 @@ export class PrismaChatRepository implements IChatRepository {
               replyToId: plain.replyToId,
               replyPreview: this.normalizeReplyPreview(plain.replyPreview),
               reactions: this.normalizeReactions(plain.reactions),
-
-              // 👇 SỬA LỖI TẠI ĐÂY
               readBy: (plain.readBy || []).map(
-                (
-                  s, // Tham số bạn đặt tên là 's'
-                ) =>
+                (s) =>
                   new ReadStatus({
                     userId: s.userId,
-                    at: new Date(s.at), // 👈 SỬA: Thay 'status.at' thành 's.at'
+                    at: new Date(s.at),
                   }),
               ),
             });
@@ -408,6 +405,16 @@ export class PrismaChatRepository implements IChatRepository {
         this.compareMessagesCanonicalNewestFirst(left, right),
       )
       .reverse();
+  }
+
+  private normalizeMetadata(
+    value: MessageMetadata | null | undefined,
+  ): MessageMetadata | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value;
   }
 
   async findMessageWindowAroundId(
