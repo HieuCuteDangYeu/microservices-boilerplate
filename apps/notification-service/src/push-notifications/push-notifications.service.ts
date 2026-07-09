@@ -125,11 +125,20 @@ export class PushNotificationsService {
     const uniqueRecipientIds = [...new Set(input.recipientUserIds)];
     const tokens = (
       await Promise.all(
-        uniqueRecipientIds.map((userId) =>
-          this.pushTokensService.findActiveByUserId(userId, {
-            provider: 'fcm',
-          }),
-        ),
+        uniqueRecipientIds.map(async (userId) => {
+          const [androidTokens, iosVoipTokens] = await Promise.all([
+            this.pushTokensService.findActiveByUserId(userId, {
+              provider: 'fcm',
+              platform: 'android',
+            }),
+            this.pushTokensService.findActiveByUserId(userId, {
+              provider: 'apns_voip',
+              platform: 'ios',
+            }),
+          ]);
+
+          return [...androidTokens, ...iosVoipTokens];
+        }),
       )
     ).flat();
 
@@ -146,7 +155,11 @@ export class PushNotificationsService {
     }
 
     const results = await Promise.all(
-      tokens.map((token) => this.sendCallStateUpdateToToken(token, input)),
+      tokens.map((token) =>
+        token.provider === 'apns_voip'
+          ? this.sendCallStateUpdateToVoipToken(token, input)
+          : this.sendCallStateUpdateToFcmToken(token, input),
+      ),
     );
 
     return {
@@ -421,7 +434,7 @@ export class PushNotificationsService {
     }
   }
 
-  private async sendCallStateUpdateToToken(
+  private async sendCallStateUpdateToFcmToken(
     token: ActivePushToken,
     input: SendCallStateUpdateInput,
   ): Promise<PushTokenSendResult> {
@@ -429,7 +442,6 @@ export class PushNotificationsService {
       const messageId = await this.firebaseAdminService.sendToToken({
         token: token.token,
         includeNotification: false,
-        apnsContentAvailable: token.platform === 'ios',
         data: {
           type: 'CALL_STATE_UPDATE',
           callId: input.callId,
@@ -452,6 +464,41 @@ export class PushNotificationsService {
     }
   }
 
+  private async sendCallStateUpdateToVoipToken(
+    token: ActivePushToken,
+    input: SendCallStateUpdateInput,
+  ): Promise<PushTokenSendResult> {
+    try {
+      const voipMetadata = this.readVoipTokenMetadata(token);
+
+      await this.apnsVoipService.sendVoipPush({
+        token: token.token,
+        bundleId: voipMetadata.bundleId,
+        deliveryEnvironment: voipMetadata.deliveryEnvironment,
+        payload: {
+          aps: {
+            'content-available': 1,
+          },
+          type: 'CALL_STATE_UPDATE',
+          callId: input.callId,
+          conversationId: input.conversationId,
+          status: input.status,
+          reason: input.reason,
+          at: input.at,
+        },
+      });
+
+      return {
+        tokenId: token.id,
+        provider: token.provider,
+        platform: token.platform,
+        ok: true,
+      };
+    } catch (error) {
+      return this.buildFailedTokenResult(token, error);
+    }
+  }
+
   private readVoipTokenMetadata(token: ActivePushToken): {
     bundleId: string;
     deliveryEnvironment: VoipDeliveryEnvironment;
@@ -461,7 +508,9 @@ export class PushNotificationsService {
       (token.deliveryEnvironment !== 'development' &&
         token.deliveryEnvironment !== 'production')
     ) {
-      throw new Error('Missing bundleId or deliveryEnvironment for APNs VoIP token');
+      throw new Error(
+        'Missing bundleId or deliveryEnvironment for APNs VoIP token',
+      );
     }
 
     return {
@@ -560,7 +609,9 @@ export class PushNotificationsService {
     }
   }
 
-  private buildSendResult(results: PushTokenSendResult[]): SendNotificationResult {
+  private buildSendResult(
+    results: PushTokenSendResult[],
+  ): SendNotificationResult {
     const sentCount = results.filter((result) => result.ok).length;
 
     return {
@@ -571,7 +622,9 @@ export class PushNotificationsService {
     };
   }
 
-  private readIncomingCallPayload(job: NotificationJobRecord): IncomingCallPayload {
+  private readIncomingCallPayload(
+    job: NotificationJobRecord,
+  ): IncomingCallPayload {
     const data = this.readDataJson(job.dataJson);
 
     return {
@@ -583,10 +636,7 @@ export class PushNotificationsService {
         typeof data.targetUserId === 'string' && data.targetUserId.trim()
           ? data.targetUserId
           : job.recipientUserId,
-      callType:
-        data.callType === 'VIDEO'
-          ? 'VIDEO'
-          : 'VOICE',
+      callType: data.callType === 'VIDEO' ? 'VIDEO' : 'VOICE',
       initiatorDisplayName:
         typeof data.initiatorDisplayName === 'string' &&
         data.initiatorDisplayName.trim()
@@ -598,7 +648,8 @@ export class PushNotificationsService {
           ? data.initiatorAvatarUrl
           : undefined,
       ringTimeoutMs:
-        typeof data.ringTimeoutMs === 'number' && Number.isFinite(data.ringTimeoutMs)
+        typeof data.ringTimeoutMs === 'number' &&
+        Number.isFinite(data.ringTimeoutMs)
           ? data.ringTimeoutMs
           : 30_000,
       expiresAt:
@@ -608,9 +659,11 @@ export class PushNotificationsService {
     };
   }
 
-  private readDataJson(dataJson: Prisma.JsonValue | null): Record<string, unknown> {
+  private readDataJson(
+    dataJson: Prisma.JsonValue | null,
+  ): Record<string, unknown> {
     if (dataJson && typeof dataJson === 'object' && !Array.isArray(dataJson)) {
-      return dataJson as Record<string, unknown>;
+      return dataJson;
     }
 
     return {};
