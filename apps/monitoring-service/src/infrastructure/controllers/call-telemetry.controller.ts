@@ -32,4 +32,19 @@ export class CallTelemetryController {
   async timeline(@Payload() payload: { callId: string }) {
     return this.telemetryService.callTimeline(payload.callId);
   }
+
+  @MessagePattern('call.telemetry.recent')
+  async recent(
+    @Payload()
+    payload: {
+      from: string;
+      to: string;
+      platform?: string;
+      osVersion?: string;
+      appVersion?: string;
+      direction?: string;
+    },
+  ) {
+    return this.telemetryService.recentCallLegs(payload);
+  }
 }

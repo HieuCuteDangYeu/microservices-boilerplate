@@ -112,6 +112,30 @@ export class CallController {
     );
   }
 
+  @Get('telemetry/calls')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Get recent call telemetry legs' })
+  async recentTelemetryCalls(@Req() request: AuthenticatedRequest) {
+    const query = request.query as {
+      from?: string;
+      to?: string;
+      platform?: string;
+      osVersion?: string;
+      appVersion?: string;
+      direction?: string;
+    };
+    if (!query.from || !query.to) {
+      throw new ForbiddenException('from and to are required');
+    }
+
+    return lastValueFrom(
+      this.monitoringClient
+        .send('call.telemetry.recent', query)
+        .pipe(timeout(5000)),
+    );
+  }
+
   private assertTelemetryRateLimit(userId: string) {
     const now = Date.now();
     const recent = (this.telemetryRequestTimesByUser.get(userId) ?? []).filter(

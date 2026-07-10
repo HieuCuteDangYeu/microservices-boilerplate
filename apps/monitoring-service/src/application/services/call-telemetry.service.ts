@@ -18,6 +18,20 @@ type TelemetryQuery = {
   direction?: string;
 };
 
+type RecentCallLeg = {
+  callId: string;
+  attemptId: string;
+  role: string | null;
+  platform: string;
+  appVersion: string;
+  direction: string | null;
+  startedAt: Date;
+  lastOccurredAt: Date;
+  controlPlaneActive: boolean;
+  mediaReady: boolean;
+  failure: { stage: string; errorCode: string | null } | null;
+};
+
 @Injectable()
 export class CallTelemetryService
   extends PrismaClient
@@ -154,6 +168,85 @@ export class CallTelemetryService
     });
   }
 
+  async recentCallLegs(query: TelemetryQuery): Promise<RecentCallLeg[]> {
+    const groups = await this.callTelemetryEvent.groupBy({
+      by: ['callId', 'attemptId', 'role', 'platform', 'appVersion', 'direction'],
+      where: {
+        ...this.toEventWhere(query),
+        callId: { not: null },
+      },
+      _min: { occurredAt: true },
+      _max: { occurredAt: true },
+      orderBy: { _max: { occurredAt: 'desc' } },
+      take: 50,
+    });
+
+    if (groups.length === 0) {
+      return [];
+    }
+
+    const events = await this.callTelemetryEvent.findMany({
+      where: {
+        ...this.toEventWhere(query),
+        OR: groups.map((group) => ({
+          callId: group.callId!,
+          attemptId: group.attemptId,
+        })),
+      },
+      select: {
+        callId: true,
+        attemptId: true,
+        role: true,
+        stage: true,
+        outcome: true,
+        errorCode: true,
+        occurredAt: true,
+        platform: true,
+        appVersion: true,
+        direction: true,
+      },
+      orderBy: { occurredAt: 'asc' },
+    });
+
+    return groups.map((group) => {
+      const legEvents = events.filter(
+        (event) =>
+          event.callId === group.callId &&
+          event.attemptId === group.attemptId &&
+          event.role === group.role &&
+          event.platform === group.platform &&
+          event.appVersion === group.appVersion &&
+          event.direction === group.direction,
+      );
+      const failure = [...legEvents]
+        .reverse()
+        .find((event) => event.outcome === 'failed');
+
+      return {
+        callId: group.callId!,
+        attemptId: group.attemptId,
+        role: group.role,
+        platform: group.platform,
+        appVersion: group.appVersion,
+        direction: group.direction,
+        startedAt: group._min.occurredAt!,
+        lastOccurredAt: group._max.occurredAt!,
+        controlPlaneActive: legEvents.some(
+          (event) =>
+            event.stage === 'control_plane_active' &&
+            event.outcome === 'succeeded',
+        ),
+        mediaReady: legEvents.some(
+          (event) =>
+            event.stage === 'media_ready' && event.outcome === 'succeeded',
+        ),
+        failure: failure
+          ? { stage: failure.stage, errorCode: failure.errorCode }
+          : null,
+      };
+    });
+  }
+
   @Cron('0 0 * * *', { timeZone: 'UTC' })
   async removeExpiredEvents() {
     await this.callTelemetryEvent.deleteMany({
@@ -165,14 +258,18 @@ export class CallTelemetryService
 
   private findEvents(query: TelemetryQuery) {
     return this.callTelemetryEvent.findMany({
-      where: {
-        occurredAt: { gte: new Date(query.from), lte: new Date(query.to) },
-        ...(query.platform ? { platform: query.platform } : {}),
-        ...(query.osVersion ? { osVersion: query.osVersion } : {}),
-        ...(query.appVersion ? { appVersion: query.appVersion } : {}),
-        ...(query.direction ? { direction: query.direction } : {}),
-      },
+      where: this.toEventWhere(query),
     });
+  }
+
+  private toEventWhere(query: TelemetryQuery) {
+    return {
+      occurredAt: { gte: new Date(query.from), lte: new Date(query.to) },
+      ...(query.platform ? { platform: query.platform } : {}),
+      ...(query.osVersion ? { osVersion: query.osVersion } : {}),
+      ...(query.appVersion ? { appVersion: query.appVersion } : {}),
+      ...(query.direction ? { direction: query.direction } : {}),
+    };
   }
 }
 
