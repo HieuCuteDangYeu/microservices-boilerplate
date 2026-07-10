@@ -43,7 +43,12 @@ export class CallTelemetryService
       if (event.telemetryToken && !token) {
         throw new BadRequestException('Invalid call telemetry token');
       }
-      const { telemetryToken: _telemetryToken, metrics, ...safeEvent } = event;
+      const {
+        telemetryToken: _telemetryToken,
+        metrics,
+        details,
+        ...safeEvent
+      } = event;
 
       return {
         eventId: safeEvent.eventId,
@@ -64,7 +69,13 @@ export class CallTelemetryService
             : 'incoming'
           : safeEvent.direction,
         errorCode: safeEvent.errorCode,
-        metricsJson: metrics,
+        metricsJson:
+          metrics || details
+            ? {
+                ...metrics,
+                ...(details ? { details } : {}),
+              }
+            : undefined,
       };
     });
 

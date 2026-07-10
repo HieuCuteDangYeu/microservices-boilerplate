@@ -1,6 +1,19 @@
 import { z } from 'zod';
 
 const finiteNumber = z.number().finite();
+const audioRouteType = z.enum([
+  'receiver',
+  'speaker',
+  'bluetooth_hfp',
+  'bluetooth_a2dp',
+  'bluetooth_le',
+  'headphones',
+  'airplay',
+  'car_audio',
+  'usb_audio',
+  'line_out',
+  'other',
+]);
 
 export const CallTelemetryEventSchema = z
   .object({
@@ -28,6 +41,22 @@ export const CallTelemetryEventSchema = z
           .max(60_000)
           .nullable()
           .optional(),
+        packetsReceivedDelta: finiteNumber.min(0).nullable().optional(),
+        bytesReceivedDelta: finiteNumber.min(0).nullable().optional(),
+      })
+      .strict()
+      .optional(),
+    details: z
+      .object({
+        audioRoute: z
+          .object({
+            category: z.enum(['play_and_record', 'other']),
+            mode: z.enum(['voice_chat', 'other']),
+            outputRouteTypes: z.array(audioRouteType).max(4),
+            inputRouteTypes: z.array(audioRouteType).max(4),
+            forcedSpeaker: z.boolean(),
+          })
+          .strict(),
       })
       .strict()
       .optional(),
