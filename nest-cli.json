@@ -88,6 +88,16 @@
         "webpack": false
       }
     },
+    "monitoring-service": {
+      "type": "application",
+      "root": "apps/monitoring-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/monitoring-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/monitoring-service/tsconfig.app.json",
+        "webpack": false
+      }
+    },
     "mail-service": {
       "type": "application",
       "root": "apps/mail-service",

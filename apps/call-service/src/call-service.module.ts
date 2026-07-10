@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { CallTelemetryTokenService } from '@common/calls/call-telemetry-token.service';
 import Redis from 'ioredis';
 
 import { InitiateCallUseCase } from './application/use-cases/initiate-call.use-case';
@@ -91,6 +92,7 @@ import { NotificationServiceAdapter } from './infrastructure/adapters/notificati
     RabbitCallEventPublisher,
     MediasoupCallMediaEngine,
     NotificationServiceAdapter,
+    CallTelemetryTokenService,
     {
       provide: 'ICallSessionRepository',
       useExisting: RedisCallSessionRepository,

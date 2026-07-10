@@ -1,0 +1,35 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/@prisma/monitoring-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("MONITORING_DATABASE_URL")
+}
+
+model CallTelemetryEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique @map("event_id")
+  attemptId   String   @map("attempt_id")
+  callId      String?  @map("call_id")
+  role        String?
+  eventType   String   @map("event_type")
+  stage       String
+  outcome     String?
+  elapsedMs   Int      @map("elapsed_ms")
+  occurredAt  DateTime @map("occurred_at")
+  platform    String
+  appVersion  String   @map("app_version")
+  osVersion   String?  @map("os_version")
+  direction   String?
+  errorCode   String?  @map("error_code")
+  metricsJson Json?    @map("metrics_json")
+  receivedAt  DateTime @default(now()) @map("received_at")
+
+  @@index([receivedAt])
+  @@index([platform, appVersion, eventType])
+  @@index([callId, occurredAt])
+  @@map("call_telemetry_events")
+}

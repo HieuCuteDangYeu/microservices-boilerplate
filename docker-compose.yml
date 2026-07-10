@@ -162,6 +162,22 @@ services:
     networks:
       - microservices-net
 
+  monitoring-service:
+    image: ${DOCKERHUB_USERNAME}/monitoring-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/monitoring-service/Dockerfile
+    restart: always
+    env_file:
+      - .env
+    expose:
+      - '3016'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
   notification-service:
     image: ${DOCKERHUB_USERNAME}/notification-service:latest
     build:

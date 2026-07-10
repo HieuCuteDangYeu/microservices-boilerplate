@@ -1,6 +1,7 @@
 import { AuthController } from '@gateway/auth/auth.controller';
 import { CallController } from '@gateway/calls/call.controller';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '@gateway/auth/guards/roles.guard';
 import { ContentController } from '@gateway/content/content.controller';
 import { PublicReelShareController } from '@gateway/content/public-reel-share.controller';
 import { ReelAuthorService } from '@gateway/content/reel-author.service';
@@ -61,6 +62,7 @@ function createRmqClientRegistration(name: string, queue: string) {
       createRmqClientRegistration('AI_SERVICE', 'ai_queue'),
       createRmqClientRegistration('FRIEND_SERVICE', 'friend_queue'),
       createRmqClientRegistration('CALL_SERVICE', 'call_queue'),
+      createRmqClientRegistration('MONITORING_SERVICE', 'monitoring_queue'),
     ]),
   ],
   controllers: [
@@ -78,6 +80,6 @@ function createRmqClientRegistration(name: string, queue: string) {
     NotificationController,
     CallController,
   ],
-  providers: [JwtAuthGuard, ReelAuthorService],
+  providers: [JwtAuthGuard, RolesGuard, ReelAuthorService],
 })
 export class ApiGatewayModule {}

@@ -28,6 +28,7 @@ import { LeaveCallUseCase } from '../../application/use-cases/leave-call.use-cas
 import { ProduceUseCase } from '../../application/use-cases/produce.use-case';
 import { RejectCallUseCase } from '../../application/use-cases/reject-call.use-case';
 import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
+import { CallTelemetryTokenService } from '@common/calls/call-telemetry-token.service';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
 import type { CallSession } from '../../domain/entities/call-session.entity';
 import type {
@@ -95,6 +96,7 @@ type CallJoinedSocketPayload = {
   rtpCapabilities: RouterRtpCapabilitiesResult;
   activeProducers: ActiveProducerResult[];
   noAnswerTimeoutMs?: number;
+  telemetryToken: string;
 };
 
 @WebSocketGateway({
@@ -141,6 +143,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Inject('ICallStateRepository')
     private readonly stateRepository: ICallStateRepository,
     @Inject('AUTH_SERVICE_RMQ') private readonly authClient: ClientProxy,
+    private readonly telemetryTokenService: CallTelemetryTokenService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -261,6 +264,10 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
       activeProducers: [],
+      telemetryToken: this.telemetryTokenService.issue(
+        result.session.callId,
+        result.role,
+      ),
       ...(result.session.callType === 'VOICE'
         ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
         : {}),
@@ -275,8 +282,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       initiatorDisplayName:
         result.session.initiatorDisplayName ?? 'Incoming call',
       initiatorAvatarUrl: result.session.initiatorAvatarUrl,
-      ringTimeoutMs:
-        result.session.ringTimeoutMs ?? this.noAnswerTimeoutMs,
+      ringTimeoutMs: result.session.ringTimeoutMs ?? this.noAnswerTimeoutMs,
       expiresAt:
         result.session.expiresAt?.toISOString() ??
         new Date(Date.now() + this.noAnswerTimeoutMs).toISOString(),
@@ -316,6 +322,10 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
       activeProducers,
+      telemetryToken: this.telemetryTokenService.issue(
+        payload.callId,
+        result.role,
+      ),
       ...(result.session.callType === 'VOICE'
         ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
         : {}),
@@ -383,6 +393,10 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       session: result.session,
       rtpCapabilities: result.rtpCapabilities,
       activeProducers: activePeerProducers,
+      telemetryToken: this.telemetryTokenService.issue(
+        payload.callId,
+        result.role,
+      ),
     });
 
     client.to(payload.callId).emit('peer_reconnected', {
@@ -571,7 +585,11 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.untrackCallId(client, payload.callId);
 
     this.server
-      .to([result.session.callId, result.session.initiatorId, result.session.targetUserId])
+      .to([
+        result.session.callId,
+        result.session.initiatorId,
+        result.session.targetUserId,
+      ])
       .emit('call_rejected', {
         callId: result.session.callId,
         userId,

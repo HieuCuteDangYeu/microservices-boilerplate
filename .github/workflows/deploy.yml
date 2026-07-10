@@ -50,6 +50,7 @@ jobs:
             processing-service
             ai-service
             call-service
+            monitoring-service
             notification-service
           )
 
