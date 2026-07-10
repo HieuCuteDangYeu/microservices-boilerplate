@@ -1,6 +1,7 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { CheckUsernameAvailabilityDto } from '@common/user/dtos/check-username-availability.dto';
 import { CreateUserDto } from '@common/user/dtos/create-user.dto';
+import { RecommendedPublicUsersQueryDto } from '@common/user/dtos/recommended-public-users-query.dto';
 import { SearchPublicUsersDto } from '@common/user/dtos/search-public-users.dto';
 import { UpdateAvatarDto } from '@common/user/dtos/update-avatar.dto';
 import { UpdateUserDto } from '@common/user/dtos/update-user.dto';
@@ -86,6 +87,25 @@ export class UserController {
           this.handleMicroserviceError(error);
         }),
       ),
+    );
+  }
+
+  @Get('recommended')
+  @ApiOperation({
+    summary: 'Get recommended public users for contact suggestions',
+  })
+  @Roles(Role.ADMIN, Role.USER)
+  async getRecommendedUsers(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: RecommendedPublicUsersQueryDto,
+  ): Promise<PublicUserProfile[]> {
+    return await lastValueFrom(
+      this.userClient
+        .send<PublicUserProfile[]>('user.get_recommended_public', {
+          limit: query.limit ?? 20,
+          excludeUserId: request.user!.id,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 

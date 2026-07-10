@@ -5,11 +5,12 @@ import { CheckUsernameAvailabilityUseCase } from '@user/application/use-cases/ch
 import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
-import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
-import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
 import { FindPublicUserByUsernameUseCase } from '@user/application/use-cases/find-public-user-by-username.use-case';
 import { FindPublicUsersByIdsUseCase } from '@user/application/use-cases/find-public-users-by-ids.use-case';
+import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
+import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
+import { GetRecommendedPublicUsersUseCase } from '@user/application/use-cases/get-recommended-public-users.use-case';
 import { SearchPublicUsersUseCase } from '@user/application/use-cases/search-public-users.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
@@ -63,6 +64,7 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     SearchPublicUsersUseCase,
     CheckUsernameAvailabilityUseCase,
     ValidateUsersListUseCase,
+    GetRecommendedPublicUsersUseCase,
     {
       provide: 'IUserRepository',
       useClass: UserRepository,

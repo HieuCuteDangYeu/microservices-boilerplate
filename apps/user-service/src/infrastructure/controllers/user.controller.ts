@@ -24,6 +24,7 @@ import { FindPublicUsersByIdsUseCase } from '@user/application/use-cases/find-pu
 import { FindUserByEmailUseCase } from '@user/application/use-cases/find-user-by-email.use-case';
 import { FindUserByIdUseCase } from '@user/application/use-cases/find-user-by-id.use-case';
 import { FindUsersByIdsUseCase } from '@user/application/use-cases/find-users-by-ids.use-case';
+import { GetRecommendedPublicUsersUseCase } from '@user/application/use-cases/get-recommended-public-users.use-case';
 import { SearchPublicUsersUseCase } from '@user/application/use-cases/search-public-users.use-case';
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
@@ -59,6 +60,7 @@ export class UserController {
     private readonly findPublicUserByUsernameUseCase: FindPublicUserByUsernameUseCase,
     private readonly searchPublicUsersUseCase: SearchPublicUsersUseCase,
     private readonly checkUsernameAvailabilityUseCase: CheckUsernameAvailabilityUseCase,
+    private readonly getRecommendedPublicUsersUseCase: GetRecommendedPublicUsersUseCase,
   ) {}
 
   @MessagePattern('create_user')
@@ -166,6 +168,20 @@ export class UserController {
       data.limit,
       data.excludeUserId,
     );
+  }
+
+  @MessagePattern('user.get_recommended_public')
+  async getRecommendedPublicUsers(
+    @Payload()
+    data: {
+      limit?: number;
+      excludeUserId?: string;
+    },
+  ) {
+    return await this.getRecommendedPublicUsersUseCase.execute({
+      limit: data?.limit,
+      excludeUserId: data?.excludeUserId,
+    });
   }
 
   @MessagePattern('user.check_username_availability')

@@ -9,6 +9,7 @@ import { User } from '../../domain/entities/user.entity';
 import {
   FindAllParams,
   IUserRepository,
+  RecommendedPublicUsersParams,
   SearchPublicUsersParams,
 } from '../../domain/interfaces/user.repository.interface';
 import { PrismaService } from '../prisma/prisma.service';
@@ -151,6 +152,33 @@ export class UserRepository implements IUserRepository {
       },
       take: params.limit,
       orderBy: [{ username: 'asc' }, { fullName: 'asc' }],
+    });
+
+    return users.map((user) => this.toDomain(user));
+  }
+
+  async findRecommendedPublicUsers(
+    params: RecommendedPublicUsersParams,
+  ): Promise<User[]> {
+    const excludedUserIds = [BOT_USER_ID, DEFAULT_ADMIN_ID];
+
+    if (params.excludeUserId) {
+      excludedUserIds.push(params.excludeUserId);
+    }
+
+    const limit = Math.min(Math.max(params.limit ?? 20, 1), 30);
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { notIn: excludedUserIds },
+        username: { not: null },
+      },
+      take: limit,
+      orderBy: [
+        { isVerified: 'desc' },
+        { createdAt: 'desc' },
+        { username: 'asc' },
+      ],
     });
 
     return users.map((user) => this.toDomain(user));

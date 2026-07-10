@@ -14,6 +14,11 @@ export interface SearchPublicUsersParams {
   excludeUserId?: string;
 }
 
+export interface RecommendedPublicUsersParams {
+  limit: number;
+  excludeUserId?: string;
+}
+
 export interface IUserRepository {
   save(user: User): Promise<User>;
   findByEmail(email: string): Promise<User | null>;
@@ -24,6 +29,9 @@ export interface IUserRepository {
     params: FindAllParams,
   ): Promise<{ users: UserResponse[]; total: number }>;
   searchPublicUsers(params: SearchPublicUsersParams): Promise<User[]>;
+  findRecommendedPublicUsers(
+    params: RecommendedPublicUsersParams,
+  ): Promise<User[]>;
   isUsernameAvailable(
     username: string,
     excludeUserId?: string,
