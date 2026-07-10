@@ -12,6 +12,7 @@ import type {
   CreateSendTransportResult,
   ICallMediaEngine,
   ProducedMediaResult,
+  RestartIceResult,
   RouterRtpCapabilitiesResult,
 } from '../../domain/interfaces/call-media.engine.interface';
 import { RedisCallStateRepository } from '../repositories/redis-call-state.repository';
@@ -79,6 +80,10 @@ export class MediasoupCallMediaEngine
           mimeType: 'audio/opus',
           clockRate: 48000,
           channels: 2,
+          parameters: {
+            useinbandfec: 1,
+            usedtx: 1,
+          },
         },
         {
           kind: 'video',
@@ -167,6 +172,33 @@ export class MediasoupCallMediaEngine
     });
   }
 
+  async restartIce(
+    callId: string,
+    userId: string,
+    transportId: string,
+  ): Promise<RestartIceResult> {
+    const room = this.getRoomOrThrow(callId);
+    const transport = room.transports.get(transportId);
+    const meta = room.transportMeta.get(transportId);
+
+    if (
+      !transport ||
+      !meta ||
+      meta.userId !== userId ||
+      meta.callId !== callId ||
+      !meta.connected
+    ) {
+      throw new Error('Transport is not connected');
+    }
+
+    return {
+      iceParameters: (await transport.restartIce()) as unknown as Record<
+        string,
+        unknown
+      >,
+    };
+  }
+
   async produce(
     callId: string,
     userId: string,
@@ -242,10 +274,9 @@ export class MediasoupCallMediaEngine
       !transport ||
       !transportMeta ||
       transportMeta.userId !== userId ||
-      transportMeta.direction !== 'recv' ||
-      !transportMeta.connected
+      transportMeta.direction !== 'recv'
     ) {
-      throw new Error('Receive transport is not connected');
+      throw new Error('Receive transport is unavailable');
     }
 
     const canConsume = room.router.canConsume({

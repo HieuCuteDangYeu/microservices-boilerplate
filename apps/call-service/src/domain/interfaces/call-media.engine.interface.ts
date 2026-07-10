@@ -36,6 +36,10 @@ export interface RouterRtpCapabilitiesResult {
   headerExtensions: unknown[];
 }
 
+export interface RestartIceResult {
+  iceParameters: Record<string, unknown>;
+}
+
 export abstract class ICallMediaEngine {
   abstract createRoom(callId: string): Promise<void>;
   abstract getRouterRtpCapabilities(
@@ -55,6 +59,11 @@ export abstract class ICallMediaEngine {
     transportId: string,
     dtlsParameters: Record<string, unknown>,
   ): Promise<void>;
+  abstract restartIce(
+    callId: string,
+    userId: string,
+    transportId: string,
+  ): Promise<RestartIceResult>;
   abstract produce(
     callId: string,
     userId: string,

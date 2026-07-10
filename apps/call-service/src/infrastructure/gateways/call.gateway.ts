@@ -28,6 +28,7 @@ import { LeaveCallUseCase } from '../../application/use-cases/leave-call.use-cas
 import { ProduceUseCase } from '../../application/use-cases/produce.use-case';
 import { RejectCallUseCase } from '../../application/use-cases/reject-call.use-case';
 import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
+import { RestartIceUseCase } from '../../application/use-cases/restart-ice.use-case';
 import { CallTelemetryTokenService } from '@common/calls/call-telemetry-token.service';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
 import type { CallSession } from '../../domain/entities/call-session.entity';
@@ -89,6 +90,11 @@ type ResumeConsumerPayload = {
   consumerId: string;
 };
 
+type RestartIcePayload = {
+  callId: string;
+  transportId: string;
+};
+
 type CallJoinedSocketPayload = {
   callId: string;
   role: 'host' | 'guest';
@@ -136,6 +142,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly rejectCallUseCase: RejectCallUseCase,
     private readonly answerCallUseCase: AnswerCallUseCase,
     private readonly resumeConsumerUseCase: ResumeConsumerUseCase,
+    private readonly restartIceUseCase: RestartIceUseCase,
     @Inject('ICallMediaEngine')
     private readonly mediaEngine: ICallMediaEngine,
     @Inject('ICallSessionRepository')
@@ -412,6 +419,19 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         kind: producer.kind,
       });
     });
+
+    const rejoinedUserProducers = (
+      await this.mediaEngine.listActiveProducers(payload.callId)
+    ).filter((producer) => producer.userId === userId);
+
+    rejoinedUserProducers.forEach((producer) => {
+      client.to(payload.callId).emit('new_producer', {
+        callId: payload.callId,
+        userId: producer.userId,
+        producerId: producer.producerId,
+        kind: producer.kind,
+      });
+    });
   }
 
   @SubscribeMessage('create_transport')
@@ -525,6 +545,27 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.emit('consumer_resumed', {
       callId: payload.callId,
       consumerId: payload.consumerId,
+    });
+  }
+
+  @SubscribeMessage('restart_ice')
+  async handleRestartIce(
+    @MessageBody() payload: RestartIcePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = await this.resolveUserId(client);
+    if (!userId) return;
+
+    const result = await this.restartIceUseCase.execute(
+      payload.callId,
+      userId,
+      payload.transportId,
+    );
+
+    client.emit('ice_restarted', {
+      callId: payload.callId,
+      transportId: payload.transportId,
+      ...result,
     });
   }
 
