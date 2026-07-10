@@ -2,6 +2,10 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import {
+  SearchSuggestionItem,
+  SearchSuggestionType,
+} from '@common/search/interfaces/search-suggestions-response.interface';
 import { ReelShareLink } from '../entities/reel-share-link.entity';
 import { ReelShare } from '../entities/reel-share.entity';
 import { Reel } from '../entities/reel.entity';
@@ -135,6 +139,14 @@ export interface ReelSearchQuery {
   limit?: number;
 }
 
+export interface SearchSuggestionsQuery {
+  viewerId?: string;
+  type?: SearchSuggestionType;
+  limit?: number;
+}
+
+export type SearchSuggestion = SearchSuggestionItem;
+
 export interface ReelSearchResult {
   reel: Reel;
   score: number;
@@ -218,6 +230,10 @@ export interface IContentRepository {
   ): Promise<void>;
 
   searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]>;
+
+  getSearchSuggestions(
+    query: SearchSuggestionsQuery,
+  ): Promise<SearchSuggestion[]>;
 
   listRecommendedReels(query: RecommendedReelsQuery): Promise<{
     items: Reel[];

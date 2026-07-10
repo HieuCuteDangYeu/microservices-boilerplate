@@ -1,7 +1,9 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { ReelFeedListItem } from '@common/content/interfaces/reel-response.interface';
 import { GlobalSearchQueryDto } from '@common/search/dtos/global-search-query.dto';
+import { SearchSuggestionsQueryDto } from '@common/search/dtos/search-suggestions-query.dto';
 import { GlobalSearchResponse } from '@common/search/interfaces/global-search-response.interface';
+import { SearchSuggestionsResponse } from '@common/search/interfaces/search-suggestions-response.interface';
 import { PublicUserProfile } from '@common/user/interfaces/public-user-profile.types';
 import { Reel } from '@content/domain/entities/reel.entity';
 import {
@@ -90,6 +92,23 @@ export class SearchController {
         reels: enrichedReels.length,
       },
     };
+  }
+
+  @Get('suggestions')
+  @ApiOperation({ summary: 'Get dynamic search suggestion chips' })
+  async suggestions(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: SearchSuggestionsQueryDto,
+  ): Promise<SearchSuggestionsResponse> {
+    return await lastValueFrom(
+      this.contentClient
+        .send<SearchSuggestionsResponse>('content.get_search_suggestions', {
+          viewerId: request.user!.id,
+          type: query.type ?? 'all',
+          limit: query.limit ?? 8,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
   }
 
   private async searchUsers(input: {

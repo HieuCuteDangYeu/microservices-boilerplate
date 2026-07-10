@@ -11,6 +11,7 @@ import { GetProfileReelContextUseCase } from '@content/application/use-cases/get
 import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
+import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
@@ -66,6 +67,7 @@ export class ContentController {
     private readonly reprocessReelUseCase: ReprocessReelUseCase,
     private readonly claimReelProcessingAttemptUseCase: ClaimReelProcessingAttemptUseCase,
     private readonly searchPublicReelsUseCase: SearchPublicReelsUseCase,
+    private readonly getSearchSuggestionsUseCase: GetSearchSuggestionsUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -607,6 +609,24 @@ export class ContentController {
       ...this.toSerializable(result.reel),
       searchScore: result.score,
     }));
+  }
+
+  @MessagePattern('content.get_search_suggestions')
+  async getSearchSuggestions(
+    @Payload()
+    data: {
+      viewerId?: string;
+      type?: 'all' | 'users' | 'reels';
+      limit?: number;
+    },
+  ) {
+    const suggestions = await this.getSearchSuggestionsUseCase.execute({
+      viewerId: data?.viewerId,
+      type: data?.type ?? 'all',
+      limit: data?.limit,
+    });
+
+    return { suggestions };
   }
 
   @MessagePattern('content.get_recommended_reels')

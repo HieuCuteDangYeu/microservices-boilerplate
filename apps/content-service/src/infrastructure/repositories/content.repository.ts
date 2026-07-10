@@ -25,6 +25,8 @@ import {
   ReelShareLinkWithReel,
   ReelUpdateData,
   ReelViewEventInput,
+  SearchSuggestion,
+  SearchSuggestionsQuery,
 } from '../../domain/interfaces/content.repository.interface';
 
 @Injectable()
@@ -940,6 +942,164 @@ export class ContentRepository
         (event.eventType === 'WATCH_END' ||
           event.eventType === 'WATCH_PROGRESS'))
     );
+  }
+
+  private normalizeSearchSuggestionText(value: string): string | null {
+    const normalized = value
+      .normalize('NFKC')
+      .trim()
+      .replace(/^#+/, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/[^\p{L}\p{N}#+. ]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+
+    if (normalized.length < 2 || normalized.length > 32) {
+      return null;
+    }
+
+    if (/^\d+$/.test(normalized)) {
+      return null;
+    }
+
+    return normalized;
+  }
+
+  private addSearchSuggestionScore(
+    map: Map<
+      string,
+      {
+        label: string;
+        query: string;
+        source: SearchSuggestion['source'];
+        score: number;
+      }
+    >,
+    input: {
+      label: string;
+      query: string;
+      source: SearchSuggestion['source'];
+      score: number;
+    },
+  ): void {
+    const existing = map.get(input.query);
+
+    if (existing) {
+      existing.score += input.score;
+      return;
+    }
+
+    map.set(input.query, {
+      label: input.label,
+      query: input.query,
+      source: input.source,
+      score: input.score,
+    });
+  }
+
+  async getSearchSuggestions(
+    query: SearchSuggestionsQuery,
+  ): Promise<SearchSuggestion[]> {
+    const type = query.type ?? 'all';
+
+    if (type === 'users') {
+      return [];
+    }
+
+    const limit = Math.min(Math.max(query.limit ?? 8, 1), 12);
+    const candidateLimit = Math.min(Math.max(limit * 80, 300), 1000);
+    const now = Date.now();
+
+    const records = await this.reel.findMany({
+      where: {
+        visibility: 'public',
+        status: 'COMPLETED',
+        tags: {
+          isEmpty: false,
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: candidateLimit,
+      select: {
+        id: true,
+        tags: true,
+        viewCount: true,
+        createdAt: true,
+      },
+    });
+
+    if (records.length === 0) {
+      return [];
+    }
+
+    const suggestions = new Map<
+      string,
+      {
+        label: string;
+        query: string;
+        source: SearchSuggestion['source'];
+        score: number;
+      }
+    >();
+
+    for (const record of records) {
+      const ageDays = Math.max(
+        0,
+        (now - record.createdAt.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
+      const freshnessScore = 1 / (1 + ageDays / 14);
+
+      const viewCount =
+        typeof record.viewCount === 'bigint'
+          ? Number(record.viewCount)
+          : Number(record.viewCount ?? 0);
+
+      const popularityScore = Math.min(
+        Math.log(viewCount + 1) / Math.log(1001),
+        1,
+      );
+
+      const baseScore = 1 + freshnessScore * 0.35 + popularityScore * 0.4;
+
+      for (const rawTag of record.tags ?? []) {
+        const queryText = this.normalizeSearchSuggestionText(rawTag);
+
+        if (!queryText) {
+          continue;
+        }
+
+        const label = rawTag
+          .normalize('NFKC')
+          .trim()
+          .replace(/^#+/, '')
+          .replace(/[_-]+/g, ' ')
+          .replace(/\s+/g, ' ');
+
+        this.addSearchSuggestionScore(suggestions, {
+          label: label || queryText,
+          query: queryText,
+          source: 'trending_reel_tag',
+          score: baseScore,
+        });
+      }
+    }
+
+    return [...suggestions.values()]
+      .sort((left, right) => {
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+
+        return left.query.localeCompare(right.query);
+      })
+      .slice(0, limit)
+      .map((suggestion) => ({
+        label: suggestion.label,
+        query: suggestion.query,
+        source: suggestion.source,
+        score: Number(suggestion.score.toFixed(4)),
+      }));
   }
 
   async listRecommendedReels(query: RecommendedReelsQuery): Promise<{
