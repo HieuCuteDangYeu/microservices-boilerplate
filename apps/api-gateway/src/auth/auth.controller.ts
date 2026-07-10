@@ -231,14 +231,10 @@ export class AuthController {
     }
 
     response.clearCookie('access_token', {
-      path: '/',
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      ...this.getCookieOptions(),
     });
     response.clearCookie('refresh_token', {
-      path: '/',
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      ...this.getCookieOptions(),
     });
 
     return { message: logoutResult?.message ?? 'Logged out successfully' };
@@ -271,20 +267,28 @@ export class AuthController {
     refreshToken: string,
   ) {
     response.cookie('access_token', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
+      ...this.getCookieOptions(),
       maxAge: 15 * 60 * 1000,
     });
 
     response.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
+      ...this.getCookieOptions(),
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
+  }
+
+  private getCookieOptions() {
+    const sameSite: 'lax' | 'none' =
+      this.configService.get<string>('AUTH_COOKIE_SAME_SITE') === 'none'
+        ? 'none'
+        : 'lax';
+
+    return {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production' || sameSite === 'none',
+      sameSite,
+      path: '/',
+    };
   }
 
   @Post('forgot-password')

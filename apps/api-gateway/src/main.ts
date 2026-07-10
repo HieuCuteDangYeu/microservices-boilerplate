@@ -5,11 +5,34 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { ZodValidationPipe } from 'nestjs-zod';
 
+const parseOrigins = (value: string | undefined) =>
+  (value ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
 async function bootstrap() {
   const app = await NestFactory.create(ApiGatewayModule);
   const configService = app.get(ConfigService);
 
   app.use(cookieParser());
+
+  const allowedOrigins = new Set([
+    ...parseOrigins(configService.get<string>('FRONTEND_URL')),
+    ...parseOrigins(configService.get<string>('CALL_OPS_DASHBOARD_ORIGINS')),
+    ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173']),
+  ]);
+  app.enableCors({
+    credentials: true,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS origin not allowed: ${origin}`));
+    },
+  });
 
   const config = new DocumentBuilder()
     .setTitle('Microservices API Gateway')
