@@ -125,20 +125,12 @@ export class PushNotificationsService {
     const uniqueRecipientIds = [...new Set(input.recipientUserIds)];
     const tokens = (
       await Promise.all(
-        uniqueRecipientIds.map(async (userId) => {
-          const [androidTokens, iosVoipTokens] = await Promise.all([
-            this.pushTokensService.findActiveByUserId(userId, {
-              provider: 'fcm',
-              platform: 'android',
-            }),
-            this.pushTokensService.findActiveByUserId(userId, {
-              provider: 'apns_voip',
-              platform: 'ios',
-            }),
-          ]);
-
-          return [...androidTokens, ...iosVoipTokens];
-        }),
+        uniqueRecipientIds.map((userId) =>
+          this.pushTokensService.findActiveByUserId(userId, {
+            provider: 'fcm',
+            platform: 'android',
+          }),
+        ),
       )
     ).flat();
 
@@ -155,11 +147,7 @@ export class PushNotificationsService {
     }
 
     const results = await Promise.all(
-      tokens.map((token) =>
-        token.provider === 'apns_voip'
-          ? this.sendCallStateUpdateToVoipToken(token, input)
-          : this.sendCallStateUpdateToFcmToken(token, input),
-      ),
+      tokens.map((token) => this.sendCallStateUpdateToFcmToken(token, input)),
     );
 
     return {
@@ -458,41 +446,6 @@ export class PushNotificationsService {
         platform: token.platform,
         ok: true,
         messageId,
-      };
-    } catch (error) {
-      return this.buildFailedTokenResult(token, error);
-    }
-  }
-
-  private async sendCallStateUpdateToVoipToken(
-    token: ActivePushToken,
-    input: SendCallStateUpdateInput,
-  ): Promise<PushTokenSendResult> {
-    try {
-      const voipMetadata = this.readVoipTokenMetadata(token);
-
-      await this.apnsVoipService.sendVoipPush({
-        token: token.token,
-        bundleId: voipMetadata.bundleId,
-        deliveryEnvironment: voipMetadata.deliveryEnvironment,
-        payload: {
-          aps: {
-            'content-available': 1,
-          },
-          type: 'CALL_STATE_UPDATE',
-          callId: input.callId,
-          conversationId: input.conversationId,
-          status: input.status,
-          reason: input.reason,
-          at: input.at,
-        },
-      });
-
-      return {
-        tokenId: token.id,
-        provider: token.provider,
-        platform: token.platform,
-        ok: true,
       };
     } catch (error) {
       return this.buildFailedTokenResult(token, error);
