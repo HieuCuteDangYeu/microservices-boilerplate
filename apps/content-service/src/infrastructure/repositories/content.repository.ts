@@ -6,7 +6,8 @@ import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { ReelShare } from '@content/domain/entities/reel-share.entity';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient } from '@prisma/content-client';
+import { Prisma, PrismaClient } from '@prisma/content-client';
+import { randomUUID } from 'crypto';
 import { Reel } from '../../domain/entities/reel.entity';
 import {
   IContentRepository,
@@ -429,29 +430,55 @@ export class ContentRepository
 
       if (chunks && status === 'COMPLETED') {
         await tx.reelChunk.deleteMany({
-          where: { reelId: id },
+          where: {
+            reelId: id,
+          },
         });
 
-        for (const chunk of chunks) {
-          const created = await tx.reelChunk.create({
-            data: {
-              reelId: id,
-              userId: record.userId,
-              chunkIndex: chunk.chunkIndex,
-              text: chunk.text,
-              startTime: chunk.startTime,
-              endTime: chunk.endTime,
-              embeddingModel: chunk.embeddingModel,
-            },
+        if (chunks.length > 0) {
+          const rows = chunks.map((chunk) => {
+            const chunkId = randomUUID();
+
+            if (
+              !Array.isArray(chunk.embedding) ||
+              chunk.embedding.length === 0
+            ) {
+              throw new Error(
+                `Chunk ${chunk.chunkIndex} has an invalid embedding`,
+              );
+            }
+
+            const embedding = `[${chunk.embedding.join(',')}]`;
+
+            return Prisma.sql`(
+        ${chunkId},
+        ${id},
+        ${record.userId},
+        ${chunk.chunkIndex},
+        ${chunk.text},
+        ${chunk.startTime ?? null},
+        ${chunk.endTime ?? null},
+        ${chunk.embeddingModel},
+        ${embedding}::vector
+      )`;
           });
 
-          const chunkVectorString = `[${chunk.embedding.join(',')}]`;
-
-          await tx.$executeRaw`
-          UPDATE "ReelChunk"
-          SET embedding = ${chunkVectorString}::vector
-          WHERE id = ${created.id}
-        `;
+          await tx.$executeRaw(
+            Prisma.sql`
+        INSERT INTO "ReelChunk" (
+          "id",
+          "reelId",
+          "userId",
+          "chunkIndex",
+          "text",
+          "startTime",
+          "endTime",
+          "embeddingModel",
+          "embedding"
+        )
+        VALUES ${Prisma.join(rows)}
+      `,
+          );
         }
       }
 
