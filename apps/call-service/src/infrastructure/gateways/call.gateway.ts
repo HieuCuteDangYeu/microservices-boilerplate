@@ -105,6 +105,15 @@ type CallJoinedSocketPayload = {
   telemetryToken: string;
 };
 
+type RecentTerminalCall = {
+  callId: string;
+  reason: string;
+};
+
+type StoredRecentTerminalCall = RecentTerminalCall & {
+  expiresAtMs: number;
+};
+
 @WebSocketGateway({
   namespace: '/call',
   cors: { origin: '*' },
@@ -122,6 +131,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly noAnswerTimeoutMs = Number(
     process.env.CALL_NO_ANSWER_TIMEOUT_MS || 30000,
   );
+  private readonly terminalReplayTtlMs = Number(
+    process.env.CALL_TERMINAL_REPLAY_TTL_MS || 60000,
+  );
+  private readonly recentTerminalCallsByUser = new Map<
+    string,
+    Map<string, StoredRecentTerminalCall>
+  >();
   private readonly pendingDisconnects = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -161,7 +177,9 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     await client.join(userId);
-    client.emit('call_socket_ready', {});
+    client.emit('call_socket_ready', {
+      recentTerminalCalls: this.getRecentTerminalCalls(userId),
+    });
     this.logger.log(`Socket connected ${client.id} user=${userId}`);
   }
 
@@ -653,12 +671,72 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.clearPendingUnansweredCall(session.callId);
     this.clearPendingDisconnect(session.callId, session.initiatorId);
     this.clearPendingDisconnect(session.callId, session.targetUserId);
+
+    const payload = {
+      callId: session.callId,
+      reason,
+    } satisfies RecentTerminalCall;
+    this.rememberRecentTerminalCall(session, payload);
+
     this.server
       .to([session.callId, session.initiatorId, session.targetUserId])
-      .emit('call_ended', {
-        callId: session.callId,
-        reason,
-      });
+      .emit('call_ended', payload);
+  }
+
+  private rememberRecentTerminalCall(
+    session: CallSession,
+    payload: RecentTerminalCall,
+  ): void {
+    const expiresAtMs = Date.now() + this.terminalReplayTtlMs;
+
+    for (const userId of new Set([
+      session.initiatorId,
+      session.targetUserId,
+    ])) {
+      const calls =
+        this.recentTerminalCallsByUser.get(userId) ??
+        new Map<string, StoredRecentTerminalCall>();
+      calls.set(payload.callId, { ...payload, expiresAtMs });
+      this.recentTerminalCallsByUser.set(userId, calls);
+
+      const cleanupTimeout = setTimeout(() => {
+        const currentCalls = this.recentTerminalCallsByUser.get(userId);
+        const current = currentCalls?.get(payload.callId);
+        if (!current || current.expiresAtMs > Date.now()) {
+          return;
+        }
+
+        currentCalls?.delete(payload.callId);
+        if (currentCalls?.size === 0) {
+          this.recentTerminalCallsByUser.delete(userId);
+        }
+      }, this.terminalReplayTtlMs + 1000);
+      cleanupTimeout.unref?.();
+    }
+  }
+
+  private getRecentTerminalCalls(userId: string): RecentTerminalCall[] {
+    const calls = this.recentTerminalCallsByUser.get(userId);
+    if (!calls) {
+      return [];
+    }
+
+    const now = Date.now();
+    const recent: RecentTerminalCall[] = [];
+    for (const [callId, call] of calls) {
+      if (call.expiresAtMs <= now) {
+        calls.delete(callId);
+        continue;
+      }
+
+      recent.push({ callId: call.callId, reason: call.reason });
+    }
+
+    if (calls.size === 0) {
+      this.recentTerminalCallsByUser.delete(userId);
+    }
+
+    return recent;
   }
 
   private emitPeerLeft(callId: string, userId: string, reason: string): void {
