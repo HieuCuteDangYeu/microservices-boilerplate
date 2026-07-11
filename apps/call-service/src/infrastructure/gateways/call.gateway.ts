@@ -1,4 +1,5 @@
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
+import { CallTelemetryTokenService } from '@common/calls/call-telemetry-token.service';
 import {
   ForbiddenException,
   Inject,
@@ -27,9 +28,8 @@ import { JoinCallUseCase } from '../../application/use-cases/join-call.use-case'
 import { LeaveCallUseCase } from '../../application/use-cases/leave-call.use-case';
 import { ProduceUseCase } from '../../application/use-cases/produce.use-case';
 import { RejectCallUseCase } from '../../application/use-cases/reject-call.use-case';
-import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
 import { RestartIceUseCase } from '../../application/use-cases/restart-ice.use-case';
-import { CallTelemetryTokenService } from '@common/calls/call-telemetry-token.service';
+import { ResumeConsumerUseCase } from '../../application/use-cases/resume-consumer.use-case';
 import { CallParticipant } from '../../domain/entities/call-participant.entity';
 import type { CallSession } from '../../domain/entities/call-session.entity';
 import type {
@@ -161,6 +161,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     await client.join(userId);
+    client.emit('call_socket_ready', {});
     this.logger.log(`Socket connected ${client.id} user=${userId}`);
   }
 
@@ -204,7 +205,11 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           continue;
         }
 
-        if (session.status === 'active') {
+        if (
+          session.status === 'initiated' ||
+          session.status === 'ringing' ||
+          session.status === 'active'
+        ) {
           const reconnectDeadlineAt = new Date(
             Date.now() + this.reconnectGraceMs,
           );
@@ -217,11 +222,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
               reconnectDeadlineAt,
             }),
           );
-          this.server.to(callId).emit('peer_reconnecting', {
-            callId,
-            userId,
-            reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
-          });
+          if (session.status === 'active') {
+            this.server.to(callId).emit('peer_reconnecting', {
+              callId,
+              userId,
+              reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
+            });
+          }
           this.scheduleDisconnectFinalization(callId, userId);
           continue;
         }
@@ -317,6 +324,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     await client.join(payload.callId);
     this.trackCallId(client, payload.callId);
+    this.clearPendingDisconnect(payload.callId, userId);
 
     const activeProducers = await this.mediaEngine.listActiveProducers(
       payload.callId,
@@ -578,6 +586,9 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!userId) return;
 
     await this.answerCallUseCase.execute(payload.callId, userId);
+    await client.join(payload.callId);
+    this.trackCallId(client, payload.callId);
+    this.clearPendingDisconnect(payload.callId, userId);
     this.clearPendingUnansweredCall(payload.callId);
     this.server.to(payload.callId).emit('call_answered', {
       callId: payload.callId,
