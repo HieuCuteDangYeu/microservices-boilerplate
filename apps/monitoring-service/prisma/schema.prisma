@@ -33,3 +33,28 @@ model CallTelemetryEvent {
   @@index([callId, occurredAt])
   @@map("call_telemetry_events")
 }
+
+model RecommendationTelemetryEvent {
+  id                 String   @id @default(uuid())
+  eventId            String   @unique @map("event_id")
+  recommendationType String   @map("recommendation_type")
+  algorithmVersion   String   @map("algorithm_version")
+  feedSessionId      String   @map("feed_session_id")
+  route              String
+  candidateSource    String   @map("candidate_source")
+  requestedLimit     Int      @map("requested_limit")
+  returnedItems      Int      @map("returned_items")
+  latencyMs          Int      @map("latency_ms")
+  outcome            String
+  errorCode          String?  @map("error_code")
+  featureFlags       Json     @map("feature_flags")
+  occurredAt         DateTime @map("occurred_at")
+  receivedAt         DateTime @default(now()) @map("received_at")
+
+  @@index([occurredAt])
+  @@index([recommendationType, algorithmVersion, outcome])
+  @@index([candidateSource, occurredAt])
+  @@index([feedSessionId])
+  @@index([route, occurredAt])
+  @@map("recommendation_telemetry_events")
+}

@@ -1,13 +1,16 @@
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
-export interface PublicUserProfile {
+export interface GetRecommendedPublicUsersInput {
+  limit?: number;
+  excludeUserId?: string;
+  feedSessionId?: string;
+}
+
+export interface RecommendedPublicUserProfile {
   id: string;
   fullName: string;
   username: string | null;
   picture: string | null;
   isVerified: boolean;
-}
-
-export interface RecommendedPublicUserProfile extends PublicUserProfile {
   recommendation: RecommendationMetadata;
 }

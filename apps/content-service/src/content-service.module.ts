@@ -2,6 +2,7 @@ import { TrackReelEventsUseCase } from '@ai/application/use-cases/track-reel-eve
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
+import { CreateReelUseCase } from '@content/application/use-cases/create-reel.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
@@ -22,14 +23,15 @@ import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-e
 import { ConversationMessageAdapter } from '@content/infrastructure/adapters/conversation-message.adapter';
 import { FriendSharePolicyAdapter } from '@content/infrastructure/adapters/friend-share-policy.adapter';
 import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
+import { RecommendationTelemetryServiceAdapter } from '@content/infrastructure/adapters/recommendation-telemetry-service.adapter';
 import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
+import { ContentController } from '@content/infrastructure/controllers/content.controller';
+import { ContentRepository } from '@content/infrastructure/repositories/content.repository';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
+import { RecommendationConfigService } from '@content/infrastructure/services/recommendation-config.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { CreateReelUseCase } from './application/use-cases/create-reel.use-case';
-import { ContentController } from './infrastructure/controllers/content.controller';
-import { ContentRepository } from './infrastructure/repositories/content.repository';
 
 function createRmqClientRegistration(name: string, queue: string) {
   return {
@@ -47,7 +49,9 @@ function createRmqClientRegistration(name: string, queue: string) {
               'amqp://localhost:5672',
           ],
           queue,
-          queueOptions: { durable: true },
+          queueOptions: {
+            durable: true,
+          },
           heartbeat:
             Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
           retryAttempts: 10,
@@ -74,6 +78,7 @@ function createRmqClientRegistration(name: string, queue: string) {
         'CONVERSATION_SERVICE_RMQ',
         'conversation_queue',
       ),
+      createRmqClientRegistration('MONITORING_SERVICE_RMQ', 'monitoring_queue'),
     ]),
   ],
   controllers: [ContentController],
@@ -126,6 +131,14 @@ function createRmqClientRegistration(name: string, queue: string) {
     {
       provide: 'IConversationMessageService',
       useClass: ConversationMessageAdapter,
+    },
+    {
+      provide: 'IRecommendationConfig',
+      useClass: RecommendationConfigService,
+    },
+    {
+      provide: 'IRecommendationTelemetryService',
+      useClass: RecommendationTelemetryServiceAdapter,
     },
   ],
 })

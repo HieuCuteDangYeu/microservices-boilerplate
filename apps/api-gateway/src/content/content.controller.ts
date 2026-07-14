@@ -188,21 +188,28 @@ export class ContentController {
   }
 
   @Get('reels/recommended')
-  @ApiOperation({ summary: 'Get personalized recommended reels' })
+  @ApiOperation({
+    summary: 'Get personalized recommended reels',
+  })
   async getRecommendedReels(
     @Req() request: AuthenticatedRequest,
-    @Query() query: RecommendedReelsQueryDto,
+    @Query()
+    query: RecommendedReelsQueryDto,
   ): Promise<PaginatedReels<ReelFeedListItem>> {
     const result = await lastValueFrom(
       this.contentClient
         .send<{
           items: Reel[];
           nextCursor: string | null;
+          feedSessionId: string;
+          algorithmVersion: string;
+          generatedAt: string;
         }>('content.get_recommended_reels', {
           viewerId: request.user!.id,
           limit: query.limit,
           cursor: query.cursor,
           excludeRecentlySeen: query.excludeRecentlySeen,
+          feedSessionId: query.feedSessionId,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
@@ -210,6 +217,9 @@ export class ContentController {
     return {
       items: await this.enrichFeedItems(result.items),
       nextCursor: result.nextCursor,
+      feedSessionId: result.feedSessionId,
+      algorithmVersion: result.algorithmVersion,
+      generatedAt: result.generatedAt,
     };
   }
 
@@ -472,10 +482,12 @@ export class ContentController {
     reel: Reel,
     opts?: { includeTranscript?: false },
   ): ReelListItem;
+
   private _enrichReel(
     reel: Reel,
     opts: { includeTranscript: true },
   ): ReelDetail;
+
   private _enrichReel(
     reel: Reel,
     opts: { includeTranscript?: boolean } = {},
@@ -509,6 +521,7 @@ export class ContentController {
       processingProgress: reel.processingProgress,
       streamUrl,
       createdAt,
+      recommendation: reel.recommendation,
     };
 
     if (opts.includeTranscript) {

@@ -1,8 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ClientsModule, Transport } from '@nestjs/microservices';
+import {
+  ClientsModule,
+  ClientsProviderAsyncOptions,
+  Transport,
+} from '@nestjs/microservices';
 import { CheckUsernameAvailabilityUseCase } from '@user/application/use-cases/check-username-availability.use-case';
 import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
+import { CreateUserUseCase } from '@user/application/use-cases/create-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindPublicUserByUsernameUseCase } from '@user/application/use-cases/find-public-user-by-username.use-case';
@@ -18,11 +23,32 @@ import { ValidateUserUseCase } from '@user/application/use-cases/validate-user.u
 import { ValidateUsersListUseCase } from '@user/application/use-cases/validate-users-list.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { AuthServiceAdapter } from '@user/infrastructure/adapters/auth-service.adapter';
+import { RecommendationTelemetryServiceAdapter } from '@user/infrastructure/adapters/recommendation-telemetry-service.adapter';
 import { UserController } from '@user/infrastructure/controllers/user.controller';
+import { PrismaService } from '@user/infrastructure/prisma/prisma.service';
+import { UserRepository } from '@user/infrastructure/repositories/user.repository';
 import { R2StorageService } from '@user/infrastructure/services/r2-storage.service';
-import { CreateUserUseCase } from './application/use-cases/create-user.use-case';
-import { PrismaService } from './infrastructure/prisma/prisma.service';
-import { UserRepository } from './infrastructure/repositories/user.repository';
+import { RecommendationConfigService } from '@user/infrastructure/services/recommendation-config.service';
+
+function createRmqClientRegistration(
+  name: string,
+  queue: string,
+): ClientsProviderAsyncOptions {
+  return {
+    name,
+    useFactory: (config: ConfigService) => ({
+      transport: Transport.RMQ as const,
+      options: {
+        urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+        queue,
+        queueOptions: {
+          durable: true,
+        },
+      },
+    }),
+    inject: [ConfigService],
+  };
+}
 
 @Module({
   imports: [
@@ -31,18 +57,8 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
       envFilePath: '.env',
     }),
     ClientsModule.registerAsync([
-      {
-        name: 'AUTH_SERVICE_RMQ',
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
-            queue: 'auth_queue',
-            queueOptions: { durable: true },
-          },
-        }),
-        inject: [ConfigService],
-      },
+      createRmqClientRegistration('AUTH_SERVICE_RMQ', 'auth_queue'),
+      createRmqClientRegistration('MONITORING_SERVICE_RMQ', 'monitoring_queue'),
     ]),
   ],
   controllers: [UserController],
@@ -76,6 +92,15 @@ import { UserRepository } from './infrastructure/repositories/user.repository';
     {
       provide: 'IStorageService',
       useClass: R2StorageService,
+    },
+    {
+      provide: 'IRecommendationConfig',
+      useClass: RecommendationConfigService,
+    },
+
+    {
+      provide: 'IRecommendationTelemetryService',
+      useClass: RecommendationTelemetryServiceAdapter,
     },
   ],
 })

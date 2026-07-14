@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
 export class Reel {
   id: string;
@@ -35,4 +36,5 @@ export class Reel {
   encodedFps?: number;
   createdAt: Date;
   updatedAt: Date;
+  recommendation?: RecommendationMetadata;
 }

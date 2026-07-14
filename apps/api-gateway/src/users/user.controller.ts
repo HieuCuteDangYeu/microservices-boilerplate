@@ -11,7 +11,10 @@ import {
   DeleteUserResponse,
 } from '@common/user/interfaces/delete-user.types';
 import { PaginatedUsersResponse } from '@common/user/interfaces/find-all-users.types';
-import { PublicUserProfile } from '@common/user/interfaces/public-user-profile.types';
+import {
+  PublicUserProfile,
+  RecommendedPublicUserProfile,
+} from '@common/user/interfaces/public-user-profile.types';
 import {
   UpdateUserPayload,
   UpdateUserResponse,
@@ -97,12 +100,14 @@ export class UserController {
   @Roles(Role.ADMIN, Role.USER)
   async getRecommendedUsers(
     @Req() request: AuthenticatedRequest,
-    @Query() query: RecommendedPublicUsersQueryDto,
-  ): Promise<PublicUserProfile[]> {
+    @Query()
+    query: RecommendedPublicUsersQueryDto,
+  ): Promise<RecommendedPublicUserProfile[]> {
     return await lastValueFrom(
       this.userClient
-        .send<PublicUserProfile[]>('user.get_recommended_public', {
-          limit: query.limit ?? 20,
+        .send<RecommendedPublicUserProfile[]>('user.get_recommended_public', {
+          limit: query.limit,
+          feedSessionId: query.feedSessionId,
           excludeUserId: request.user!.id,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),

@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
 export interface ReelAuthorSummary {
   id: string;
@@ -25,6 +26,7 @@ export interface ReelListItem {
   processingProgress?: number;
   streamUrl: string;
   createdAt: string;
+  recommendation?: RecommendationMetadata;
 }
 
 export interface ReelDetail extends ReelListItem {
@@ -41,4 +43,7 @@ export interface PaginatedReels<T> {
   items: T[];
   nextCursor: string | null;
   total?: number;
+  feedSessionId?: string;
+  algorithmVersion?: string;
+  generatedAt?: string;
 }

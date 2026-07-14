@@ -30,6 +30,7 @@
       "@mail/*": ["apps/mail-service/src/*"],
       "@media/*": ["apps/media-service/src/*"],
       "@payment/*": ["apps/payment-service/src/*"],
+      "@monitoring/*": ["apps/monitoring-service/src/*"],
       "@prisma/auth-client": ["node_modules/@prisma/auth-client"],
       "@prisma/content-client": ["node_modules/@prisma/content-client"],
       "@prisma/conversation-client": [
@@ -38,13 +39,16 @@
       "@prisma/friend-client": ["node_modules/@prisma/friend-client"],
       "@prisma/mail-client": ["node_modules/@prisma/mail-client"],
       "@prisma/media-client": ["node_modules/@prisma/media-client"],
-      "@prisma/notification-client": ["node_modules/@prisma/notification-client"],
+      "@prisma/notification-client": [
+        "node_modules/@prisma/notification-client"
+      ],
       "@prisma/payment-client": ["node_modules/@prisma/payment-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@processing/*": ["apps/processing-service/src/*"],
       "@user/*": ["apps/user-service/src/*"],
       "@ai/*": ["apps/ai-service/src/*"],
-      "@prisma/ai-client": ["node_modules/@prisma/ai-client"]
+      "@prisma/ai-client": ["node_modules/@prisma/ai-client"],
+      "@prisma/processing-client": ["node_modules/@prisma/processing-client"]
     }
   }
 }

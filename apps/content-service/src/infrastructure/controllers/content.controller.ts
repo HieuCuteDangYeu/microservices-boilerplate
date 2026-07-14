@@ -105,6 +105,7 @@ export class ContentController {
       encodedVariantCount: reel.encodedVariantCount,
       encodedMaxHeight: reel.encodedMaxHeight,
       encodedFps: reel.encodedFps,
+      recommendation: reel.recommendation,
     };
   }
 
@@ -635,8 +636,12 @@ export class ContentController {
     data: {
       viewerId: string;
       limit?: number;
-      cursor?: { createdAt: string; id: string };
+      cursor?: {
+        createdAt: string;
+        id: string;
+      };
       excludeRecentlySeen?: boolean;
+      feedSessionId?: string;
     },
   ) {
     if (
@@ -661,11 +666,15 @@ export class ContentController {
             }
           : undefined,
         excludeRecentlySeen: data.excludeRecentlySeen,
+        feedSessionId: data.feedSessionId,
       });
 
       return {
         items: result.items.map((item) => this.toSerializable(item)),
         nextCursor: this.serializeCursor(result.nextCursor),
+        feedSessionId: result.feedSessionId,
+        algorithmVersion: result.algorithmVersion,
+        generatedAt: result.generatedAt,
       };
     } catch (error: unknown) {
       const err = error as Error;

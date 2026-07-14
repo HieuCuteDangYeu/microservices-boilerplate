@@ -176,11 +176,13 @@ export class UserController {
     data: {
       limit?: number;
       excludeUserId?: string;
+      feedSessionId?: string;
     },
   ) {
     return await this.getRecommendedPublicUsersUseCase.execute({
       limit: data?.limit,
       excludeUserId: data?.excludeUserId,
+      feedSessionId: data?.feedSessionId,
     });
   }
 
