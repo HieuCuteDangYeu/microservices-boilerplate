@@ -1,6 +1,7 @@
 import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateReelShareLinkDto } from '@common/content/dtos/create-reel-share-link.dto';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
+import { FriendsReelsQueryDto } from '@common/content/dtos/friends-reels-query.dto';
 import { GetReelContextQueryDto } from '@common/content/dtos/get-reel-context.dto';
 import { ListReelsQueryDto } from '@common/content/dtos/list-reels.dto';
 import { RecommendedReelsQueryDto } from '@common/content/dtos/recommended-reels-query.dto';
@@ -234,6 +235,35 @@ export class ContentController {
     };
   }
 
+  @Get('reels/friends')
+  @ApiOperation({
+    summary: 'Get chronological reels from accepted friends',
+  })
+  async getFriendsReels(
+    @Req()
+    request: AuthenticatedRequest,
+    @Query()
+    query: FriendsReelsQueryDto,
+  ): Promise<PaginatedReels<ReelFeedListItem>> {
+    const result = await lastValueFrom(
+      this.contentClient
+        .send<{
+          items: Reel[];
+          nextCursor: string | null;
+        }>('content.get_friends_reels', {
+          viewerId: request.user!.id,
+          limit: query.limit,
+          cursor: query.cursor,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+
+    return {
+      items: await this.enrichFeedItems(result.items),
+      nextCursor: result.nextCursor,
+    };
+  }
+
   @Get('reels/:id')
   @ApiOperation({ summary: 'Get a single reel by ID' })
   async getReel(
@@ -242,7 +272,10 @@ export class ContentController {
   ) {
     const reel = await lastValueFrom(
       this.contentClient
-        .send<Reel | null>('content.get_reel', { reelId })
+        .send<Reel | null>('content.get_reel', {
+          reelId,
+          viewerId: request.user!.id,
+        })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
 
@@ -273,7 +306,10 @@ export class ContentController {
       this.contentClient
         .send<{
           source: 'profile';
-          scope: { userId: string; visibility: 'public' | 'private' };
+          scope: {
+            userId: string;
+            visibility: 'public' | 'friends' | 'private';
+          };
           selectedId: string;
           selectedIndex: number;
           items: Reel[];
@@ -281,6 +317,7 @@ export class ContentController {
           nextCursor: string | null;
         }>('content.get_profile_reel_context', {
           reelId,
+          viewerId: request.user!.id,
           before: query.before,
           after: query.after,
         })

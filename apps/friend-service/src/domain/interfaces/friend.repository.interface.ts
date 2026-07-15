@@ -94,4 +94,6 @@ export interface IFriendRepository {
     limit: number,
     cursor?: FriendshipPaginationCursor,
   ): Promise<PaginatedFriendships>;
+
+  listAcceptedUserIds(userId: string): Promise<string[]>;
 }

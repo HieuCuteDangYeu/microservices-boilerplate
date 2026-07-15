@@ -38,13 +38,14 @@ export interface RecommendedReelsQuery {
   limit?: number;
   cursor?: ReelCursor;
   excludeRecentlySeen?: boolean;
+  excludedUserIds?: string[];
 }
 
 export interface ReelUpdateData {
   title?: string;
   description?: string;
   tags?: string[];
-  visibility?: 'public' | 'private';
+  visibility?: 'public' | 'friends' | 'private';
 }
 
 export interface ReelCursor {
@@ -152,6 +153,13 @@ export interface ReelSearchResult {
   score: number;
 }
 
+export interface FriendsReelsQuery {
+  friendUserIds: string[];
+  excludedUserIds?: string[];
+  limit?: number;
+  cursor?: ReelCursor;
+}
+
 export interface IContentRepository {
   createReel(reel: Partial<Reel>): Promise<Reel>;
 
@@ -256,4 +264,9 @@ export interface IContentRepository {
   ): Promise<Reel | null>;
 
   deleteReel(id: string, userId: string): Promise<boolean>;
+
+  listFriendsReels(query: FriendsReelsQuery): Promise<{
+    items: Reel[];
+    nextCursor: ReelCursor | null;
+  }>;
 }

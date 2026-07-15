@@ -9,6 +9,7 @@ import {
   FriendSummary,
   PaginatedFriendResults,
 } from '@common/friend/interfaces/friend.types';
+import { UserBlockActionResponse } from '@common/friend/interfaces/user-block-action.interface';
 import { Role, Roles } from '@gateway/auth/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
@@ -84,6 +85,46 @@ export class FriendController {
         .send<FriendshipActionResponse>('friend.reject_request', {
           userId: request.user!.id,
           requestId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Post(':userId/block')
+  @ApiOperation({
+    summary: 'Block a user and remove any relationship',
+  })
+  async blockUser(
+    @Req()
+    request: AuthenticatedRequest,
+    @Param('userId', ParseUUIDPipe)
+    blockedUserId: string,
+  ): Promise<UserBlockActionResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<UserBlockActionResponse>('friend.block_user', {
+          userId: request.user!.id,
+          blockedUserId,
+        })
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
+  @Delete(':userId/block')
+  @ApiOperation({
+    summary: 'Unblock a user',
+  })
+  async unblockUser(
+    @Req()
+    request: AuthenticatedRequest,
+    @Param('userId', ParseUUIDPipe)
+    blockedUserId: string,
+  ): Promise<UserBlockActionResponse> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<UserBlockActionResponse>('friend.unblock_user', {
+          userId: request.user!.id,
+          blockedUserId,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );

@@ -1,14 +1,20 @@
 import { SagaCompensationError } from '@common/domain/errors/saga.error';
+import type { CanViewReelContentRequest } from '@common/friend/interfaces/friend-content-access.interface';
 import { AcceptFriendRequestUseCase } from '@friend/application/use-cases/accept-friend-request.use-case';
+import { BlockUserUseCase } from '@friend/application/use-cases/block-user.use-case';
 import { CanShareWithUserUseCase } from '@friend/application/use-cases/can-share-with-user.use-case';
+import { CanViewReelContentUseCase } from '@friend/application/use-cases/can-view-reel-content.use-case';
 import { CancelFriendRequestUseCase } from '@friend/application/use-cases/cancel-friend-request.use-case';
 import { GetFriendshipStatusUseCase } from '@friend/application/use-cases/get-friendship-status.use-case';
+import { GetReelFeedAudienceUseCase } from '@friend/application/use-cases/get-reel-feed-audience.use-case';
 import { ListFriendsUseCase } from '@friend/application/use-cases/list-friends.use-case';
 import { ListIncomingFriendRequestsUseCase } from '@friend/application/use-cases/list-incoming-friend-requests.use-case';
 import { ListOutgoingFriendRequestsUseCase } from '@friend/application/use-cases/list-outgoing-friend-requests.use-case';
 import { RejectFriendRequestUseCase } from '@friend/application/use-cases/reject-friend-request.use-case';
 import { RemoveFriendUseCase } from '@friend/application/use-cases/remove-friend.use-case';
 import { SendFriendRequestUseCase } from '@friend/application/use-cases/send-friend-request.use-case';
+import { UnblockUserUseCase } from '@friend/application/use-cases/unblock-user.use-case';
+import { CannotBlockSelfError } from '@friend/domain/errors/cannot-block-self.error';
 import { CannotFriendSelfError } from '@friend/domain/errors/cannot-friend-self.error';
 import { FriendActionForbiddenError } from '@friend/domain/errors/friend-action-forbidden.error';
 import { FriendRequestAlreadyExistsError } from '@friend/domain/errors/friend-request-already-exists.error';
@@ -33,6 +39,10 @@ export class FriendController {
     private readonly removeFriendUseCase: RemoveFriendUseCase,
     private readonly getFriendshipStatusUseCase: GetFriendshipStatusUseCase,
     private readonly canShareWithUserUseCase: CanShareWithUserUseCase,
+    private readonly getReelFeedAudienceUseCase: GetReelFeedAudienceUseCase,
+    private readonly canViewReelContentUseCase: CanViewReelContentUseCase,
+    private readonly blockUserUseCase: BlockUserUseCase,
+    private readonly unblockUserUseCase: UnblockUserUseCase,
   ) {}
 
   @MessagePattern('friend.send_request')
@@ -177,6 +187,60 @@ export class FriendController {
     return await this.canShareWithUserUseCase.execute(data);
   }
 
+  @MessagePattern('friend.get_reel_feed_audience')
+  async getReelFeedAudience(
+    @Payload()
+    data: {
+      userId: string;
+    },
+  ) {
+    return await this.getReelFeedAudienceUseCase.execute(data.userId);
+  }
+
+  @MessagePattern('friend.can_view_reel_content')
+  async canViewReelContent(
+    @Payload()
+    data: CanViewReelContentRequest,
+  ) {
+    return await this.canViewReelContentUseCase.execute(data);
+  }
+
+  @MessagePattern('friend.block_user')
+  async blockUser(
+    @Payload()
+    data: {
+      userId: string;
+      blockedUserId: string;
+    },
+  ) {
+    try {
+      return await this.blockUserUseCase.execute(
+        data.userId,
+        data.blockedUserId,
+      );
+    } catch (error: unknown) {
+      this.handleError(error);
+    }
+  }
+
+  @MessagePattern('friend.unblock_user')
+  async unblockUser(
+    @Payload()
+    data: {
+      userId: string;
+      blockedUserId: string;
+    },
+  ) {
+    try {
+      return await this.unblockUserUseCase.execute(
+        data.userId,
+        data.blockedUserId,
+      );
+    } catch (error: unknown) {
+      this.handleError(error);
+    }
+  }
+
   private handleError(error: unknown): never {
     if (error instanceof RpcException) {
       throw error;
@@ -214,6 +278,13 @@ export class FriendController {
     if (error instanceof FriendActionForbiddenError) {
       throw new RpcException({
         statusCode: 403,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof CannotBlockSelfError) {
+      throw new RpcException({
+        statusCode: 400,
         message: error.message,
       });
     }

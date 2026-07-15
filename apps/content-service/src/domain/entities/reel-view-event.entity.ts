@@ -13,6 +13,7 @@ export type ReelViewEventType =
 
 export type ReelEventSource =
   | 'RECOMMENDED'
+  | 'FRIENDS'
   | 'PUBLIC_FEED'
   | 'PROFILE'
   | 'SEARCH'

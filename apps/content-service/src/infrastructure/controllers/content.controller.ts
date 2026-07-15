@@ -7,6 +7,7 @@ import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfi
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
+import { GetFriendsReelsUseCase } from '@content/application/use-cases/get-friends-reels.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
@@ -67,6 +68,7 @@ export class ContentController {
     private readonly claimReelProcessingAttemptUseCase: ClaimReelProcessingAttemptUseCase,
     private readonly searchPublicReelsUseCase: SearchPublicReelsUseCase,
     private readonly getSearchSuggestionsUseCase: GetSearchSuggestionsUseCase,
+    private readonly getFriendsReelsUseCase: GetFriendsReelsUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -641,6 +643,7 @@ export class ContentController {
       };
       excludeRecentlySeen?: boolean;
       feedSessionId?: string;
+      excludedUserIds?: string[];
     },
   ) {
     if (
@@ -654,6 +657,17 @@ export class ContentController {
       });
     }
 
+    const excludedUserIds = Array.isArray(data.excludedUserIds)
+      ? [
+          ...new Set(
+            data.excludedUserIds
+              .filter((id): id is string => typeof id === 'string')
+              .map((id) => id.trim())
+              .filter(Boolean),
+          ),
+        ]
+      : [];
+
     try {
       const result = await this.getRecommendedReelsUseCase.execute({
         viewerId: data.viewerId.trim(),
@@ -666,6 +680,7 @@ export class ContentController {
           : undefined,
         excludeRecentlySeen: data.excludeRecentlySeen,
         feedSessionId: data.feedSessionId,
+        excludedUserIds,
       });
 
       return {
@@ -729,9 +744,12 @@ export class ContentController {
   }
 
   @MessagePattern('content.get_reel')
-  async getReel(@Payload() data: { reelId: string }) {
+  async getReel(@Payload() data: { reelId: string; viewerId: string }) {
     try {
-      const reel = await this.getReelUseCase.execute(data.reelId);
+      const reel = await this.getReelUseCase.execute(
+        data.reelId,
+        data.viewerId,
+      );
       if (!reel) {
         throw new RpcException({
           statusCode: 404,
@@ -1155,6 +1173,46 @@ export class ContentController {
     });
 
     return result;
+  }
+
+  @MessagePattern('content.get_friends_reels')
+  async getFriendsReels(
+    @Payload()
+    data: {
+      viewerId: string;
+      limit?: number;
+      cursor?: {
+        createdAt: string;
+        id: string;
+      };
+    },
+  ) {
+    if (
+      !data ||
+      typeof data.viewerId !== 'string' ||
+      data.viewerId.trim().length === 0
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid friends reel feed payload',
+      });
+    }
+
+    const result = await this.getFriendsReelsUseCase.execute({
+      viewerId: data.viewerId.trim(),
+      limit: data.limit,
+      cursor: data.cursor
+        ? {
+            createdAt: new Date(data.cursor.createdAt),
+            id: data.cursor.id,
+          }
+        : undefined,
+    });
+
+    return {
+      items: result.items.map((reel) => this.toSerializable(reel)),
+      nextCursor: this.serializeCursor(result.nextCursor),
+    };
   }
 
   private normalizeBackfillNumber(

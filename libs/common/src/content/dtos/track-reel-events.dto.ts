@@ -19,6 +19,7 @@ export const ReelViewEventTypeSchema = z.enum([
 
 export const ReelEventSourceSchema = z.enum([
   'RECOMMENDED',
+  'FRIENDS',
   'PUBLIC_FEED',
   'PROFILE',
   'SEARCH',

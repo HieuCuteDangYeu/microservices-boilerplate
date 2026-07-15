@@ -345,6 +345,32 @@ export class FriendRepository implements IFriendRepository {
     }
   }
 
+  async listAcceptedUserIds(userId: string): Promise<string[]> {
+    const friendships = await this.prisma.friendship.findMany({
+      where: {
+        status: 'ACCEPTED',
+        OR: [
+          {
+            userOneId: userId,
+          },
+          {
+            userTwoId: userId,
+          },
+        ],
+      },
+      select: {
+        userOneId: true,
+        userTwoId: true,
+      },
+    });
+
+    return friendships.map((friendship) =>
+      friendship.userOneId === userId
+        ? friendship.userTwoId
+        : friendship.userOneId,
+    );
+  }
+
   private buildCursorFilter(
     field: 'createdAt' | 'updatedAt',
     cursor?: FriendshipPaginationCursor,

@@ -1,11 +1,13 @@
+import { ReelVisibilitySchema } from '@common/content/schemas/reel-visibility.schema';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
 export const CreateReelSchema = z.object({
-  mediaKey: z.string().min(1),
-  title: z.string().optional(),
-  description: z.string().optional(),
-  tags: z.array(z.string()).optional(),
+  mediaKey: z.string().trim().min(1),
+  title: z.string().trim().max(220).optional(),
+  description: z.string().trim().max(2000).optional(),
+  tags: z.array(z.string().trim().min(1).max(50)).max(30).optional(),
+  visibility: ReelVisibilitySchema.default('public'),
 });
 
 export class CreateReelDto extends createZodDto(CreateReelSchema) {}

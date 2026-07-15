@@ -23,10 +23,19 @@ export class GetRecommendedReelsUseCase {
   ): Promise<RecommendedReelsResult> {
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 50);
     const feedSessionId = input.feedSessionId ?? globalThis.crypto.randomUUID();
+
     const algorithmVersion = this.recommendationConfig.getAlgorithmVersion();
+
     const candidateSource = this.recommendationConfig.getCandidateSource();
+
     const featureFlags = this.recommendationConfig.getFeatureFlags();
     const startedAt = Date.now();
+
+    const excludedUserIds = [
+      ...new Set(
+        (input.excludedUserIds ?? []).map((id) => id.trim()).filter(Boolean),
+      ),
+    ];
 
     try {
       const result = await this.contentRepository.listRecommendedReels({
@@ -34,6 +43,7 @@ export class GetRecommendedReelsUseCase {
         limit,
         cursor: input.cursor,
         excludeRecentlySeen: input.excludeRecentlySeen,
+        excludedUserIds,
       });
 
       const generatedAt = new Date().toISOString();

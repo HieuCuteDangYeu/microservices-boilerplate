@@ -7,6 +7,7 @@ export interface GetRecommendedReelsInput {
   cursor?: ReelCursor;
   excludeRecentlySeen?: boolean;
   feedSessionId?: string;
+  excludedUserIds?: string[];
 }
 
 export interface RecommendedReelsResult {

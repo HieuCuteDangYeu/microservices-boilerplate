@@ -1,6 +1,8 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
+export type ReelVisibility = 'public' | 'friends' | 'private';
+
 export interface ReelAuthorSummary {
   id: string;
   username: string | null;
@@ -17,7 +19,7 @@ export interface ReelListItem {
   description?: string;
   tags: string[];
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
-  visibility: 'public' | 'private';
+  visibility: ReelVisibility;
   viewCount: number;
   thumbnailKey?: string;
   thumbnailUrl?: string;

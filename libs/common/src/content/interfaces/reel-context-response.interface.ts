@@ -1,8 +1,11 @@
-import { ReelFeedListItem } from '@common/content/interfaces/reel-response.interface';
+import type {
+  ReelFeedListItem,
+  ReelVisibility,
+} from '@common/content/interfaces/reel-response.interface';
 
 export interface ReelContextScope {
   userId: string;
-  visibility: 'public' | 'private';
+  visibility: ReelVisibility;
 }
 
 export interface ReelProfileContextResponse {

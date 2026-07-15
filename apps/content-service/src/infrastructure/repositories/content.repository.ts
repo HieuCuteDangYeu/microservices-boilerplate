@@ -15,6 +15,7 @@ import { Prisma, PrismaClient } from '@prisma/content-client';
 import { randomUUID } from 'crypto';
 import { Reel } from '../../domain/entities/reel.entity';
 import {
+  FriendsReelsQuery,
   IContentRepository,
   RecommendedReelsQuery,
   ReelChunkBackfillCursor,
@@ -1164,17 +1165,37 @@ export class ContentRepository
     const limit = Math.min(Math.max(query.limit ?? 20, 1), 50);
     const candidateLimit = Math.min(Math.max(limit * 10, 80), 300);
 
+    const excludedUserIds = [
+      ...new Set(
+        (query.excludedUserIds ?? []).map((id) => id.trim()).filter(Boolean),
+      ),
+    ];
+
     const where: Record<string, unknown> = {
       visibility: 'public',
       status: 'COMPLETED',
+
+      ...(excludedUserIds.length > 0
+        ? {
+            userId: {
+              notIn: excludedUserIds,
+            },
+          }
+        : {}),
     };
 
     if (query.cursor) {
       where['OR'] = [
-        { createdAt: { lt: query.cursor.createdAt } },
+        {
+          createdAt: {
+            lt: query.cursor.createdAt,
+          },
+        },
         {
           createdAt: query.cursor.createdAt,
-          id: { gt: query.cursor.id },
+          id: {
+            gt: query.cursor.id,
+          },
         },
       ];
     }
@@ -2252,6 +2273,88 @@ export class ContentRepository
       rejected: rejectedEvents.length,
       countedViews: persisted.countedViews,
       rejectedEventIds: rejectedEvents.map((event) => event.eventId),
+    };
+  }
+
+  async listFriendsReels(query: FriendsReelsQuery): Promise<{
+    items: Reel[];
+    nextCursor: ReelCursor | null;
+  }> {
+    const limit = Math.min(Math.max(query.limit ?? 20, 1), 50);
+
+    const excludedSet = new Set(query.excludedUserIds ?? []);
+
+    const eligibleFriendIds = [
+      ...new Set(
+        query.friendUserIds.filter(
+          (friendUserId) => !excludedSet.has(friendUserId),
+        ),
+      ),
+    ];
+
+    if (eligibleFriendIds.length === 0) {
+      return {
+        items: [],
+        nextCursor: null,
+      };
+    }
+
+    const records = await this.reel.findMany({
+      where: {
+        userId: {
+          in: eligibleFriendIds,
+        },
+        status: 'COMPLETED',
+        visibility: {
+          in: ['public', 'friends'],
+        },
+        ...(query.cursor
+          ? {
+              OR: [
+                {
+                  createdAt: {
+                    lt: query.cursor.createdAt,
+                  },
+                },
+                {
+                  createdAt: query.cursor.createdAt,
+                  id: {
+                    gt: query.cursor.id,
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          id: 'asc',
+        },
+      ],
+      take: limit + 1,
+      select: this.reelListSelect,
+    });
+
+    const hasMore = records.length > limit;
+
+    const items = records
+      .slice(0, limit)
+      .map((record) => this.toDomain(record));
+
+    const lastItem = items[items.length - 1];
+
+    return {
+      items,
+      nextCursor:
+        hasMore && lastItem
+          ? {
+              createdAt: lastItem.createdAt,
+              id: lastItem.id,
+            }
+          : null,
     };
   }
 }

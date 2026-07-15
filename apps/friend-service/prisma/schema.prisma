@@ -31,3 +31,14 @@ model Friendship {
   @@index([userOneId, status])
   @@index([userTwoId, status])
 }
+
+model UserBlock {
+  blockerId     String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+
+  @@id([blockerId, blockedUserId])
+  @@index([blockerId])
+  @@index([blockedUserId])
+  @@index([createdAt])
+}

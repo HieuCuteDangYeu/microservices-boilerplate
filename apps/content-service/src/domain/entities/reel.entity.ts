@@ -1,4 +1,5 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import { ReelVisibility } from '@common/content/schemas/reel-visibility.schema';
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
 export class Reel {
@@ -9,7 +10,7 @@ export class Reel {
   description?: string;
   tags: string[];
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
-  visibility: 'public' | 'private';
+  visibility: ReelVisibility;
   viewCount: bigint;
   transcript?: string;
   transcriptVtt?: string;

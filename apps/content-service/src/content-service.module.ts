@@ -3,6 +3,7 @@ import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-case
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { CreateReelUseCase } from '@content/application/use-cases/create-reel.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
+import { GetFriendsReelsUseCase } from '@content/application/use-cases/get-friends-reels.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
@@ -20,6 +21,7 @@ import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-r
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-embedding-service.adapter';
 import { ConversationMessageAdapter } from '@content/infrastructure/adapters/conversation-message.adapter';
+import { FriendContentAccessAdapter } from '@content/infrastructure/adapters/friend-content-access.adapter';
 import { FriendSharePolicyAdapter } from '@content/infrastructure/adapters/friend-share-policy.adapter';
 import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
 import { RecommendationTelemetryServiceAdapter } from '@content/infrastructure/adapters/recommendation-telemetry-service.adapter';
@@ -103,6 +105,11 @@ function createRmqClientRegistration(name: string, queue: string) {
     SearchPublicReelsUseCase,
     GetRecommendedReelsUseCase,
     GetSearchSuggestionsUseCase,
+    GetFriendsReelsUseCase,
+    {
+      provide: 'IFriendContentAccessService',
+      useClass: FriendContentAccessAdapter,
+    },
     {
       provide: 'IContentRepository',
       useExisting: ContentRepository,
