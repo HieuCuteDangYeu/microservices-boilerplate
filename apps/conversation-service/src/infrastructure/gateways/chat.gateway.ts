@@ -16,10 +16,7 @@ import Redis from 'ioredis';
 import { Server, Socket } from 'socket.io';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
-import {
-  Message,
-  type MessageMedia,
-} from '../../domain/entities/message.entity';
+import { type MessageMedia } from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { NotificationServiceAdapter } from '../adapters/notification-service.adapter';
 import { ChatMapper } from '../repositories/chat.mapper';
@@ -121,6 +118,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const senderId = await this.resolveUserId(client);
     if (!senderId) return;
 
+    if (!payload.clientMessageId?.trim()) {
+      client.emit('message_failed', {
+        conversationId: payload.conversationId,
+        clientMessageId: payload.clientMessageId,
+      });
+      return;
+    }
+
     try {
       await this.chatRepository.assertConversationParticipant(
         payload.conversationId,
@@ -137,87 +142,75 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const tempMessage = {
-      id: crypto.randomUUID(),
-      conversationId: payload.conversationId,
-      senderId,
-      clientMessageId: payload.clientMessageId,
-      content: payload.content,
-      media: payload.media,
-      type: payload.type,
-      signalType: payload.signalType,
-      replyToId: payload.replyToId,
-      createdAt: new Date(),
-      status: 'sending',
-    };
+    try {
+      const result = await this.sendMessageUseCase.execute(payload, senderId);
+      const savedMessage = result.message;
+      const savedMessageDto = ChatMapper.toDto(savedMessage);
 
-    this.server.to(payload.conversationId).emit('new_message', tempMessage);
+      // Always reconcile the sending socket. For an idempotent retry this is
+      // the only event: all fan-out must happen exactly once.
+      client.emit('message_synced', savedMessageDto);
 
-    this.sendMessageUseCase
-      .execute(payload, senderId)
-      .then(async (savedMessage: Message) => {
-        const savedMessageDto = ChatMapper.toDto(savedMessage);
+      if (!result.created) {
+        return;
+      }
 
-        client.emit('message_synced', savedMessageDto);
-        client
+      client.to(payload.conversationId).emit('new_message', savedMessageDto);
+
+      // Update conversation sidebar for all participants (lastMessage, ordering)
+      const conversation = await this.chatRepository.findConversation(
+        payload.conversationId,
+      );
+      if (conversation) {
+        conversation.lastMessageAt = savedMessage.createdAt;
+        this.server
           .to(payload.conversationId)
-          .emit('message_synced', savedMessageDto);
+          .emit(
+            'conversation_updated',
+            ChatMapper.conversationToDto(conversation),
+          );
+      }
 
-        // Update conversation sidebar for all participants (lastMessage, ordering)
-        const conversation = await this.chatRepository.findConversation(
-          payload.conversationId,
-        );
-        if (conversation) {
-          conversation.lastMessageAt = savedMessage.createdAt;
-          this.server
-            .to(payload.conversationId)
-            .emit(
-              'conversation_updated',
-              ChatMapper.conversationToDto(conversation),
+      void this.notificationService.notifyNewMessage(
+        conversation,
+        savedMessage,
+        senderId,
+      );
+
+      void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
+        async (botResult) => {
+          if (botResult.botReply) {
+            this.server
+              .to(savedMessage.conversationId)
+              .emit('new_message', ChatMapper.toDto(botResult.botReply));
+
+            // Update conversation sidebar with bot reply as lastMessage
+            const botConversation = await this.chatRepository.findConversation(
+              savedMessage.conversationId,
             );
-        }
-
-        void this.notificationService.notifyNewMessage(
-          conversation,
-          savedMessage,
-          senderId,
-        );
-
-        void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
-          async (result) => {
-            if (result.botReply) {
+            if (botConversation) {
+              botConversation.lastMessageAt = botResult.botReply.createdAt;
               this.server
                 .to(savedMessage.conversationId)
-                .emit('new_message', ChatMapper.toDto(result.botReply));
-
-              // Update conversation sidebar with bot reply as lastMessage
-              const conversation = await this.chatRepository.findConversation(
-                savedMessage.conversationId,
-              );
-              if (conversation) {
-                conversation.lastMessageAt = result.botReply.createdAt;
-                this.server
-                  .to(savedMessage.conversationId)
-                  .emit(
-                    'conversation_updated',
-                    ChatMapper.conversationToDto(conversation),
-                  );
-              }
+                .emit(
+                  'conversation_updated',
+                  ChatMapper.conversationToDto(botConversation),
+                );
             }
-          },
-          (err) => {
-            this.logger.warn(
-              `Bot reply trigger failed: ${(err as Error).message}`,
-            );
-          },
-        );
-      })
-      .catch(() => {
-        this.server.to(client.id).emit('message_failed', {
-          conversationId: payload.conversationId,
-          clientMessageId: payload.clientMessageId,
-        });
+          }
+        },
+        (err) => {
+          this.logger.warn(
+            `Bot reply trigger failed: ${(err as Error).message}`,
+          );
+        },
+      );
+    } catch {
+      this.server.to(client.id).emit('message_failed', {
+        conversationId: payload.conversationId,
+        clientMessageId: payload.clientMessageId,
       });
+    }
   }
 
   @SubscribeMessage('join_conversation')

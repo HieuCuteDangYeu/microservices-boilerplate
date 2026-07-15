@@ -7,8 +7,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/conversation-client';
+import {
+  Prisma,
+  type Message as PrismaMessage,
+} from '@prisma/conversation-client';
 import Redis from 'ioredis';
+import { randomUUID } from 'node:crypto';
 
 // Entities & Interfaces
 import {
@@ -28,6 +32,7 @@ import {
   IChatRepository,
   type AnchorMessageExpansion,
   type AnchorMessageWindow,
+  type CreateMessageResult,
   type MarkMessagesAsSeenResult,
   type MediaProcessingSyncResult,
 } from '../../domain/interfaces/chat.repository.interface';
@@ -71,31 +76,22 @@ export class PrismaChatRepository implements IChatRepository {
 
   // --- 1. CREATE MESSAGE ---
   async createMessage(message: Message): Promise<Message> {
+    return (await this.createMessageIdempotently(message)).message;
+  }
+
+  async createMessageIdempotently(
+    message: Message,
+  ): Promise<CreateMessageResult> {
+    // Legacy internal producers do not supply a client key. They keep working
+    // with a server-generated key; public HTTP and Socket entry points require
+    // a client key before reaching this method.
+    const clientMessageId =
+      message.clientMessageId?.trim() || `server:${randomUUID()}`;
+
     await this.assertConversationParticipant(
       message.conversationId,
       message.senderId,
     );
-
-    if (message.clientMessageId) {
-      const existingMessage = await this.prisma.message.findFirst({
-        where: {
-          conversationId: message.conversationId,
-          senderId: message.senderId,
-          clientMessageId: message.clientMessageId,
-        },
-      });
-
-      if (existingMessage) {
-        const domainMessage = ChatMapper.toDomain(existingMessage);
-        if (domainMessage.signalType === 0) {
-          domainMessage.content = this.encryptionRepository.decrypt(
-            domainMessage.content,
-          );
-        }
-
-        return domainMessage;
-      }
-    }
 
     // BƯỚC 1: Chuẩn bị dữ liệu (CPU bound - cực nhanh)
     let contentToSave = message.content;
@@ -131,40 +127,70 @@ export class PrismaChatRepository implements IChatRepository {
 
     // BƯỚC 2: Thực thi DB song song (Prisma Transaction)
     // Giúp giảm Round-trip time xuống DB từ 2 lần còn 1 lần
-    const [savedMsg] = await this.prisma.$transaction([
-      // Op 1: Tạo message
-      this.prisma.message.create({
-        data: {
-          type: message.type,
-          clientMessageId: message.clientMessageId,
-          signalType: message.signalType ?? 1,
-          content: contentToSave,
-          media: message.media
-            ? (message.media as unknown as Prisma.InputJsonValue)
-            : null,
-          metadata: message.metadata
-            ? (message.metadata as unknown as Prisma.InputJsonValue)
-            : null,
-          registrationId: message.registrationId,
-          senderId: message.senderId,
-          isRecalled: false,
-          replyToId: message.replyToId,
-          replyPreview: replyPreview
-            ? (replyPreview as unknown as Prisma.InputJsonValue)
-            : null,
+    let savedMsg: PrismaMessage;
+    try {
+      [savedMsg] = await this.prisma.$transaction([
+        // Op 1: Tạo message
+        this.prisma.message.create({
+          data: {
+            type: message.type,
+            clientMessageId,
+            signalType: message.signalType ?? 1,
+            content: contentToSave,
+            media: message.media
+              ? (message.media as unknown as Prisma.InputJsonValue)
+              : null,
+            metadata: message.metadata
+              ? (message.metadata as unknown as Prisma.InputJsonValue)
+              : null,
+            registrationId: message.registrationId,
+            senderId: message.senderId,
+            isRecalled: false,
+            replyToId: message.replyToId,
+            replyPreview: replyPreview
+              ? (replyPreview as unknown as Prisma.InputJsonValue)
+              : null,
+            conversationId: message.conversationId,
+            readBy: [],
+          },
+        }),
+        // Op 2: Update conversation (Last message)
+        this.prisma.conversation.update({
+          where: { id: message.conversationId },
+          data: {
+            lastMessage: previewText,
+            lastMessageAt: new Date(),
+          },
+        }),
+      ]);
+    } catch (error: unknown) {
+      // The compound unique index is the source of truth. A retry may race
+      // with the original request, so P2002 is a successful idempotent read.
+      if (!this.isClientMessageIdConflict(error)) {
+        throw error;
+      }
+
+      const existingMessage = await this.prisma.message.findFirst({
+        where: {
           conversationId: message.conversationId,
-          readBy: [],
+          senderId: message.senderId,
+          clientMessageId,
         },
-      }),
-      // Op 2: Update conversation (Last message)
-      this.prisma.conversation.update({
-        where: { id: message.conversationId },
-        data: {
-          lastMessage: previewText,
-          lastMessageAt: new Date(),
-        },
-      }),
-    ]);
+      });
+
+      if (!existingMessage) {
+        throw error;
+      }
+
+      return {
+        message: await this.syncPendingMediaTracking(
+          this.hydrateReadableMessageContent(
+            ChatMapper.toDomain(existingMessage),
+          ),
+        ),
+        created: false,
+      };
+    }
 
     // BƯỚC 3: Map về Domain Model
     let domainMsg = ChatMapper.toDomain(savedMsg);
@@ -179,7 +205,7 @@ export class PrismaChatRepository implements IChatRepository {
     // messages. A delayed cache write could otherwise resurrect recalled data.
     await this.clearConversationCache(domainMsg.conversationId);
 
-    return domainMsg;
+    return { message: domainMsg, created: true };
   }
 
   async syncMediaProcessingResult(
@@ -1152,6 +1178,13 @@ export class PrismaChatRepository implements IChatRepository {
     } catch (error) {
       this.logger.error(error);
     }
+  }
+
+  private isClientMessageIdConflict(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
   }
 
   private async clearConversationCaches(conversationIds: string[]) {

@@ -208,7 +208,17 @@ export class ConversationMicroserviceController {
   ): Promise<CreateMessageResponse> {
     try {
       const { senderId, ...dto } = data;
-      const savedMessage = await this.sendMessageUseCase.execute(dto, senderId);
+      const result = await this.sendMessageUseCase.execute(dto, senderId);
+      const savedMessage = result.message;
+
+      // A retry must get the original message back, but it must not fan out
+      // another socket event, notification, or bot invocation.
+      if (!result.created) {
+        return {
+          message: ChatMapper.toDto(savedMessage),
+          created: false,
+        };
+      }
 
       this.chatGateway.server
         .to(dto.conversationId)
@@ -268,6 +278,7 @@ export class ConversationMicroserviceController {
 
       return {
         message: ChatMapper.toDto(savedMessage),
+        created: true,
       };
     } catch (err: unknown) {
       const error = err as Error;

@@ -464,6 +464,14 @@ export class ConversationController {
       throw new BadRequestException('Content cannot be empty');
     }
 
+    if (
+      typeof body?.clientMessageId !== 'string' ||
+      body.clientMessageId.trim().length === 0 ||
+      body.clientMessageId.length > 200
+    ) {
+      throw new BadRequestException('clientMessageId is required');
+    }
+
     const type = body?.type ?? 'text';
     if (!['text', 'image', 'video', 'file', 'call', 'reel'].includes(type)) {
       throw new BadRequestException('Invalid message type');
@@ -484,7 +492,7 @@ export class ConversationController {
     const response = await lastValueFrom(
       this.conversationClient.send<CreateMessageResponse>('create_message', {
         conversationId,
-        clientMessageId: body.clientMessageId,
+        clientMessageId: body.clientMessageId.trim(),
         content: body.content.trim(),
         media: body.media,
         type,

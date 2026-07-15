@@ -7,6 +7,8 @@ export interface CreateMessageError {
 
 export interface CreateMessageResponse {
   message: MessageDto;
+  /** False when this response is for a retry of an already persisted message. */
+  created: boolean;
   botReply?: MessageDto;
   botError?: CreateMessageError;
 }

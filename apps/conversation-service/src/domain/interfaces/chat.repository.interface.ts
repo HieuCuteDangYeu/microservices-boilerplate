@@ -12,6 +12,16 @@ export interface MediaProcessingSyncResult {
   discardedBecauseRecalled?: boolean;
 }
 
+/**
+ * `created` is deliberately part of the persistence contract.  Callers must
+ * only produce externally visible side effects (socket events, push and bot
+ * work) for a newly-created message, never for an idempotent retry.
+ */
+export interface CreateMessageResult {
+  message: Message;
+  created: boolean;
+}
+
 export interface MarkMessagesAsSeenResult {
   updatedCount: number;
   seenAt?: Date;
@@ -38,6 +48,9 @@ export interface AnchorMessageExpansion {
 
 export abstract class IChatRepository {
   abstract createMessage(message: Message): Promise<Message>;
+  abstract createMessageIdempotently(
+    message: Message,
+  ): Promise<CreateMessageResult>;
   abstract assertConversationParticipant(
     conversationId: string,
     userId: string,

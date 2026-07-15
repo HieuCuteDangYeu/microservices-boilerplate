@@ -1,7 +1,10 @@
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Message } from '../../domain/entities/message.entity';
-import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
+import {
+  type CreateMessageResult,
+  IChatRepository,
+} from '../../domain/interfaces/chat.repository.interface';
 
 @Injectable()
 export class SendMessageUseCase {
@@ -11,12 +14,15 @@ export class SendMessageUseCase {
     @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
   ) {}
 
-  async execute(dto: CreateMessageDto, senderId: string): Promise<Message> {
+  async execute(
+    dto: CreateMessageDto,
+    senderId: string,
+  ): Promise<CreateMessageResult> {
     const newMessage = new Message({
       id: '',
       conversationId: dto.conversationId,
       senderId,
-      clientMessageId: dto.clientMessageId,
+      clientMessageId: dto.clientMessageId?.trim() || undefined,
       content: dto.content,
       media: dto.media,
       signalType: dto.signalType,
@@ -25,12 +31,15 @@ export class SendMessageUseCase {
       replyToId: dto.replyToId,
     });
 
-    const savedMessage = await this.chatRepository.createMessage(newMessage);
-    savedMessage.clientMessageId = dto.clientMessageId;
+    const result =
+      await this.chatRepository.createMessageIdempotently(newMessage);
+
     this.logger.debug(
-      `Message ${savedMessage.id} saved to conversation ${dto.conversationId}`,
+      result.created
+        ? `Message ${result.message.id} saved to conversation ${dto.conversationId}`
+        : `Message ${result.message.id} returned for idempotent retry in conversation ${dto.conversationId}`,
     );
 
-    return savedMessage;
+    return result;
   }
 }

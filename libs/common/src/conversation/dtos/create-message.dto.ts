@@ -19,8 +19,9 @@ export const CreateMessageSchema = z.object({
   conversationId: z.string().min(1, 'Conversation ID is required'),
   clientMessageId: z
     .string()
+    .trim()
     .min(1, 'Client message ID cannot be empty')
-    .optional(),
+    .max(200, 'Client message ID is too long'),
   type: ConversationMessageTypeSchema.optional().default('text'),
   signalType: z
     .number()

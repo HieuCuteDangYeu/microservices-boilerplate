@@ -51,7 +51,7 @@ model Conversation {
 model Message {
   id              String  @id @default(auto()) @map("_id") @db.ObjectId
   type            String  @default("text")
-  clientMessageId String?
+  clientMessageId String
 
   // 2. SIGNAL TYPE: Dùng cho Mã hóa (Server chỉ chuyển tiếp)
   // 1: WhisperMessage (Tin bình thường)
@@ -78,6 +78,7 @@ model Message {
 
   @@index([conversationId, createdAt(sort: Desc)])
   @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)])
+  @@unique([conversationId, senderId, clientMessageId])
   @@index([replyToId])
   @@map("messages")
 }
