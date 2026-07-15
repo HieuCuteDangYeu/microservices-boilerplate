@@ -20,6 +20,7 @@ async function bootstrap() {
   const allowedOrigins = new Set([
     ...parseOrigins(configService.get<string>('FRONTEND_URL')),
     ...parseOrigins(configService.get<string>('CALL_OPS_DASHBOARD_ORIGINS')),
+    ...parseOrigins(configService.get<string>('BACKEND_URL')),
     ...(process.env.NODE_ENV === 'production'
       ? []
       : ['http://localhost:5173', 'http://localhost:3000']),
