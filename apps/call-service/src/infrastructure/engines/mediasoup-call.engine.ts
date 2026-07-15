@@ -16,6 +16,10 @@ import type {
   RouterRtpCapabilitiesResult,
 } from '../../domain/interfaces/call-media.engine.interface';
 import { RedisCallStateRepository } from '../repositories/redis-call-state.repository';
+import {
+  getAnnouncedIpAddressFamily,
+  validateMediasoupNetworkConfiguration,
+} from './mediasoup-network-configuration';
 
 type MediaType = 'audio' | 'video';
 type TransportDirection = 'send' | 'recv';
@@ -61,6 +65,17 @@ export class MediasoupCallMediaEngine
   constructor(private readonly stateRepository: RedisCallStateRepository) {}
 
   async onModuleInit(): Promise<void> {
+    const announcedIp = process.env.MEDIASOUP_ANNOUNCED_IP?.trim();
+    validateMediasoupNetworkConfiguration({
+      environment: process.env.NODE_ENV,
+      announcedIp,
+    });
+    if (process.env.NODE_ENV?.toLowerCase() === 'production') {
+      this.logger.log(
+        `Validated public Mediasoup ${getAnnouncedIpAddressFamily(announcedIp)} candidate configuration`,
+      );
+    }
+
     await this.bootstrapWorkers(this.workerCount);
   }
 
@@ -436,8 +451,7 @@ export class MediasoupCallMediaEngine
         },
       ],
       enableUdp: true,
-      enableTcp: true,
-      preferUdp: true,
+      enableTcp: false,
       initialAvailableOutgoingBitrate: 800000,
       appData: {
         callId,
