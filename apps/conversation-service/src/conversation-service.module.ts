@@ -16,6 +16,7 @@ import { GetUserConversationsUseCase } from 'apps/conversation-service/src/appli
 import { ProcessBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/process-bot-reply.use-case';
 import { TriggerBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/trigger-bot-reply.use-case';
 import { AiServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/ai-service.adapter';
+import { ChatMediaServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/chat-media.service.adapter';
 import { NotificationServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/notification-service.adapter';
 import { UserServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/user-service.adapter';
 import { ConversationMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/conversation.controller';
@@ -79,6 +80,21 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
         }),
         inject: [ConfigService],
       },
+      {
+        name: 'MEDIA_SERVICE_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: 'media_queue',
+            queueOptions: { durable: true },
+            heartbeat: 60,
+            retryAttempts: 10,
+            retryDelay: 3000,
+          },
+        }),
+        inject: [ConfigService],
+      },
     ]),
   ],
   controllers: [ConversationMicroserviceController, KeyMicroserviceController],
@@ -119,6 +135,10 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     {
       provide: 'IAiService',
       useClass: AiServiceAdapter,
+    },
+    {
+      provide: 'IChatMediaService',
+      useClass: ChatMediaServiceAdapter,
     },
     NotificationServiceAdapter,
 

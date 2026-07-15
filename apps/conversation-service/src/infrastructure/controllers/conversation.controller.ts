@@ -22,6 +22,7 @@ import { GetMessagesUseCase } from '../../application/use-cases/get-messages.use
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
+import type { IChatMediaService } from '../../domain/interfaces/chat-media.service.interface';
 import { NotificationServiceAdapter } from '../adapters/notification-service.adapter';
 import { ChatGateway } from '../gateways/chat.gateway';
 import { ChatMapper } from '../repositories/chat.mapper';
@@ -44,6 +45,8 @@ export class ConversationMicroserviceController {
     private readonly triggerBotReplyUseCase: TriggerBotReplyUseCase,
     private readonly notificationService: NotificationServiceAdapter,
     @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
+    @Inject('IChatMediaService')
+    private readonly chatMediaService: IChatMediaService,
   ) {}
 
   @MessagePattern('create_conversation')
@@ -413,6 +416,18 @@ export class ConversationMicroserviceController {
         data.media,
       );
 
+      if (result.discardedBecauseRecalled) {
+        await this.chatMediaService.deleteRecalledChatMedia({
+          userId: data.userId,
+          fileKeys: [
+            data.fileKey,
+            data.media.fileKey,
+            data.media.thumbnailKey,
+          ].filter((key): key is string => Boolean(key)),
+        });
+        return;
+      }
+
       result.conversationIds.forEach((conversationId) => {
         this.chatGateway.emitMediaProcessingCompleted(conversationId, {
           fileKey: data.fileKey,
@@ -437,6 +452,18 @@ export class ConversationMicroserviceController {
         data.fileKey,
         data.media,
       );
+
+      if (result.discardedBecauseRecalled) {
+        await this.chatMediaService.deleteRecalledChatMedia({
+          userId: data.userId,
+          fileKeys: [
+            data.fileKey,
+            data.media.fileKey,
+            data.media.thumbnailKey,
+          ].filter((key): key is string => Boolean(key)),
+        });
+        return;
+      }
 
       result.conversationIds.forEach((conversationId) => {
         this.chatGateway.emitMediaProcessingFailed(conversationId, {

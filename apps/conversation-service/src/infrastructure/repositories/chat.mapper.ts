@@ -7,6 +7,7 @@ import { Conversation } from '../../domain/entities/conversation.entity';
 import {
   Message,
   MessageMetadata,
+  RECALLED_MESSAGE_CONTENT,
   type MessageMedia,
   type MessageReactionMap,
   type MessageReplyPreview,
@@ -191,22 +192,25 @@ export class ChatMapper {
   }
 
   static toDto(domain: Message) {
+    const isRecalled = domain.isRecalled === true;
+
     return {
       id: domain.id,
       conversationId: domain.conversationId,
       senderId: domain.senderId,
       clientMessageId: domain.clientMessageId,
-      content: domain.content,
-      media: domain.media,
-      metadata: domain.metadata,
+      // Never serialize residual content or media from legacy recalled records.
+      content: isRecalled ? RECALLED_MESSAGE_CONTENT : domain.content,
+      media: isRecalled ? undefined : domain.media,
+      metadata: isRecalled ? undefined : domain.metadata,
       type: domain.type,
       signalType: domain.signalType,
       createdAt: domain.createdAt.toISOString(),
       isRecalled: domain.isRecalled,
       recalledAt: domain.recalledAt?.toISOString(),
       replyToId: domain.replyToId,
-      replyPreview: domain.replyPreview,
-      reactions: domain.reactions,
+      replyPreview: isRecalled ? undefined : domain.replyPreview,
+      reactions: isRecalled ? undefined : domain.reactions,
       createdAtMs: domain.createdAt.getTime(),
       readBy: domain.readBy.map((r) => ({
         userId: r.userId,

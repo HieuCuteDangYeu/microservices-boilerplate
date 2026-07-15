@@ -9,6 +9,7 @@ export interface MediaProcessingSyncResult {
   conversationIds: string[];
   messageIds: string[];
   media: MessageMedia;
+  discardedBecauseRecalled?: boolean;
 }
 
 export interface MarkMessagesAsSeenResult {

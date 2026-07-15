@@ -1,6 +1,8 @@
 import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import { ReadStatus } from './read-status.entity';
 
+export const RECALLED_MESSAGE_CONTENT = 'Tin nhắn đã thu hồi';
+
 export interface MessageReaction {
   emoji: string;
   createdAt: string;

@@ -1,4 +1,5 @@
 import {
+  DeleteObjectsCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -70,6 +71,36 @@ export class S3Service {
   getPublicUrl(key: string) {
     const normalizedKey = key.replace(/^\/+/, '');
     return `${this.publicDomain}/${normalizedKey}`;
+  }
+
+  async deleteObjects(keys: string[]): Promise<void> {
+    const normalizedKeys = [
+      ...new Set(
+        keys
+          .map((key) => key.replace(/^\/+/, '').trim())
+          .filter((key) => key.length > 0),
+      ),
+    ];
+
+    if (normalizedKeys.length === 0) {
+      return;
+    }
+
+    const response = await this.s3Client.send(
+      new DeleteObjectsCommand({
+        Bucket: this.bucketName,
+        Delete: {
+          Objects: normalizedKeys.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      }),
+    );
+
+    if (response.Errors?.length) {
+      throw new InternalServerErrorException(
+        'Could not delete all media objects',
+      );
+    }
   }
 
   async downloadObjectToFile(key: string, outputPath: string) {

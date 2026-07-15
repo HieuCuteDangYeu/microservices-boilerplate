@@ -18,6 +18,7 @@ import {
 import {
   Message,
   MessageMetadata,
+  RECALLED_MESSAGE_CONTENT,
   type MessageMedia,
   type MessageReactionMap,
   type MessageReplyPreview,
@@ -33,35 +34,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 
 // Mappers
-import { ReadStatus } from '../../domain/entities/read-status.entity';
 import type { IEncryptionRepository } from '../../domain/interfaces/encryption.repository.interface';
+import type { IChatMediaService } from '../../domain/interfaces/chat-media.service.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
 import { ChatMapper } from './chat.mapper';
 import { ConversationMapper } from './conversation.mapper';
-
-interface CachedReadStatus {
-  userId: string;
-  at: string;
-}
-
-interface CachedMessage {
-  id: string;
-  conversationId: string;
-  senderId: string;
-  clientMessageId?: string;
-  type: string;
-  signalType: number;
-  content: string;
-  metadata?: MessageMetadata;
-  media?: MessageMedia;
-  createdAt: string;
-  isRecalled?: boolean;
-  recalledAt?: string;
-  replyToId?: string;
-  replyPreview?: MessageReplyPreview;
-  readBy?: CachedReadStatus[];
-  reactions?: MessageReactionMap;
-}
 
 const RECALLED_PREVIEW_CONTENT = 'Tin nhắn đã thu hồi';
 const RECALLED_LAST_MESSAGE = '🚫 Message recalled';
@@ -87,6 +64,9 @@ export class PrismaChatRepository implements IChatRepository {
 
     @Inject('IUserService')
     private readonly userService: IUserService,
+
+    @Inject('IChatMediaService')
+    private readonly chatMediaService: IChatMediaService,
   ) {}
 
   // --- 1. CREATE MESSAGE ---
@@ -195,30 +175,11 @@ export class PrismaChatRepository implements IChatRepository {
 
     domainMsg = await this.syncPendingMediaTracking(domainMsg);
 
-    // BƯỚC 4: Cập nhật Redis dạng "Fire-and-Forget"
-    // KHÔNG dùng await ở đây. Để nó chạy ngầm, lỗi thì log lại sau.
-    // User nhận phản hồi ngay lập tức sau Bước 3.
-    this.updateRedisInBackground(domainMsg).catch((err: unknown) => {
-      const error = err as Error;
-      this.logger.error(
-        `Failed to update cache for msg ${domainMsg.id}`,
-        error.stack,
-      );
-    });
+    // History cache is invalidated instead of incrementally writing plaintext
+    // messages. A delayed cache write could otherwise resurrect recalled data.
+    await this.clearConversationCache(domainMsg.conversationId);
 
     return domainMsg;
-  }
-
-  private async updateRedisInBackground(domainMsg: Message) {
-    const redisKey = `chat:history:${domainMsg.conversationId}`;
-
-    const pipeline = this.redis.pipeline();
-
-    pipeline.lpush(redisKey, JSON.stringify(ChatMapper.toDto(domainMsg)));
-    pipeline.ltrim(redisKey, 0, 49);
-    pipeline.expire(redisKey, 60 * 60 * 24 * 7);
-
-    await pipeline.exec();
   }
 
   async syncMediaProcessingResult(
@@ -267,7 +228,25 @@ export class PrismaChatRepository implements IChatRepository {
       };
     }
 
-    const updatedMessages = existingMessages.map((messageRecord) => {
+    const activeMessages = existingMessages.filter(
+      (messageRecord) => !messageRecord.isRecalled,
+    );
+
+    if (activeMessages.length === 0) {
+      await this.redis.del(
+        this.pendingMediaKey(normalizedFileKey),
+        this.mediaResultKey(normalizedFileKey),
+      );
+
+      return {
+        conversationIds: [],
+        messageIds: [],
+        media: mergedMedia,
+        discardedBecauseRecalled: true,
+      };
+    }
+
+    const updatedMessages = activeMessages.map((messageRecord) => {
       const currentMedia = ChatMapper.toDomain(messageRecord).media;
       const nextMedia = this.mergeMessageMedia(currentMedia, mergedMedia);
 
@@ -310,49 +289,8 @@ export class PrismaChatRepository implements IChatRepository {
     limit: number = 20,
     cursor?: string,
   ): Promise<Message[]> {
-    const redisKey = `chat:history:${conversationId}`;
-
-    // CASE 1: Lấy trang đầu tiên (Không có cursor) -> Ưu tiên Redis
-    if (!cursor) {
-      const cached = await this.redis.lrange(redisKey, 0, limit - 1);
-
-      if (cached.length > 0) {
-        return cached
-          .map((item) => {
-            const plain = JSON.parse(item) as CachedMessage;
-            return new Message({
-              id: plain.id,
-              conversationId: plain.conversationId,
-              senderId: plain.senderId,
-              clientMessageId: plain.clientMessageId,
-              type: plain.type,
-              signalType: plain.signalType,
-              content: plain.content,
-              media: this.normalizeMedia(plain.media),
-              metadata: this.normalizeMetadata(plain.metadata),
-              createdAt: new Date(plain.createdAt),
-              isRecalled: plain.isRecalled,
-              recalledAt: plain.recalledAt
-                ? new Date(plain.recalledAt)
-                : undefined,
-              replyToId: plain.replyToId,
-              replyPreview: this.normalizeReplyPreview(plain.replyPreview),
-              reactions: this.normalizeReactions(plain.reactions),
-              readBy: (plain.readBy || []).map(
-                (s) =>
-                  new ReadStatus({
-                    userId: s.userId,
-                    at: new Date(s.at),
-                  }),
-              ),
-            });
-          })
-          .sort((left, right) =>
-            this.compareMessagesCanonicalNewestFirst(left, right),
-          )
-          .reverse();
-      }
-    }
+    // Do not serve history from Redis. A recalled message must never be
+    // recoverable from an asynchronous/stale content cache.
 
     const boundaryRecord = cursor
       ? await this.prisma.message.findUnique({
@@ -382,22 +320,16 @@ export class PrismaChatRepository implements IChatRepository {
 
     const domainMsgs = mongoMsgs.map((msg) => {
       const domain = ChatMapper.toDomain(msg);
+      if (domain.isRecalled) {
+        return this.redactRecalledMessage(domain);
+      }
+
       // Decrypt logic cho Normal Mode
       if (domain.signalType === 0) {
         domain.content = this.encryptionRepository.decrypt(domain.content);
       }
       return domain;
     });
-
-    // Hydrate Cache: Chỉ cache nếu đang load trang đầu tiên và Cache bị rỗng
-    if (!cursor && domainMsgs.length > 0) {
-      const pipeline = this.redis.pipeline();
-      domainMsgs.slice(0, 50).forEach((msg) => {
-        pipeline.rpush(redisKey, JSON.stringify(ChatMapper.toDto(msg)));
-      });
-      pipeline.expire(redisKey, 60 * 60 * 24 * 7);
-      await pipeline.exec();
-    }
 
     // Trả về kết quả (Reverse để client dễ render: Trên cùng là tin cũ, dưới cùng là tin mới)
     return domainMsgs
@@ -550,26 +482,6 @@ export class PrismaChatRepository implements IChatRepository {
         ? { nextCursor: visibleRecordsDesc[0]?.id }
         : {}),
     };
-  }
-
-  private async cacheMessagesToRedis(key: string, messages: Message[]) {
-    if (messages.length === 0) return;
-
-    const pipeline = this.redis.pipeline();
-
-    // Xóa cache cũ để tránh duplicate/sai lệch (Optional - tuỳ chiến lược)
-    // pipeline.del(key);
-
-    // Lưu vào Redis: [Newest -> Oldest]
-    // Vì 'messages' đang là DESC (từ DB), ta push vào list.
-    messages.forEach((msg) => {
-      // RPUSH: Đẩy vào đuôi.
-      // Nếu Redis đang rỗng, List sẽ là [Newest, 2nd Newest, ..., Oldest]
-      pipeline.rpush(key, JSON.stringify(msg));
-    });
-
-    pipeline.expire(key, 60 * 60 * 24 * 7); // 7 ngày
-    await pipeline.exec();
   }
 
   // --- CÁC HÀM KHÁC GIỮ NGUYÊN ---
@@ -885,6 +797,19 @@ export class PrismaChatRepository implements IChatRepository {
 
     const recalledAt = new Date();
     const conversationId = existingMessage.conversationId;
+    const recalledMedia = this.normalizeMedia(existingMessage.media);
+    const recalledMediaKeys = this.getOwnedChatMediaKeys(
+      recalledMedia,
+      existingMessage.senderId,
+    );
+
+    // Chat attachments are publicly addressed in R2. Remove the source objects
+    // before confirming the recall, otherwise clearing the database reference
+    // alone would leave the original URL accessible.
+    await this.chatMediaService.deleteRecalledChatMedia({
+      userId: existingMessage.senderId,
+      fileKeys: recalledMediaKeys,
+    });
 
     const result = await this.prisma.$transaction(async (tx) => {
       const replyMessages = await tx.message.findMany({
@@ -909,6 +834,14 @@ export class PrismaChatRepository implements IChatRepository {
         data: {
           isRecalled: true,
           recalledAt,
+          content:
+            existingMessage.signalType === 0
+              ? this.encryptionRepository.encrypt(RECALLED_MESSAGE_CONTENT)
+              : RECALLED_MESSAGE_CONTENT,
+          media: null,
+          metadata: null,
+          registrationId: null,
+          replyPreview: null,
           reactions: null,
         },
       });
@@ -950,10 +883,19 @@ export class PrismaChatRepository implements IChatRepository {
       };
     });
 
+    if (recalledMedia?.fileKey) {
+      await this.redis.hdel(
+        this.pendingMediaKey(this.normalizeMediaFileKey(recalledMedia.fileKey)),
+        messageId,
+      );
+    }
+
     await this.clearConversationCache(conversationId);
 
     return {
-      message: ChatMapper.toDomain(result.updatedMessage),
+      message: this.redactRecalledMessage(
+        ChatMapper.toDomain(result.updatedMessage),
+      ),
       updatedReplyMessageIds: result.updatedReplyMessageIds,
       previewContent: RECALLED_PREVIEW_CONTENT,
     };
@@ -1349,6 +1291,10 @@ export class PrismaChatRepository implements IChatRepository {
       messages.map(async (message) => {
         const domain = ChatMapper.toDomain(message);
 
+        if (domain.isRecalled) {
+          return this.redactRecalledMessage(domain);
+        }
+
         if (domain.signalType === 0) {
           domain.content = this.encryptionRepository.decrypt(domain.content);
         }
@@ -1562,12 +1508,46 @@ export class PrismaChatRepository implements IChatRepository {
   }
 
   private hydrateReadableMessageContent(message: Message): Message {
+    if (message.isRecalled) {
+      return this.redactRecalledMessage(message);
+    }
+
     if (message.signalType !== 0) {
       return message;
     }
 
     message.content = this.encryptionRepository.decrypt(message.content);
     return message;
+  }
+
+  private redactRecalledMessage(message: Message): Message {
+    message.content = RECALLED_MESSAGE_CONTENT;
+    message.media = undefined;
+    message.metadata = undefined;
+    message.registrationId = undefined;
+    message.replyPreview = undefined;
+    message.reactions = undefined;
+    return message;
+  }
+
+  private getOwnedChatMediaKeys(
+    media: MessageMedia | undefined,
+    userId: string,
+  ): string[] {
+    const keys = [media?.fileKey, media?.thumbnailKey].filter(
+      (key): key is string => typeof key === 'string' && key.trim().length > 0,
+    );
+    const ownedChatPrefixPattern = new RegExp(
+      `^(chat-images|chat-videos|chat-thumbnails)/${this.escapeRegExp(userId)}/`,
+    );
+
+    return [
+      ...new Set(keys.map((key) => this.normalizeMediaFileKey(key))),
+    ].filter((key) => ownedChatPrefixPattern.test(key));
+  }
+
+  private escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   private hydrateReactionUpdateMessage(message: Message): Message {

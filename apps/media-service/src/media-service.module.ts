@@ -1,4 +1,5 @@
 import { FinalizeChatUploadUseCase } from '@media/application/use-cases/finalize-chat-upload.use-case';
+import { DeleteRecalledChatMediaUseCase } from '@media/application/use-cases/delete-recalled-chat-media.use-case';
 import { ProcessingServiceAdapter } from '@media/infrastructure/adapters/processing-service.adapter';
 import { GetPresignedUrlUseCase } from '@media/application/use-cases/get-presigned-url.use-case';
 import { MediaController } from '@media/infrastructure/controllers/media.controller';
@@ -45,6 +46,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   controllers: [MediaController],
   providers: [
     FinalizeChatUploadUseCase,
+    DeleteRecalledChatMediaUseCase,
     GetPresignedUrlUseCase,
     S3Service,
     VideoProcessingService,

@@ -1,8 +1,9 @@
 import { FinalizeUploadDto } from '@common/media/dtos/finalize-upload.dto';
 import { GetPresignedUrlDto } from '@common/media/dtos/get-presigned-url.dto';
-import { Controller } from '@nestjs/common';
+import { Controller, ForbiddenException } from '@nestjs/common';
 import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 import { FinalizeChatUploadUseCase } from '../../application/use-cases/finalize-chat-upload.use-case';
+import { DeleteRecalledChatMediaUseCase } from '../../application/use-cases/delete-recalled-chat-media.use-case';
 import { GetPresignedUrlUseCase } from '../../application/use-cases/get-presigned-url.use-case';
 
 @Controller()
@@ -10,6 +11,7 @@ export class MediaController {
   constructor(
     private readonly getPresignedUrlUseCase: GetPresignedUrlUseCase,
     private readonly finalizeChatUploadUseCase: FinalizeChatUploadUseCase,
+    private readonly deleteRecalledChatMediaUseCase: DeleteRecalledChatMediaUseCase,
   ) {}
 
   @MessagePattern('media.get_presigned_url')
@@ -63,6 +65,21 @@ export class MediaController {
         statusCode,
         message,
       });
+    }
+  }
+
+  @MessagePattern('media.delete_recalled_chat_media')
+  async handleDeleteRecalledChatMedia(
+    @Payload() data: { userId: string; fileKeys: string[] },
+  ): Promise<void> {
+    try {
+      await this.deleteRecalledChatMediaUseCase.execute(data);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Internal Server Error';
+      const statusCode = error instanceof ForbiddenException ? 403 : 500;
+
+      throw new RpcException({ statusCode, message });
     }
   }
 }
