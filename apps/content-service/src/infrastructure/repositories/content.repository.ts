@@ -4,6 +4,11 @@ import { ReelContextSearchRequest } from '@common/content/interfaces/reel-contex
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { ReelShare } from '@content/domain/entities/reel-share.entity';
+import type { ReelViewEvent as DomainReelViewEvent } from '@content/domain/entities/reel-view-event.entity';
+import {
+  IReelViewEventRepository,
+  PersistReelViewEventsResult,
+} from '@content/domain/interfaces/reel-view-event.repository.interface';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/content-client';
@@ -25,15 +30,29 @@ import {
   ReelShareLinkCreateInput,
   ReelShareLinkWithReel,
   ReelUpdateData,
-  ReelViewEventInput,
   SearchSuggestion,
   SearchSuggestionsQuery,
 } from '../../domain/interfaces/content.repository.interface';
 
+interface InsertedReelViewEventRow {
+  eventId: string;
+  reelId: string;
+  userId: string;
+  playbackSessionId: string;
+  eventType: DomainReelViewEvent['eventType'];
+  occurredAt: Date;
+}
+
+interface StartedReelViewSession {
+  userId: string;
+  playbackSessionId: string;
+  startedAt: Date;
+}
+
 @Injectable()
 export class ContentRepository
   extends PrismaClient
-  implements OnModuleInit, IContentRepository
+  implements OnModuleInit, IContentRepository, IReelViewEventRepository
 {
   constructor(private readonly configService: ConfigService) {
     super();
@@ -1186,7 +1205,7 @@ export class ContentRepository
         where: {
           userId: viewerId,
           reelId: { in: candidateIds },
-          createdAt: { gte: eventSince },
+          occurredAt: { gte: eventSince },
         },
         select: {
           reelId: true,
@@ -1196,14 +1215,14 @@ export class ContentRepository
           skipped: true,
           completed: true,
           replayed: true,
-          createdAt: true,
+          occurredAt: true,
         },
       }),
 
       this.reelViewEvent.findMany({
         where: {
           userId: viewerId,
-          createdAt: { gte: eventSince },
+          occurredAt: { gte: eventSince },
           OR: [
             { eventType: { in: ['COMPLETE', 'REPLAY', 'WATCH_END'] } },
             { completed: true },
@@ -1211,7 +1230,7 @@ export class ContentRepository
             { percentageWatched: { gte: 70 } },
           ],
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { occurredAt: 'desc' },
         take: 500,
         select: {
           eventType: true,
@@ -1281,10 +1300,10 @@ export class ContentRepository
       );
       current.latestSeenAt = Math.max(
         current.latestSeenAt,
-        event.createdAt.getTime(),
+        event.occurredAt.getTime(),
       );
       current.recentlySeen =
-        current.recentlySeen || event.createdAt >= recentSince;
+        current.recentlySeen || event.occurredAt >= recentSince;
 
       statsByReel.set(event.reelId, current);
     }
@@ -1567,8 +1586,12 @@ export class ContentRepository
     const viewerEvents = await this.reelViewEvent.findMany({
       where: {
         userId: input.viewerId,
-        reelId: { in: reelIds },
-        createdAt: { gte: since },
+        reelId: {
+          in: reelIds,
+        },
+        occurredAt: {
+          gte: since,
+        },
       },
       select: {
         reelId: true,
@@ -1578,7 +1601,7 @@ export class ContentRepository
         skipped: true,
         completed: true,
         replayed: true,
-        createdAt: true,
+        occurredAt: true,
       },
     });
 
@@ -1629,7 +1652,7 @@ export class ContentRepository
       );
       current.latestSeenAt = Math.max(
         current.latestSeenAt,
-        event.createdAt.getTime(),
+        event.occurredAt.getTime(),
       );
 
       statsByReel.set(event.reelId, current);
@@ -1805,17 +1828,6 @@ export class ContentRepository
 
     await this.reel.delete({ where: { id } });
     return true;
-  }
-
-  async incrementViewCount(id: string): Promise<Reel | null> {
-    const record = await this.reel.update({
-      where: { id },
-      data: { viewCount: { increment: 1 } },
-    });
-
-    if (!record) return null;
-
-    return this.toDomain(record);
   }
 
   async findReelsForChunkBackfill(
@@ -2043,49 +2055,203 @@ export class ContentRepository
     return this.toReelShareLinkDomain(record);
   }
 
-  async trackReelEvents(events: ReelViewEventInput[]): Promise<void> {
+  async persist(
+    events: DomainReelViewEvent[],
+  ): Promise<PersistReelViewEventsResult> {
     if (events.length === 0) {
-      return;
+      return {
+        accepted: 0,
+        duplicates: 0,
+        rejected: 0,
+        countedViews: 0,
+        rejectedEventIds: [],
+      };
     }
 
-    await this.$transaction(async (tx) => {
-      await tx.reelViewEvent.createMany({
-        data: events.map((event) => ({
-          reelId: event.reelId,
-          userId: event.userId,
-          sessionId: event.sessionId,
-          eventType: event.eventType,
-          watchMs: event.watchMs ?? 0,
-          durationMs: event.durationMs,
-          percentageWatched: event.percentageWatched,
-          muted: event.muted,
-          completed: event.completed,
-          replayed: event.replayed,
-          skipped: event.skipped,
-        })),
+    const userId = events[0].userId;
+
+    const reelIds = [...new Set(events.map((event) => event.reelId))];
+
+    const accessibleReels = await this.reel.findMany({
+      where: {
+        id: {
+          in: reelIds,
+        },
+        status: 'COMPLETED',
+        OR: [
+          {
+            visibility: 'public',
+          },
+          {
+            userId,
+          },
+        ],
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const accessibleReelIds = new Set(accessibleReels.map((reel) => reel.id));
+
+    const acceptedCandidates = events.filter((event) =>
+      accessibleReelIds.has(event.reelId),
+    );
+
+    const rejectedEvents = events.filter(
+      (event) => !accessibleReelIds.has(event.reelId),
+    );
+
+    if (acceptedCandidates.length === 0) {
+      return {
+        accepted: 0,
+        duplicates: 0,
+        rejected: rejectedEvents.length,
+        countedViews: 0,
+        rejectedEventIds: rejectedEvents.map((event) => event.eventId),
+      };
+    }
+
+    const persisted = await this.$transaction(async (transaction) => {
+      const valueRows = acceptedCandidates.map((event) => {
+        const recommendation = event.recommendation;
+
+        return Prisma.sql`(
+                ${event.eventId},
+                ${event.reelId},
+                ${event.userId},
+                ${event.playbackSessionId},
+                ${event.sequence},
+                ${event.eventType}::"ReelViewEventType",
+                ${event.source}::"ReelEventSource",
+                ${event.watchMs},
+                ${event.durationMs},
+                ${event.percentageWatched},
+                ${event.muted},
+                ${event.completed},
+                ${event.replayed},
+                ${event.skipped},
+                ${recommendation?.recommendationId ?? null},
+                ${recommendation?.feedSessionId ?? null},
+                ${recommendation?.algorithmVersion ?? null},
+                ${recommendation?.candidateSource ?? null},
+                ${recommendation?.rank ?? null},
+                ${recommendation?.generatedAt ?? null},
+                ${event.occurredAt}
+              )`;
       });
 
-      const startedReelIds = [
-        ...new Set(
-          events
-            .filter((event) => event.eventType === 'WATCH_START')
-            .map((event) => event.reelId),
-        ),
-      ];
+      const insertedEvents = await transaction.$queryRaw<
+        InsertedReelViewEventRow[]
+      >(
+        Prisma.sql`
+              INSERT INTO "ReelViewEvent" (
+                "eventId",
+                "reelId",
+                "userId",
+                "playbackSessionId",
+                "sequence",
+                "eventType",
+                "source",
+                "watchMs",
+                "durationMs",
+                "percentageWatched",
+                "muted",
+                "completed",
+                "replayed",
+                "skipped",
+                "recommendationId",
+                "feedSessionId",
+                "algorithmVersion",
+                "candidateSource",
+                "rank",
+                "recommendationGeneratedAt",
+                "occurredAt"
+              )
+              VALUES ${Prisma.join(valueRows)}
+              ON CONFLICT DO NOTHING
+              RETURNING
+                "eventId",
+                "reelId",
+                "userId",
+                "playbackSessionId",
+                "eventType",
+                "occurredAt"
+            `,
+      );
 
-      for (const reelId of startedReelIds) {
-        await tx.reel.updateMany({
+      const startedSessionsByReel = new Map<
+        string,
+        Map<string, StartedReelViewSession>
+      >();
+
+      for (const event of insertedEvents) {
+        if (event.eventType !== 'WATCH_START') {
+          continue;
+        }
+
+        const sessions =
+          startedSessionsByReel.get(event.reelId) ??
+          new Map<string, StartedReelViewSession>();
+
+        const sessionKey = `${event.userId}:${event.playbackSessionId}`;
+
+        const existing = sessions.get(sessionKey);
+
+        if (!existing || event.occurredAt < existing.startedAt) {
+          sessions.set(sessionKey, {
+            userId: event.userId,
+            playbackSessionId: event.playbackSessionId,
+            startedAt: event.occurredAt,
+          });
+        }
+
+        startedSessionsByReel.set(event.reelId, sessions);
+      }
+
+      let countedViews = 0;
+
+      for (const [reelId, sessions] of startedSessionsByReel) {
+        const createdSessions = await transaction.reelViewSession.createMany({
+          data: [...sessions.values()].map((session) => ({
+            reelId,
+            userId: session.userId,
+            playbackSessionId: session.playbackSessionId,
+            startedAt: session.startedAt,
+          })),
+          skipDuplicates: true,
+        });
+
+        if (createdSessions.count === 0) {
+          continue;
+        }
+
+        await transaction.reel.update({
           where: {
             id: reelId,
-            status: 'COMPLETED',
           },
           data: {
             viewCount: {
-              increment: 1,
+              increment: createdSessions.count,
             },
           },
         });
+
+        countedViews += createdSessions.count;
       }
+
+      return {
+        inserted: insertedEvents.length,
+        countedViews,
+      };
     });
+
+    return {
+      accepted: persisted.inserted,
+      duplicates: acceptedCandidates.length - persisted.inserted,
+      rejected: rejectedEvents.length,
+      countedViews: persisted.countedViews,
+      rejectedEventIds: rejectedEvents.map((event) => event.eventId),
+    };
   }
 }

@@ -16,6 +16,30 @@ enum ProcessingStatus {
   FAILED
 }
 
+enum ReelViewEventType {
+  IMPRESSION
+  WATCH_START
+  WATCH_PROGRESS
+  WATCH_END
+  SKIP
+  COMPLETE
+  REPLAY
+  PAUSE
+  RESUME
+  MUTE
+  UNMUTE
+}
+
+enum ReelEventSource {
+  RECOMMENDED
+  PUBLIC_FEED
+  PROFILE
+  SEARCH
+  SHARED
+  DIRECT
+  UNKNOWN
+}
+
 model Reel {
   id                      String           @id @default(uuid())
   userId                  String
@@ -54,10 +78,11 @@ model Reel {
   createdAt               DateTime         @default(now())
   updatedAt               DateTime         @updatedAt
 
-  chunks     ReelChunk[]
-  shares     ReelShare[]
-  shareLinks ReelShareLink[]
-  viewEvents ReelViewEvent[]
+  chunks       ReelChunk[]
+  shares       ReelShare[]
+  shareLinks   ReelShareLink[]
+  viewEvents   ReelViewEvent[]
+  viewSessions ReelViewSession[]
 
   @@index([userId])
   @@index([visibility, createdAt(sort: Desc)])
@@ -131,26 +156,54 @@ model ReelShareLink {
 }
 
 model ReelViewEvent {
-  id                String   @id @default(uuid())
-  reelId            String
+  eventId                      String            @id
+  reelId                       String
+  userId                       String
+  playbackSessionId            String
+  sequence                     Int
+  eventType                    ReelViewEventType
+  source                       ReelEventSource   @default(UNKNOWN)
+  watchMs                      Int               @default(0)
+  durationMs                   Int?
+  percentageWatched            Float?
+  muted                        Boolean?
+  completed                    Boolean           @default(false)
+  replayed                     Boolean           @default(false)
+  skipped                      Boolean           @default(false)
+  recommendationId             String?
+  feedSessionId                String?
+  algorithmVersion             String?
+  candidateSource              String?
+  rank                         Int?
+  recommendationGeneratedAt    DateTime?
+  occurredAt                   DateTime
+  receivedAt                   DateTime          @default(now())
+
+  reel Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reelId, playbackSessionId, sequence])
+  @@index([reelId, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([userId, reelId, occurredAt])
+  @@index([userId, playbackSessionId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([source, occurredAt])
+  @@index([feedSessionId])
+  @@index([recommendationId])
+  @@index([receivedAt])
+}
+
+model ReelViewSession {
   userId            String
-  sessionId         String?
-  eventType         String
-  watchMs           Int      @default(0)
-  durationMs        Int?
-  percentageWatched Float?
-  muted             Boolean?
-  completed         Boolean?
-  replayed          Boolean?
-  skipped           Boolean?
+  reelId            String
+  playbackSessionId String
+  startedAt         DateTime
   createdAt         DateTime @default(now())
 
   reel Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
 
-  @@index([reelId])
-  @@index([userId])
-  @@index([eventType])
+  @@id([userId, reelId, playbackSessionId])
+  @@index([reelId, startedAt])
+  @@index([userId, startedAt])
   @@index([createdAt])
-  @@index([userId, createdAt])
-  @@index([userId, reelId, createdAt])
 }

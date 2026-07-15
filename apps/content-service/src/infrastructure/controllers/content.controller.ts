@@ -1,6 +1,6 @@
-import { TrackReelEventsUseCase } from '@ai/application/use-cases/track-reel-events.use-case';
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
+import { TrackReelEventPayload } from '@common/content/dtos/track-reel-events.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
@@ -12,13 +12,13 @@ import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-r
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
-import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
+import { TrackReelEventsUseCase } from '@content/application/use-cases/track-reel-events.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
@@ -52,7 +52,6 @@ export class ContentController {
     private readonly getRecommendedReelsUseCase: GetRecommendedReelsUseCase,
     private readonly getReelUseCase: GetReelUseCase,
     private readonly getProfileReelContextUseCase: GetProfileReelContextUseCase,
-    private readonly incrementReelViewUseCase: IncrementReelViewUseCase,
     private readonly updateReelUseCase: UpdateReelUseCase,
     private readonly deleteReelUseCase: DeleteReelUseCase,
     private readonly updateReelStatusUseCase: UpdateReelStatusUseCase,
@@ -750,12 +749,6 @@ export class ContentController {
     }
   }
 
-  @MessagePattern('content.increment_reel_view')
-  async incrementReelView(@Payload() data: { reelId: string }) {
-    await this.incrementReelViewUseCase.execute(data.reelId);
-    return { success: true };
-  }
-
   @MessagePattern('content.update_reel')
   async updateReel(
     @Payload()
@@ -1114,29 +1107,7 @@ export class ContentController {
     @Payload()
     data: {
       userId: string;
-      events: Array<{
-        reelId: string;
-        sessionId?: string;
-        eventType:
-          | 'IMPRESSION'
-          | 'WATCH_START'
-          | 'WATCH_PROGRESS'
-          | 'WATCH_END'
-          | 'SKIP'
-          | 'COMPLETE'
-          | 'REPLAY'
-          | 'PAUSE'
-          | 'RESUME'
-          | 'MUTE'
-          | 'UNMUTE';
-        watchMs?: number;
-        durationMs?: number;
-        percentageWatched?: number;
-        muted?: boolean;
-        completed?: boolean;
-        replayed?: boolean;
-        skipped?: boolean;
-      }>;
+      events: TrackReelEventPayload[];
     },
   ) {
     if (
@@ -1153,9 +1124,37 @@ export class ContentController {
       });
     }
 
-    await this.trackReelEventsUseCase.execute(data.userId, data.events);
+    const result = await this.trackReelEventsUseCase.execute({
+      userId: data.userId,
+      events: data.events.map((event) => ({
+        eventId: event.eventId,
+        reelId: event.reelId,
+        playbackSessionId: event.playbackSessionId,
+        sequence: event.sequence,
+        eventType: event.eventType,
+        source: event.source,
+        occurredAt: new Date(event.occurredAt),
+        watchMs: event.watchMs,
+        durationMs: event.durationMs,
+        percentageWatched: event.percentageWatched,
+        muted: event.muted,
+        completed: event.completed,
+        replayed: event.replayed,
+        skipped: event.skipped,
+        recommendation: event.recommendation
+          ? {
+              recommendationId: event.recommendation.recommendationId,
+              feedSessionId: event.recommendation.feedSessionId,
+              algorithmVersion: event.recommendation.algorithmVersion,
+              candidateSource: event.recommendation.candidateSource,
+              rank: event.recommendation.rank,
+              generatedAt: new Date(event.recommendation.generatedAt),
+            }
+          : undefined,
+      })),
+    });
 
-    return { success: true };
+    return result;
   }
 
   private normalizeBackfillNumber(

@@ -1,12 +1,7 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
-const uuidSchema = z
-  .string()
-  .regex(
-    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
-    'Invalid UUID format',
-  );
+const uuidSchema = z.string().uuid();
 
 export const ReelViewEventTypeSchema = z.enum([
   'IMPRESSION',
@@ -22,10 +17,37 @@ export const ReelViewEventTypeSchema = z.enum([
   'UNMUTE',
 ]);
 
+export const ReelEventSourceSchema = z.enum([
+  'RECOMMENDED',
+  'PUBLIC_FEED',
+  'PROFILE',
+  'SEARCH',
+  'SHARED',
+  'DIRECT',
+  'UNKNOWN',
+]);
+
+export const ReelEventRecommendationSchema = z.object({
+  recommendationId: uuidSchema,
+  feedSessionId: uuidSchema,
+  algorithmVersion: z.string().trim().min(1).max(120),
+  candidateSource: z.string().trim().min(1).max(120),
+  rank: z.coerce.number().int().min(1).max(10000),
+  generatedAt: z.string().datetime({
+    offset: true,
+  }),
+});
+
 export const TrackReelEventSchema = z.object({
+  eventId: uuidSchema,
   reelId: uuidSchema,
-  sessionId: z.string().min(1).max(120).optional(),
+  playbackSessionId: uuidSchema,
+  sequence: z.coerce.number().int().min(0).max(1_000_000),
   eventType: ReelViewEventTypeSchema,
+  source: ReelEventSourceSchema.default('UNKNOWN'),
+  occurredAt: z.string().datetime({
+    offset: true,
+  }),
   watchMs: z.coerce
     .number()
     .int()
@@ -43,6 +65,7 @@ export const TrackReelEventSchema = z.object({
   completed: z.boolean().optional(),
   replayed: z.boolean().optional(),
   skipped: z.boolean().optional(),
+  recommendation: ReelEventRecommendationSchema.optional(),
 });
 
 export const TrackReelEventsSchema = z.object({
@@ -50,7 +73,15 @@ export const TrackReelEventsSchema = z.object({
 });
 
 export type ReelViewEventType = z.infer<typeof ReelViewEventTypeSchema>;
+
+export type ReelEventSource = z.infer<typeof ReelEventSourceSchema>;
+
+export type ReelEventRecommendation = z.infer<
+  typeof ReelEventRecommendationSchema
+>;
+
 export type TrackReelEventPayload = z.infer<typeof TrackReelEventSchema>;
+
 export type TrackReelEventsPayload = z.infer<typeof TrackReelEventsSchema>;
 
 export class TrackReelEventsDto extends createZodDto(TrackReelEventsSchema) {}

@@ -17,6 +17,7 @@ import {
 } from '@common/content/interfaces/reel-response.interface';
 import { ReelShareLinkResponse } from '@common/content/interfaces/reel-share-link.interface';
 import { ReelShareResponse } from '@common/content/interfaces/reel-share.interface';
+import { TrackReelEventsResponse } from '@common/content/interfaces/track-reel-events-response.interface';
 import { Reel } from '@content/domain/entities/reel.entity';
 import {
   JwtAuthGuard,
@@ -41,7 +42,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { catchError, lastValueFrom, of } from 'rxjs';
+import { catchError, lastValueFrom } from 'rxjs';
 import { ReelAuthorService } from './reel-author.service';
 
 @ApiTags('Content')
@@ -170,21 +171,31 @@ export class ContentController {
   }
 
   @Post('reels/events')
-  @ApiOperation({ summary: 'Track reel watch/impression events' })
+  @ApiOperation({
+    summary: 'Persist retry-safe reel interaction events',
+  })
   async trackReelEvents(
-    @Req() request: AuthenticatedRequest,
-    @Body() body: TrackReelEventsDto,
-  ) {
-    await lastValueFrom(
+    @Req()
+    request: AuthenticatedRequest,
+    @Body()
+    body: TrackReelEventsDto,
+  ): Promise<TrackReelEventsResponse> {
+    const result = await lastValueFrom(
       this.contentClient
-        .send<{ success: boolean }>('content.track_reel_events', {
-          userId: request.user!.id,
-          events: body.events,
-        })
+        .send<Omit<TrackReelEventsResponse, 'success'>>(
+          'content.track_reel_events',
+          {
+            userId: request.user!.id,
+            events: body.events,
+          },
+        )
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
 
-    return { success: true };
+    return {
+      success: true,
+      ...result,
+    };
   }
 
   @Get('reels/recommended')
@@ -248,9 +259,6 @@ export class ContentController {
       throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
     }
 
-    // Increment view count only after visibility check passes
-    await this.incrementReelViewQuietly(reelId);
-
     return this._enrichReel(reel, { includeTranscript: true });
   }
 
@@ -286,8 +294,6 @@ export class ContentController {
     ) {
       throw new HttpException('Reel not found', HttpStatus.NOT_FOUND);
     }
-
-    await this.incrementReelViewQuietly(reelId);
 
     return {
       source: 'profile',
@@ -545,14 +551,6 @@ export class ContentController {
       ...this._enrichReel(reel),
       author: this.reelAuthorService.resolveAuthor(authorsById, reel.userId),
     }));
-  }
-
-  private async incrementReelViewQuietly(reelId: string): Promise<void> {
-    await lastValueFrom(
-      this.contentClient
-        .send<{ success: boolean }>('content.increment_reel_view', { reelId })
-        .pipe(catchError(() => of({ success: false }))),
-    );
   }
 
   private buildStreamUrl(mediaKey: string): string {

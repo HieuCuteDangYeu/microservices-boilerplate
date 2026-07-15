@@ -1,4 +1,3 @@
-import { TrackReelEventsUseCase } from '@ai/application/use-cases/track-reel-events.use-case';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
@@ -9,7 +8,6 @@ import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-r
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
-import { IncrementReelViewUseCase } from '@content/application/use-cases/increment-reel-view.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
@@ -17,6 +15,7 @@ import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revok
 import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
 import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
+import { TrackReelEventsUseCase } from '@content/application/use-cases/track-reel-events.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-embedding-service.adapter';
@@ -83,11 +82,11 @@ function createRmqClientRegistration(name: string, queue: string) {
   ],
   controllers: [ContentController],
   providers: [
+    ContentRepository,
     CreateReelUseCase,
     ListReelsUseCase,
     GetReelUseCase,
     GetProfileReelContextUseCase,
-    IncrementReelViewUseCase,
     UpdateReelUseCase,
     DeleteReelUseCase,
     UpdateReelStatusUseCase,
@@ -106,7 +105,11 @@ function createRmqClientRegistration(name: string, queue: string) {
     GetSearchSuggestionsUseCase,
     {
       provide: 'IContentRepository',
-      useClass: ContentRepository,
+      useExisting: ContentRepository,
+    },
+    {
+      provide: 'IReelViewEventRepository',
+      useExisting: ContentRepository,
     },
     {
       provide: 'IStorageService',

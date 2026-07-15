@@ -256,8 +256,4 @@ export interface IContentRepository {
   ): Promise<Reel | null>;
 
   deleteReel(id: string, userId: string): Promise<boolean>;
-
-  incrementViewCount(id: string): Promise<Reel | null>;
-
-  trackReelEvents(events: ReelViewEventInput[]): Promise<void>;
 }
