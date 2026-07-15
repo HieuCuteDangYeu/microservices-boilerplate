@@ -20,11 +20,17 @@ async function bootstrap() {
   const allowedOrigins = new Set([
     ...parseOrigins(configService.get<string>('FRONTEND_URL')),
     ...parseOrigins(configService.get<string>('CALL_OPS_DASHBOARD_ORIGINS')),
-    ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173']),
+    ...(process.env.NODE_ENV === 'production'
+      ? []
+      : ['http://localhost:5173', 'http://localhost:3000']),
   ]);
+
   app.enableCors({
     credentials: true,
-    origin: (origin, callback) => {
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       if (!origin || allowedOrigins.has(origin)) {
         callback(null, true);
         return;
