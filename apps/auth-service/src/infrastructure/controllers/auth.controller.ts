@@ -104,7 +104,14 @@ export class AuthController {
 
   @MessagePattern('auth.verify_token')
   async verifyToken(@Payload() data: { token: string }) {
-    return await this.verifyTokenUseCase.execute(data.token);
+    try {
+      return await this.verifyTokenUseCase.execute(data.token);
+    } catch {
+      throw new RpcException({
+        statusCode: 401,
+        message: 'Invalid or expired token',
+      });
+    }
   }
 
   @MessagePattern('auth.confirm_account')
