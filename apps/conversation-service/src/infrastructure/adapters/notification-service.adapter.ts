@@ -112,7 +112,7 @@ export class NotificationServiceAdapter {
       case 'call':
         return '[Call]';
       default:
-        return 'You have a new message.'
+        return 'You have a new message.';
     }
   }
 }

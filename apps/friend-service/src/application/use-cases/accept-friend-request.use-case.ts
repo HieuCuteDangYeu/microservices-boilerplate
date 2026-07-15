@@ -1,11 +1,9 @@
-import { SagaCompensationError } from '@common/domain/errors/saga.error';
-import { FriendshipActionResponse } from '@common/friend/interfaces/friend.types';
+import type { FriendshipActionResponse } from '@common/friend/interfaces/friend.types';
 import { FriendActionForbiddenError } from '@friend/domain/errors/friend-action-forbidden.error';
 import { FriendRequestNotFoundError } from '@friend/domain/errors/friend-request-not-found.error';
-import type { Friendship } from '@friend/domain/entities/friendship.entity';
 import type { IConversationService } from '@friend/domain/interfaces/conversation-service.interface';
-import { Inject, Injectable } from '@nestjs/common';
 import type { IFriendRepository } from '@friend/domain/interfaces/friend.repository.interface';
+import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
 export class AcceptFriendRequestUseCase {
@@ -20,60 +18,42 @@ export class AcceptFriendRequestUseCase {
     userId: string,
     requestId: string,
   ): Promise<FriendshipActionResponse> {
-    const friendship = await this.friendRepository.findById(requestId);
+    const result = await this.friendRepository.acceptPendingRequest(
+      requestId,
+      userId,
+      new Date(),
+    );
 
-    if (!friendship || friendship.status !== 'PENDING') {
-      throw new FriendRequestNotFoundError(requestId);
-    }
+    switch (result.outcome) {
+      case 'not_found':
+      case 'not_pending':
+        throw new FriendRequestNotFoundError(requestId);
 
-    if (friendship.recipientId !== userId) {
-      throw new FriendActionForbiddenError(
-        'Only the request recipient can accept this friend request',
-      );
-    }
-
-    let updatedFriendship: Friendship | null = null;
-
-    try {
-      updatedFriendship = await this.friendRepository.updateStatus(
-        requestId,
-        'ACCEPTED',
-        new Date(),
-      );
-
-      const conversationId =
-        await this.conversationService.createDirectConversation(
-          userId,
-          friendship.getOtherUserId(userId),
+      case 'forbidden':
+        throw new FriendActionForbiddenError(
+          'Only the request recipient can accept this friend request',
         );
 
-      return {
-        message: 'Friend request accepted',
-        status: 'friends',
-        id: updatedFriendship.id!,
-        conversationId,
-      };
-    } catch (error) {
-      if (updatedFriendship) {
-        try {
-          await this.friendRepository.updateStatus(
-            updatedFriendship.id!,
-            'PENDING',
-            null,
-          );
-        } catch (compensationError) {
-          console.error(
-            `Failed to rollback accepted friendship ${updatedFriendship.id}`,
-            compensationError,
-          );
-        }
-      }
+      case 'accepted':
+      case 'already_accepted': {
+        const otherUserId = result.friendship.getOtherUserId(userId);
 
-      throw new SagaCompensationError(
-        error instanceof Error
-          ? error.message
-          : 'Failed to accept friend request',
-      );
+        const conversationId =
+          await this.conversationService.createDirectConversation(
+            userId,
+            otherUserId,
+          );
+
+        return {
+          message:
+            result.outcome === 'accepted'
+              ? 'Friend request accepted'
+              : 'Friend request was already accepted',
+          status: 'friends',
+          id: result.friendship.id!,
+          ...(conversationId ? { conversationId } : {}),
+        };
+      }
     }
   }
 }

@@ -1,8 +1,8 @@
-import { FriendshipActionResponse } from '@common/friend/interfaces/friend.types';
-import { Inject, Injectable } from '@nestjs/common';
+import type { FriendshipActionResponse } from '@common/friend/interfaces/friend.types';
 import { FriendActionForbiddenError } from '@friend/domain/errors/friend-action-forbidden.error';
 import { FriendRequestNotFoundError } from '@friend/domain/errors/friend-request-not-found.error';
-import type { IFriendRepository } from '../../domain/interfaces/friend.repository.interface';
+import type { IFriendRepository } from '@friend/domain/interfaces/friend.repository.interface';
+import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
 export class RejectFriendRequestUseCase {
@@ -15,23 +15,27 @@ export class RejectFriendRequestUseCase {
     userId: string,
     requestId: string,
   ): Promise<FriendshipActionResponse> {
-    const friendship = await this.friendRepository.findById(requestId);
+    const result = await this.friendRepository.deletePendingIncomingRequest(
+      requestId,
+      userId,
+    );
 
-    if (!friendship || friendship.status !== 'PENDING') {
-      throw new FriendRequestNotFoundError(requestId);
+    if (result.outcome === 'deleted' || result.outcome === 'not_found') {
+      return {
+        message:
+          result.outcome === 'deleted'
+            ? 'Friend request rejected'
+            : 'Friend request was already removed',
+        status: 'none',
+      };
     }
 
-    if (friendship.recipientId !== userId) {
+    if (result.outcome === 'forbidden') {
       throw new FriendActionForbiddenError(
         'Only the request recipient can reject this friend request',
       );
     }
 
-    await this.friendRepository.delete(requestId);
-
-    return {
-      message: 'Friend request rejected',
-      status: 'none',
-    };
+    throw new FriendRequestNotFoundError(requestId);
   }
 }

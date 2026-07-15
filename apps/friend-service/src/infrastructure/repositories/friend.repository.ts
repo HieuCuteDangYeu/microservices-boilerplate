@@ -1,29 +1,25 @@
 import { Friendship } from '@friend/domain/entities/friendship.entity';
 import type {
+  AcceptFriendRequestResult,
+  CreateOrFindFriendshipResult,
+  DeleteFriendRequestResult,
   FriendshipPaginationCursor,
   IFriendRepository,
   PaginatedFriendships,
 } from '@friend/domain/interfaces/friend.repository.interface';
+import { PrismaService } from '@friend/infrastructure/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
-import { Friendship as PrismaFriendship } from '@prisma/friend-client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { Prisma, Friendship as PrismaFriendship } from '@prisma/friend-client';
 
 @Injectable()
 export class FriendRepository implements IFriendRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(friendship: Friendship): Promise<Friendship> {
-    const createdFriendship = await this.prisma.friendship.create({
-      data: {
-        requesterId: friendship.requesterId,
-        recipientId: friendship.recipientId,
-        userOneId: friendship.userOneId,
-        userTwoId: friendship.userTwoId,
-        status: friendship.status,
-      },
-    });
-
-    return this.toDomain(createdFriendship);
+  async createOrFindPending(
+    friendship: Friendship,
+  ): Promise<CreateOrFindFriendshipResult> {
+    return this.createOrFindPendingAttempt(friendship, true);
   }
 
   async findById(id: string): Promise<Friendship | null> {
@@ -39,6 +35,7 @@ export class FriendRepository implements IFriendRepository {
     otherUserId: string,
   ): Promise<Friendship | null> {
     const { userOneId, userTwoId } = Friendship.createPair(userId, otherUserId);
+
     const friendship = await this.prisma.friendship.findUnique({
       where: {
         userOneId_userTwoId: {
@@ -49,6 +46,177 @@ export class FriendRepository implements IFriendRepository {
     });
 
     return friendship ? this.toDomain(friendship) : null;
+  }
+
+  async acceptPendingRequest(
+    requestId: string,
+    recipientId: string,
+    respondedAt: Date,
+  ): Promise<AcceptFriendRequestResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      const updated = await transaction.friendship.updateMany({
+        where: {
+          id: requestId,
+          recipientId,
+          status: 'PENDING',
+        },
+        data: {
+          status: 'ACCEPTED',
+          respondedAt,
+        },
+      });
+
+      if (updated.count === 1) {
+        const friendship = await transaction.friendship.findUnique({
+          where: {
+            id: requestId,
+          },
+        });
+
+        if (!friendship) {
+          return {
+            outcome: 'not_found',
+          };
+        }
+
+        return {
+          outcome: 'accepted',
+          friendship: this.toDomain(friendship),
+        };
+      }
+
+      const current = await transaction.friendship.findUnique({
+        where: {
+          id: requestId,
+        },
+      });
+
+      if (!current) {
+        return {
+          outcome: 'not_found',
+        };
+      }
+
+      if (current.recipientId !== recipientId) {
+        return {
+          outcome: 'forbidden',
+        };
+      }
+
+      if (current.status === 'ACCEPTED') {
+        return {
+          outcome: 'already_accepted',
+          friendship: this.toDomain(current),
+        };
+      }
+
+      return {
+        outcome: 'not_pending',
+      };
+    });
+  }
+
+  async deletePendingIncomingRequest(
+    requestId: string,
+    recipientId: string,
+  ): Promise<DeleteFriendRequestResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      const deleted = await transaction.friendship.deleteMany({
+        where: {
+          id: requestId,
+          recipientId,
+          status: 'PENDING',
+        },
+      });
+
+      if (deleted.count === 1) {
+        return {
+          outcome: 'deleted',
+        };
+      }
+
+      const current = await transaction.friendship.findUnique({
+        where: {
+          id: requestId,
+        },
+      });
+
+      if (!current) {
+        return {
+          outcome: 'not_found',
+        };
+      }
+
+      if (current.recipientId !== recipientId) {
+        return {
+          outcome: 'forbidden',
+        };
+      }
+
+      return {
+        outcome: 'not_pending',
+      };
+    });
+  }
+
+  async deletePendingOutgoingRequest(
+    requestId: string,
+    requesterId: string,
+  ): Promise<DeleteFriendRequestResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      const deleted = await transaction.friendship.deleteMany({
+        where: {
+          id: requestId,
+          requesterId,
+          status: 'PENDING',
+        },
+      });
+
+      if (deleted.count === 1) {
+        return {
+          outcome: 'deleted',
+        };
+      }
+
+      const current = await transaction.friendship.findUnique({
+        where: {
+          id: requestId,
+        },
+      });
+
+      if (!current) {
+        return {
+          outcome: 'not_found',
+        };
+      }
+
+      if (current.requesterId !== requesterId) {
+        return {
+          outcome: 'forbidden',
+        };
+      }
+
+      return {
+        outcome: 'not_pending',
+      };
+    });
+  }
+
+  async deleteAcceptedByUsers(
+    userId: string,
+    otherUserId: string,
+  ): Promise<boolean> {
+    const { userOneId, userTwoId } = Friendship.createPair(userId, otherUserId);
+
+    const result = await this.prisma.friendship.deleteMany({
+      where: {
+        userOneId,
+        userTwoId,
+        status: 'ACCEPTED',
+      },
+    });
+
+    return result.count > 0;
   }
 
   async listIncomingPending(
@@ -62,7 +230,14 @@ export class FriendRepository implements IFriendRepository {
         status: 'PENDING',
         ...this.buildCursorFilter('createdAt', cursor),
       },
-      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          id: 'asc',
+        },
+      ],
       take: limit + 1,
     });
 
@@ -80,7 +255,14 @@ export class FriendRepository implements IFriendRepository {
         status: 'PENDING',
         ...this.buildCursorFilter('createdAt', cursor),
       },
-      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          id: 'asc',
+        },
+      ],
       take: limit + 1,
     });
 
@@ -95,56 +277,112 @@ export class FriendRepository implements IFriendRepository {
     const records = await this.prisma.friendship.findMany({
       where: {
         status: 'ACCEPTED',
-        OR: [{ userOneId: userId }, { userTwoId: userId }],
+        OR: [
+          {
+            userOneId: userId,
+          },
+          {
+            userTwoId: userId,
+          },
+        ],
         ...this.buildCursorFilter('updatedAt', cursor),
       },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+      orderBy: [
+        {
+          updatedAt: 'desc',
+        },
+        {
+          id: 'asc',
+        },
+      ],
       take: limit + 1,
     });
 
     return this.buildPage(records, limit, 'updatedAt');
   }
 
-  async updateStatus(
-    id: string,
-    status: 'PENDING' | 'ACCEPTED',
-    respondedAt: Date | null,
-  ): Promise<Friendship> {
-    const friendship = await this.prisma.friendship.update({
-      where: { id },
-      data: {
-        status: status,
-        respondedAt,
-      },
-    });
+  private async createOrFindPendingAttempt(
+    friendship: Friendship,
+    allowRetry: boolean,
+  ): Promise<CreateOrFindFriendshipResult> {
+    try {
+      const created = await this.prisma.friendship.create({
+        data: {
+          requesterId: friendship.requesterId,
+          recipientId: friendship.recipientId,
+          userOneId: friendship.userOneId,
+          userTwoId: friendship.userTwoId,
+          status: 'PENDING',
+        },
+      });
 
-    return this.toDomain(friendship);
-  }
+      return {
+        friendship: this.toDomain(created),
+        created: true,
+      };
+    } catch (error) {
+      if (!this.isUniqueConstraintError(error)) {
+        throw error;
+      }
 
-  async delete(id: string): Promise<void> {
-    await this.prisma.friendship.delete({
-      where: { id },
-    });
+      const existing = await this.findByUsers(
+        friendship.requesterId,
+        friendship.recipientId,
+      );
+
+      if (existing) {
+        return {
+          friendship: existing,
+          created: false,
+        };
+      }
+
+      if (allowRetry) {
+        return this.createOrFindPendingAttempt(friendship, false);
+      }
+
+      throw error;
+    }
   }
 
   private buildCursorFilter(
     field: 'createdAt' | 'updatedAt',
     cursor?: FriendshipPaginationCursor,
-  ): Record<string, unknown> {
+  ): Prisma.FriendshipWhereInput {
     if (!cursor) {
       return {};
     }
 
-    return {
-      AND: [
-        {
-          OR: [
-            { [field]: { lt: cursor.timestamp } },
-            {
-              [field]: cursor.timestamp,
-              id: { gt: cursor.id },
+    if (field === 'createdAt') {
+      return {
+        OR: [
+          {
+            createdAt: {
+              lt: cursor.timestamp,
             },
-          ],
+          },
+          {
+            createdAt: cursor.timestamp,
+            id: {
+              gt: cursor.id,
+            },
+          },
+        ],
+      };
+    }
+
+    return {
+      OR: [
+        {
+          updatedAt: {
+            lt: cursor.timestamp,
+          },
+        },
+        {
+          updatedAt: cursor.timestamp,
+          id: {
+            gt: cursor.id,
+          },
         },
       ],
     };
@@ -156,9 +394,11 @@ export class FriendRepository implements IFriendRepository {
     cursorField: 'createdAt' | 'updatedAt',
   ): PaginatedFriendships {
     const hasMore = records.length > limit;
+
     const items = records
       .slice(0, limit)
       .map((friendship) => this.toDomain(friendship));
+
     const lastItem = items[items.length - 1];
 
     return {
@@ -171,6 +411,12 @@ export class FriendRepository implements IFriendRepository {
             }
           : null,
     };
+  }
+
+  private isUniqueConstraintError(error: unknown): boolean {
+    return (
+      error instanceof PrismaClientKnownRequestError && error.code === 'P2002'
+    );
   }
 
   private toDomain(friendship: PrismaFriendship): Friendship {

@@ -1,21 +1,18 @@
-import { FriendshipActionResponse } from '@common/friend/interfaces/friend.types';
-import { Inject, Injectable } from '@nestjs/common';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import type { FriendshipActionResponse } from '@common/friend/interfaces/friend.types';
+import { Friendship } from '@friend/domain/entities/friendship.entity';
 import { CannotFriendSelfError } from '@friend/domain/errors/cannot-friend-self.error';
-import { FriendRequestAlreadyExistsError } from '@friend/domain/errors/friend-request-already-exists.error';
-import { FriendRequestAlreadyReceivedError } from '@friend/domain/errors/friend-request-already-received.error';
 import { FriendUserNotFoundError } from '@friend/domain/errors/friend-user-not-found.error';
-import { FriendshipAlreadyExistsError } from '@friend/domain/errors/friendship-already-exists.error';
-import { Friendship } from '../../domain/entities/friendship.entity';
-import type { IFriendRepository } from '../../domain/interfaces/friend.repository.interface';
-import type { IUserService } from '../../domain/interfaces/user-service.interface';
+import type { IFriendRepository } from '@friend/domain/interfaces/friend.repository.interface';
+import type { IUserService } from '@friend/domain/interfaces/user-service.interface';
+import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
 export class SendFriendRequestUseCase {
   constructor(
     @Inject('IFriendRepository')
     private readonly friendRepository: IFriendRepository,
-    @Inject('IUserService') private readonly userService: IUserService,
+    @Inject('IUserService')
+    private readonly userService: IUserService,
   ) {}
 
   async execute(
@@ -28,78 +25,58 @@ export class SendFriendRequestUseCase {
 
     await this.ensureRecipientExists(recipientId);
 
-    const existing = await this.friendRepository.findByUsers(
-      userId,
-      recipientId,
-    );
-
-    if (existing) {
-      this.throwForExistingRelationship(existing, userId);
-    }
-
     const { userOneId, userTwoId } = Friendship.createPair(userId, recipientId);
 
-    try {
-      const friendship = await this.friendRepository.create(
-        new Friendship(
-          null,
-          userId,
-          recipientId,
-          userOneId,
-          userTwoId,
-          'PENDING',
-          null,
-          null,
-          null,
-        ),
-      );
+    const result = await this.friendRepository.createOrFindPending(
+      new Friendship(
+        null,
+        userId,
+        recipientId,
+        userOneId,
+        userTwoId,
+        'PENDING',
+        null,
+        null,
+        null,
+      ),
+    );
 
+    if (result.created) {
       return {
         message: 'Friend request sent',
         status: 'request_sent',
-        id: friendship.id!,
+        id: result.friendship.id!,
       };
-    } catch (error) {
-      if (
-        error instanceof PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        const conflict = await this.friendRepository.findByUsers(
-          userId,
-          recipientId,
-        );
-
-        if (conflict) {
-          this.throwForExistingRelationship(conflict, userId);
-        }
-      }
-
-      throw error;
     }
+
+    if (result.friendship.status === 'ACCEPTED') {
+      return {
+        message: 'Users are already friends',
+        status: 'friends',
+        id: result.friendship.id!,
+      };
+    }
+
+    if (result.friendship.requesterId === userId) {
+      return {
+        message: 'Friend request already sent',
+        status: 'request_sent',
+        id: result.friendship.id!,
+      };
+    }
+
+    return {
+      message: 'You already have an incoming friend request from this user',
+      status: 'request_received',
+      id: result.friendship.id!,
+    };
   }
 
   private async ensureRecipientExists(recipientId: string): Promise<void> {
-    const recipients = await this.userService.findPublicUsersByIds([
-      recipientId,
-    ]);
+    const users = await this.userService.findPublicUsersByIds([recipientId]);
 
-    if (recipients.length === 0) {
+    if (users.length === 0) {
       throw new FriendUserNotFoundError(recipientId);
     }
-  }
-
-  private throwForExistingRelationship(
-    friendship: Friendship,
-    userId: string,
-  ): never {
-    if (friendship.status === 'ACCEPTED') {
-      throw new FriendshipAlreadyExistsError();
-    }
-
-    if (friendship.requesterId === userId) {
-      throw new FriendRequestAlreadyExistsError();
-    }
-
-    throw new FriendRequestAlreadyReceivedError();
   }
 }

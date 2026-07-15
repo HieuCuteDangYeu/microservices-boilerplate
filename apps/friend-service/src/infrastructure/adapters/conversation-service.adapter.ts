@@ -2,20 +2,21 @@ import { isRpcError } from '@common/constants/rpc-error.types';
 import type { IConversationService } from '@friend/domain/interfaces/conversation-service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { catchError, lastValueFrom, throwError, timeout } from 'rxjs';
+import { catchError, lastValueFrom, of, timeout } from 'rxjs';
 
 @Injectable()
 export class ConversationServiceAdapter implements IConversationService {
   private readonly logger = new Logger(ConversationServiceAdapter.name);
 
   constructor(
-    @Inject('CONVERSATION_SERVICE_RMQ') private readonly client: ClientProxy,
+    @Inject('CONVERSATION_SERVICE_RMQ')
+    private readonly client: ClientProxy,
   ) {}
 
   async createDirectConversation(
     userId: string,
     otherUserId: string,
-  ): Promise<string> {
+  ): Promise<string | null> {
     const result = await lastValueFrom(
       this.client
         .send<{ id: string }>('create_conversation', {
@@ -25,20 +26,24 @@ export class ConversationServiceAdapter implements IConversationService {
         })
         .pipe(
           timeout(5000),
-          catchError((err: unknown) => {
-            const message = this.describeError(err);
-
+          catchError((error: unknown) => {
             this.logger.error(
-              `RPC Error [createDirectConversation]: ${message}`,
+              `Direct conversation creation failed: ${this.describeError(
+                error,
+              )}`,
             );
 
-            return throwError(() => new Error(message));
+            return of(null);
           }),
         ),
     );
 
-    if (!result?.id) {
-      throw new Error('Conversation service returned an invalid response');
+    if (
+      !result ||
+      typeof result.id !== 'string' ||
+      result.id.trim().length === 0
+    ) {
+      return null;
     }
 
     return result.id;
@@ -55,6 +60,6 @@ export class ConversationServiceAdapter implements IConversationService {
       return error.message;
     }
 
-    return 'Failed to create conversation';
+    return 'Unknown conversation service error';
   }
 }
