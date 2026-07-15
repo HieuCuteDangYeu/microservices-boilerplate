@@ -275,6 +275,7 @@ export class ContentController {
         .send<Reel | null>('content.get_reel', {
           reelId,
           viewerId: request.user!.id,
+          isAdmin: request.user!.roles?.includes('ADMIN') === true,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );

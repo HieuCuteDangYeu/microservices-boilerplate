@@ -527,6 +527,7 @@ export class ContentController {
     @Payload()
     data: {
       reelId: string;
+      viewerId: string;
       before?: number;
       after?: number;
     },
@@ -534,6 +535,9 @@ export class ContentController {
     if (
       !data ||
       typeof data.reelId !== 'string' ||
+      data.reelId.trim().length === 0 ||
+      typeof data.viewerId !== 'string' ||
+      data.viewerId.trim().length === 0 ||
       (data.before !== undefined &&
         (!Number.isInteger(data.before) || data.before < 0)) ||
       (data.after !== undefined &&
@@ -547,7 +551,8 @@ export class ContentController {
 
     try {
       const context = await this.getProfileReelContextUseCase.execute(
-        data.reelId,
+        data.reelId.trim(),
+        data.viewerId.trim(),
         data.before ?? 1,
         data.after ?? 5,
       );
@@ -577,6 +582,7 @@ export class ContentController {
       }
 
       const err = error as Error;
+
       throw new RpcException({
         statusCode: 500,
         message: `Get Profile Reel Context Error: ${err.message}`,
@@ -744,22 +750,36 @@ export class ContentController {
   }
 
   @MessagePattern('content.get_reel')
-  async getReel(@Payload() data: { reelId: string; viewerId: string }) {
+  async getReel(
+    @Payload()
+    data: {
+      reelId: string;
+      viewerId: string;
+      isAdmin?: boolean;
+    },
+  ) {
     try {
       const reel = await this.getReelUseCase.execute(
         data.reelId,
         data.viewerId,
+        data.isAdmin === true,
       );
+
       if (!reel) {
         throw new RpcException({
           statusCode: 404,
           message: 'Reel not found',
         });
       }
+
       return this.toSerializable(reel);
     } catch (error: unknown) {
-      if (error instanceof RpcException) throw error;
+      if (error instanceof RpcException) {
+        throw error;
+      }
+
       const err = error as Error;
+
       throw new RpcException({
         statusCode: 500,
         message: `Get Reel Error: ${err.message}`,

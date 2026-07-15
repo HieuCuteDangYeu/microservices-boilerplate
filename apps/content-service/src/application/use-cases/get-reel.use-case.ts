@@ -12,11 +12,19 @@ export class GetReelUseCase {
     private readonly friendContentAccessService: IFriendContentAccessService,
   ) {}
 
-  async execute(id: string, viewerId: string): Promise<Reel | null> {
+  async execute(
+    id: string,
+    viewerId: string,
+    isAdmin = false,
+  ): Promise<Reel | null> {
     const reel = await this.repository.findById(id);
 
     if (!reel) {
       return null;
+    }
+
+    if (isAdmin) {
+      return reel;
     }
 
     const allowed = await this.friendContentAccessService.canView({

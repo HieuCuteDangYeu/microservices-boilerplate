@@ -1,4 +1,5 @@
 import type { IContentRepository } from '@content/domain/interfaces/content.repository.interface';
+import type { IFriendContentAccessService } from '@content/domain/interfaces/friend-content-access.service.interface';
 import type { IRecommendationConfig } from '@content/domain/interfaces/recommendation-config.interface';
 import type { IRecommendationTelemetryService } from '@content/domain/interfaces/recommendation-telemetry-service.interface';
 import type {
@@ -16,6 +17,8 @@ export class GetRecommendedReelsUseCase {
     private readonly recommendationConfig: IRecommendationConfig,
     @Inject('IRecommendationTelemetryService')
     private readonly recommendationTelemetryService: IRecommendationTelemetryService,
+    @Inject('IFriendContentAccessService')
+    private readonly friendContentAccessService: IFriendContentAccessService,
   ) {}
 
   async execute(
@@ -31,9 +34,15 @@ export class GetRecommendedReelsUseCase {
     const featureFlags = this.recommendationConfig.getFeatureFlags();
     const startedAt = Date.now();
 
+    const audience = await this.friendContentAccessService.getFeedAudience(
+      input.viewerId,
+    );
+
     const excludedUserIds = [
       ...new Set(
-        (input.excludedUserIds ?? []).map((id) => id.trim()).filter(Boolean),
+        [...audience.excludedUserIds, ...(input.excludedUserIds ?? [])]
+          .map((id) => id.trim())
+          .filter(Boolean),
       ),
     ];
 
