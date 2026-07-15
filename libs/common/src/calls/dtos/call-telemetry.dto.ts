@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 const finiteNumber = z.number().finite();
+const telemetryPlatform = z.enum(['ios', 'android', 'web']);
+const telemetryDirection = z.enum(['incoming', 'outgoing']);
 const audioRouteType = z.enum([
   'receiver',
   'speaker',
@@ -25,10 +27,10 @@ export const CallTelemetryEventSchema = z
     outcome: z.enum(['started', 'succeeded', 'failed', 'ended']).optional(),
     elapsedMs: finiteNumber.min(0).max(86_400_000),
     occurredAt: z.string().datetime(),
-    platform: z.enum(['ios', 'android', 'web']),
+    platform: telemetryPlatform,
     appVersion: z.string().min(1).max(64),
     osVersion: z.string().min(1).max(64).optional(),
-    direction: z.enum(['incoming', 'outgoing']).optional(),
+    direction: telemetryDirection.optional(),
     errorCode: z.string().min(1).max(80).optional(),
     metrics: z
       .object({
@@ -69,9 +71,41 @@ export const TrackCallTelemetrySchema = z
   })
   .strict();
 
+export const CallTelemetryQuerySchema = z
+  .object({
+    from: z.string().datetime(),
+    to: z.string().datetime(),
+    platform: telemetryPlatform.optional(),
+    osVersion: z.string().min(1).max(64).optional(),
+    appVersion: z.string().min(1).max(64).optional(),
+    direction: telemetryDirection.optional(),
+  })
+  .strict()
+  .superRefine((query, context) => {
+    if (new Date(query.from) > new Date(query.to)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['to'],
+        message: 'to must be greater than or equal to from',
+      });
+    }
+  });
+
+export const CallTelemetryTimelineSchema = z
+  .object({
+    callId: z.string().uuid(),
+  })
+  .strict();
+
 export type CallTelemetryEventPayload = z.infer<
   typeof CallTelemetryEventSchema
 >;
 export type TrackCallTelemetryPayload = z.infer<
   typeof TrackCallTelemetrySchema
+>;
+export type CallTelemetryQueryPayload = z.infer<
+  typeof CallTelemetryQuerySchema
+>;
+export type CallTelemetryTimelinePayload = z.infer<
+  typeof CallTelemetryTimelineSchema
 >;
