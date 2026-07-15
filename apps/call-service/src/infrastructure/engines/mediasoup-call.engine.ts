@@ -214,6 +214,32 @@ export class MediasoupCallMediaEngine
     };
   }
 
+  async setConsumerMaxBitrate(
+    callId: string,
+    userId: string,
+    transportId: string,
+    bitrate: number,
+  ): Promise<void> {
+    const room = this.getRoomOrThrow(callId);
+    const transport = room.transports.get(transportId);
+    const meta = room.transportMeta.get(transportId);
+
+    if (
+      !transport ||
+      !meta ||
+      meta.callId !== callId ||
+      meta.userId !== userId ||
+      meta.direction !== 'recv' ||
+      !meta.connected ||
+      !Number.isInteger(bitrate) ||
+      bitrate <= 0
+    ) {
+      throw new Error('Consumer transport not found');
+    }
+
+    await transport.setMaxOutgoingBitrate(bitrate);
+  }
+
   async produce(
     callId: string,
     userId: string,

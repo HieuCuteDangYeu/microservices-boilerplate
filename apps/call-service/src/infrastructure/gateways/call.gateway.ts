@@ -1,6 +1,7 @@
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { CallTelemetryTokenService } from '@common/calls/call-telemetry-token.service';
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Logger,
@@ -93,6 +94,19 @@ type ResumeConsumerPayload = {
 type RestartIcePayload = {
   callId: string;
   transportId: string;
+};
+
+type AudioBitrateProfile = 'normal' | 'constrained';
+
+type SetAudioBitratePayload = {
+  callId: string;
+  transportId: string;
+  profile: AudioBitrateProfile;
+};
+
+const AUDIO_BITRATE_BY_PROFILE: Record<AudioBitrateProfile, number> = {
+  normal: 48_000,
+  constrained: 32_000,
 };
 
 type CallJoinedSocketPayload = {
@@ -595,6 +609,41 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('set_audio_bitrate')
+  async handleSetAudioBitrate(
+    @MessageBody() payload: SetAudioBitratePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = await this.resolveUserId(client);
+    if (!userId) return;
+
+    if (!(payload.profile in AUDIO_BITRATE_BY_PROFILE)) {
+      throw new BadRequestException('Invalid audio bitrate profile');
+    }
+
+    const session = await this.sessionRepository.findByCallId(payload.callId);
+    if (!session) {
+      throw new NotFoundException('Call not found');
+    }
+
+    if (session.status !== 'active' || session.callType !== 'VOICE') {
+      throw new ForbiddenException('Audio bitrate cannot be adjusted');
+    }
+
+    await this.mediaEngine.setConsumerMaxBitrate(
+      payload.callId,
+      userId,
+      payload.transportId,
+      AUDIO_BITRATE_BY_PROFILE[payload.profile],
+    );
+
+    client.emit('audio_bitrate_updated', {
+      callId: payload.callId,
+      transportId: payload.transportId,
+      profile: payload.profile,
+    });
+  }
+
   @SubscribeMessage('answer_call')
   async handleAnswerCall(
     @MessageBody() payload: JoinCallPayload,
@@ -689,10 +738,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): void {
     const expiresAtMs = Date.now() + this.terminalReplayTtlMs;
 
-    for (const userId of new Set([
-      session.initiatorId,
-      session.targetUserId,
-    ])) {
+    for (const userId of new Set([session.initiatorId, session.targetUserId])) {
       const calls =
         this.recentTerminalCallsByUser.get(userId) ??
         new Map<string, StoredRecentTerminalCall>();

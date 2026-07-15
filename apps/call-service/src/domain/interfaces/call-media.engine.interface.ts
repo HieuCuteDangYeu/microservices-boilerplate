@@ -64,6 +64,12 @@ export abstract class ICallMediaEngine {
     userId: string,
     transportId: string,
   ): Promise<RestartIceResult>;
+  abstract setConsumerMaxBitrate(
+    callId: string,
+    userId: string,
+    transportId: string,
+    bitrate: number,
+  ): Promise<void>;
   abstract produce(
     callId: string,
     userId: string,
