@@ -123,16 +123,32 @@ export class PushNotificationsService {
 
   async sendCallStateUpdate(input: SendCallStateUpdateInput) {
     const uniqueRecipientIds = [...new Set(input.recipientUserIds)];
-    const tokens = (
-      await Promise.all(
-        uniqueRecipientIds.map((userId) =>
-          this.pushTokensService.findActiveByUserId(userId, {
+    const tokenGroups = await Promise.all(
+      uniqueRecipientIds.map(async (userId) => {
+        const androidTokensPromise = this.pushTokensService.findActiveByUserId(
+          userId,
+          {
             provider: 'fcm',
             platform: 'android',
+          },
+        );
+
+        if (input.status === 'active') {
+          return androidTokensPromise;
+        }
+
+        const [androidTokens, iosTokens] = await Promise.all([
+          androidTokensPromise,
+          this.pushTokensService.findActiveByUserId(userId, {
+            provider: 'fcm',
+            platform: 'ios',
           }),
-        ),
-      )
-    ).flat();
+        ]);
+
+        return [...androidTokens, ...iosTokens];
+      }),
+    );
+    const tokens = tokenGroups.flat();
 
     if (tokens.length === 0) {
       return {
@@ -433,11 +449,18 @@ export class PushNotificationsService {
         data: {
           type: 'CALL_STATE_UPDATE',
           callId: input.callId,
+          recipientUserId: token.userId,
           conversationId: input.conversationId,
           status: input.status,
           reason: input.reason,
           at: input.at,
         },
+        ...(token.platform === 'ios'
+          ? {
+              apnsContentAvailable: true,
+              apnsBackground: true,
+            }
+          : {}),
       });
 
       return {

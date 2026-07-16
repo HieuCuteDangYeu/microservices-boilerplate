@@ -15,6 +15,7 @@ type SendToTokenInput = {
   androidSound?: string;
   includeNotification?: boolean;
   apnsContentAvailable?: boolean;
+  apnsBackground?: boolean;
   apnsSound?: string;
 };
 
@@ -80,6 +81,14 @@ export class FirebaseAdminService {
           : {}),
       },
       apns: {
+        ...(input.apnsBackground
+          ? {
+              headers: {
+                'apns-push-type': 'background',
+                'apns-priority': '5',
+              },
+            }
+          : {}),
         payload: {
           aps: {
             ...(input.apnsContentAvailable ? { 'content-available': 1 } : {}),
