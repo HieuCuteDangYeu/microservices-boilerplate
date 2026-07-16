@@ -4,6 +4,11 @@ import type { IUserService } from 'apps/conversation-service/src/domain/interfac
 import { Conversation } from '../../domain/entities/conversation.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 
+export type CreateConversationResult = {
+  conversation: Conversation;
+  created: boolean;
+};
+
 @Injectable()
 export class CreateConversationUseCase {
   constructor(
@@ -15,7 +20,7 @@ export class CreateConversationUseCase {
   async execute(
     dto: CreateConversationDto,
     creatorId: string,
-  ): Promise<Conversation> {
+  ): Promise<CreateConversationResult> {
     const participantIds = [...new Set(dto.participantIds)];
 
     if (!participantIds.includes(creatorId)) {
@@ -54,7 +59,7 @@ export class CreateConversationUseCase {
       );
 
       if (existingConv) {
-        return existingConv; // Trả về cái cũ, không tạo mới
+        return { conversation: existingConv, created: false };
       }
     }
 
@@ -66,6 +71,10 @@ export class CreateConversationUseCase {
       updatedAt: new Date(),
     });
 
-    return this.chatRepository.createConversation(newConversation);
+    return {
+      conversation:
+        await this.chatRepository.createConversation(newConversation),
+      created: true,
+    };
   }
 }

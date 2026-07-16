@@ -60,11 +60,34 @@ export class ConversationMicroserviceController {
   ) {
     try {
       const creatorId = payload.creatorId ?? payload.participantIds[0];
-      const conv = await this.createConversationUseCase.execute(
-        { participantIds: payload.participantIds, isGroup: payload.isGroup },
-        creatorId,
-      );
-      return { id: conv.id };
+      const { conversation, created } =
+        await this.createConversationUseCase.execute(
+          { participantIds: payload.participantIds, isGroup: payload.isGroup },
+          creatorId,
+        );
+
+      if (created) {
+        let eventConversation = conversation;
+
+        try {
+          eventConversation =
+            (await this.chatRepository.findConversation(conversation.id)) ??
+            conversation;
+        } catch (error) {
+          this.logger.warn(
+            `Unable to enrich created conversation ${conversation.id}: ${(error as Error).message}`,
+          );
+        }
+
+        const conversationDto = ChatMapper.conversationToDto(eventConversation);
+        conversation.participantIds.forEach((participantId) => {
+          this.chatGateway.server
+            .to(participantId)
+            .emit('conversation_created', conversationDto);
+        });
+      }
+
+      return { id: conversation.id };
     } catch (err: unknown) {
       const error = err as Error;
       this.logger.error(`❌ [CreateConversation] Error: ${error.message}`);
