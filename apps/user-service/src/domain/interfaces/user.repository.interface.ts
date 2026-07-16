@@ -1,5 +1,5 @@
 import { UserResponse } from '@common/user/interfaces/find-all-users.types';
-import { User } from '../entities/user.entity';
+import { User } from '@user/domain/entities/user.entity';
 
 export interface FindAllParams {
   skip: number;
@@ -11,12 +11,12 @@ export interface FindAllParams {
 export interface SearchPublicUsersParams {
   query: string;
   limit: number;
-  excludeUserId?: string;
+  excludedUserIds?: string[];
 }
 
 export interface RecommendedPublicUsersParams {
   limit: number;
-  excludeUserId?: string;
+  excludedUserIds?: string[];
 }
 
 export interface IUserRepository {

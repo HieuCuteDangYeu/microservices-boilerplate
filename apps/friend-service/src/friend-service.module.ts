@@ -5,6 +5,7 @@ import { CanViewReelContentUseCase } from '@friend/application/use-cases/can-vie
 import { CancelFriendRequestUseCase } from '@friend/application/use-cases/cancel-friend-request.use-case';
 import { GetFriendshipStatusUseCase } from '@friend/application/use-cases/get-friendship-status.use-case';
 import { GetReelFeedAudienceUseCase } from '@friend/application/use-cases/get-reel-feed-audience.use-case';
+import { ListBlockedUsersUseCase } from '@friend/application/use-cases/list-blocked-users.use-case';
 import { ListFriendsUseCase } from '@friend/application/use-cases/list-friends.use-case';
 import { ListIncomingFriendRequestsUseCase } from '@friend/application/use-cases/list-incoming-friend-requests.use-case';
 import { ListOutgoingFriendRequestsUseCase } from '@friend/application/use-cases/list-outgoing-friend-requests.use-case';
@@ -36,7 +37,9 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
           options: {
             urls: [config.getOrThrow<string>('RABBITMQ_URL')],
             queue: 'user_queue',
-            queueOptions: { durable: true },
+            queueOptions: {
+              durable: true,
+            },
           },
         }),
         inject: [ConfigService],
@@ -48,7 +51,9 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
           options: {
             urls: [config.getOrThrow<string>('RABBITMQ_URL')],
             queue: 'conversation_queue',
-            queueOptions: { durable: true },
+            queueOptions: {
+              durable: true,
+            },
           },
         }),
         inject: [ConfigService],
@@ -65,6 +70,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ListIncomingFriendRequestsUseCase,
     ListOutgoingFriendRequestsUseCase,
     ListFriendsUseCase,
+    ListBlockedUsersUseCase,
     RemoveFriendUseCase,
     GetFriendshipStatusUseCase,
     CanShareWithUserUseCase,

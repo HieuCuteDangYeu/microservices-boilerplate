@@ -261,19 +261,30 @@ export class GetRecommendedReelsUseCase {
 
     const mergedCandidates = this.mergeCandidates(allCandidates);
 
-    let eligibleCandidates = mergedCandidates;
+    const recentlySeenReelIds =
+      input.excludeRecentlySeen === false
+        ? new Set<string>()
+        : await this.recommendationRepository.findRecentlySeenReelIds(
+            input.viewerId,
+            new Date(Date.now() - 24 * 60 * 60 * 1000),
+          );
 
-    if (input.excludeRecentlySeen !== false) {
-      const recentlySeenReelIds =
-        await this.recommendationRepository.findRecentlySeenReelIds(
-          input.viewerId,
-          new Date(Date.now() - 24 * 60 * 60 * 1000),
-        );
+    const unseenCandidates = mergedCandidates.filter(
+      (candidate) => !recentlySeenReelIds.has(candidate.reelId),
+    );
 
-      eligibleCandidates = eligibleCandidates.filter(
-        (candidate) => !recentlySeenReelIds.has(candidate.reelId),
-      );
-    }
+    const seenFallbackCandidates = mergedCandidates.filter((candidate) =>
+      recentlySeenReelIds.has(candidate.reelId),
+    );
+
+    // Prefer unseen candidates, but never return an empty feed merely because
+    // an active viewer has exhausted the 24-hour unseen window. Seen reels are
+    // still ranked with the existing recently-seen penalty and are used only
+    // after unseen candidates.
+    const eligibleCandidates =
+      input.excludeRecentlySeen === false
+        ? mergedCandidates
+        : [...unseenCandidates, ...seenFallbackCandidates];
 
     const eligibleReels =
       await this.recommendationRepository.findEligibleReelsByIds(
@@ -328,7 +339,30 @@ export class GetRecommendedReelsUseCase {
         return left.reel.id.localeCompare(right.reel.id);
       });
 
-    const diversifiedItems = this.diversify(rankedItems, input.limit);
+    const rankedUnseenItems = rankedItems.filter(
+      (item) => !recentlySeenReelIds.has(item.reel.id),
+    );
+
+    const rankedSeenFallbackItems = rankedItems.filter((item) =>
+      recentlySeenReelIds.has(item.reel.id),
+    );
+
+    const diversifiedUnseenItems = this.diversify(
+      rankedUnseenItems,
+      input.limit,
+    );
+
+    const remainingCapacity = input.limit - diversifiedUnseenItems.length;
+
+    const diversifiedSeenFallbackItems =
+      remainingCapacity > 0
+        ? this.diversify(rankedSeenFallbackItems, remainingCapacity)
+        : [];
+
+    const diversifiedItems = [
+      ...diversifiedUnseenItems,
+      ...diversifiedSeenFallbackItems,
+    ];
 
     return {
       items: diversifiedItems,

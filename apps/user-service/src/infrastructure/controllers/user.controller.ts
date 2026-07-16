@@ -17,6 +17,7 @@ import {
 } from '@nestjs/microservices';
 import { CheckUsernameAvailabilityUseCase } from '@user/application/use-cases/check-username-availability.use-case';
 import { CreateSocialUserUseCase } from '@user/application/use-cases/create-social-user.use-case';
+import { CreateUserUseCase } from '@user/application/use-cases/create-user.use-case';
 import { DeleteUserUseCase } from '@user/application/use-cases/delete-user.use-case';
 import { FindAllUsersUseCase } from '@user/application/use-cases/find-all-users.use-case';
 import { FindPublicUserByUsernameUseCase } from '@user/application/use-cases/find-public-user-by-username.use-case';
@@ -29,6 +30,7 @@ import { SearchPublicUsersUseCase } from '@user/application/use-cases/search-pub
 import { UpdateUserAvatarUseCase } from '@user/application/use-cases/update-user-avatar.use-case';
 import { UpdateUserUseCase } from '@user/application/use-cases/update-user.use-case';
 import { ValidateUserUseCase } from '@user/application/use-cases/validate-user.use-case';
+import { ValidateUsersListUseCase } from '@user/application/use-cases/validate-users-list.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { InvalidAvatarFileError } from '@user/domain/errors/invalid-avatar-file.error';
 import { InvalidFullNameError } from '@user/domain/errors/invalid-full-name.error';
@@ -38,8 +40,6 @@ import { UserAlreadyExistsError } from '@user/domain/errors/user-already-exists.
 import { UserNotFoundError } from '@user/domain/errors/user-not-found.error';
 import { UsernameAlreadyTakenError } from '@user/domain/errors/username-already-taken.error';
 import { UsernameNotFoundError } from '@user/domain/errors/username-not-found.error';
-import { CreateUserUseCase } from '../../application/use-cases/create-user.use-case';
-import { ValidateUsersListUseCase } from './../../application/use-cases/validate-users-list.use-case';
 
 @Controller()
 export class UserController {
@@ -122,7 +122,11 @@ export class UserController {
 
   @MessagePattern('user.update_avatar')
   async updateAvatar(
-    @Payload() data: { userId: string; payload: UpdateAvatarDto },
+    @Payload()
+    data: {
+      userId: string;
+      payload: UpdateAvatarDto;
+    },
   ) {
     try {
       return await this.updateUserAvatarUseCase.execute(
@@ -161,12 +165,14 @@ export class UserController {
   @MessagePattern('user.search_public')
   async searchPublicUsers(
     @Payload()
-    data: SearchPublicUsersDto & { excludeUserId?: string },
+    data: SearchPublicUsersDto & {
+      viewerId: string;
+    },
   ) {
     return await this.searchPublicUsersUseCase.execute(
       data.query,
       data.limit,
-      data.excludeUserId,
+      data.viewerId,
     );
   }
 
@@ -174,21 +180,22 @@ export class UserController {
   async getRecommendedPublicUsers(
     @Payload()
     data: {
+      viewerId: string;
       limit?: number;
-      excludeUserId?: string;
       feedSessionId?: string;
     },
   ) {
     return await this.getRecommendedPublicUsersUseCase.execute({
-      limit: data?.limit,
-      excludeUserId: data?.excludeUserId,
-      feedSessionId: data?.feedSessionId,
+      viewerId: data.viewerId,
+      limit: data.limit,
+      feedSessionId: data.feedSessionId,
     });
   }
 
   @MessagePattern('user.check_username_availability')
   async checkUsernameAvailability(
-    @Payload() data: CheckUsernameAvailabilityDto,
+    @Payload()
+    data: CheckUsernameAvailabilityDto,
   ) {
     try {
       return await this.checkUsernameAvailabilityUseCase.execute(data.username);

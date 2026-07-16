@@ -61,14 +61,18 @@ export interface MicroserviceUser {
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UserController {
   constructor(
-    @Inject('USER_SERVICE') private readonly userClient: ClientProxy,
+    @Inject('USER_SERVICE')
+    private readonly userClient: ClientProxy,
   ) {}
 
   @Get('username-availability')
-  @ApiOperation({ summary: 'Check username availability' })
+  @ApiOperation({
+    summary: 'Check username availability',
+  })
   @Roles(Role.ADMIN, Role.USER)
   async checkUsernameAvailability(
-    @Query() query: CheckUsernameAvailabilityDto,
+    @Query()
+    query: CheckUsernameAvailabilityDto,
   ): Promise<UsernameAvailabilityResponse> {
     return await lastValueFrom(
       this.userClient
@@ -81,7 +85,9 @@ export class UserController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a new user' })
+  @ApiOperation({
+    summary: 'Create a new user',
+  })
   @Roles(Role.ADMIN)
   async register(@Body() dto: CreateUserDto): Promise<CreateUserResponse> {
     return await lastValueFrom(
@@ -106,16 +112,18 @@ export class UserController {
     return await lastValueFrom(
       this.userClient
         .send<RecommendedPublicUserProfile[]>('user.get_recommended_public', {
+          viewerId: request.user!.id,
           limit: query.limit,
           feedSessionId: query.feedSessionId,
-          excludeUserId: request.user!.id,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 
   @Get('discover')
-  @ApiOperation({ summary: 'Search public users for friend discovery' })
+  @ApiOperation({
+    summary: 'Search public users for friend discovery',
+  })
   @Roles(Role.ADMIN, Role.USER)
   async discoverUsers(
     @Req() request: AuthenticatedRequest,
@@ -125,14 +133,16 @@ export class UserController {
       this.userClient
         .send<PublicUserProfile[]>('user.search_public', {
           ...query,
-          excludeUserId: request.user!.id,
+          viewerId: request.user!.id,
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
   }
 
   @Get('public/:username')
-  @ApiOperation({ summary: 'Lookup a public profile by username' })
+  @ApiOperation({
+    summary: 'Lookup a public profile by username',
+  })
   @Roles(Role.ADMIN, Role.USER)
   async findPublicProfile(
     @Param('username') username: string,
@@ -145,7 +155,9 @@ export class UserController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all users' })
+  @ApiOperation({
+    summary: 'Get all users',
+  })
   @Roles(Role.ADMIN)
   async findAll(
     @Query() query: PaginationDto,
@@ -162,14 +174,19 @@ export class UserController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a user' })
+  @ApiOperation({
+    summary: 'Update a user',
+  })
   @Roles(Role.ADMIN, Role.USER)
   @UseGuards(OwnershipGuard)
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
   ): Promise<UpdateUserResponse> {
-    const payload: UpdateUserPayload = { id, data: dto };
+    const payload: UpdateUserPayload = {
+      id,
+      data: dto,
+    };
 
     return await lastValueFrom(
       this.userClient.send<UpdateUserResponse>('update_user', payload).pipe(
@@ -182,12 +199,14 @@ export class UserController {
 
   @Patch('me/avatar')
   @Roles(Role.ADMIN, Role.USER)
-  @ApiOperation({ summary: 'Update user avatar using an uploaded R2 key' })
+  @ApiOperation({
+    summary: 'Update user avatar using an uploaded R2 key',
+  })
   async updateAvatar(
     @Req() request: AuthenticatedRequest,
     @Body() body: UpdateAvatarDto,
   ) {
-    const updatedUser = await lastValueFrom(
+    return await lastValueFrom(
       this.userClient
         .send<MicroserviceUser>('user.update_avatar', {
           userId: request.user!.id,
@@ -195,15 +214,17 @@ export class UserController {
         })
         .pipe(catchError((error) => this.handleMicroserviceError(error))),
     );
-
-    return updatedUser;
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a user' })
+  @ApiOperation({
+    summary: 'Delete a user',
+  })
   @Roles(Role.ADMIN)
   async remove(@Param('id') id: string): Promise<DeleteUserResponse> {
-    const payload: DeleteUserPayload = { id };
+    const payload: DeleteUserPayload = {
+      id,
+    };
 
     return await lastValueFrom(
       this.userClient.send<DeleteUserResponse>('delete_user', payload).pipe(

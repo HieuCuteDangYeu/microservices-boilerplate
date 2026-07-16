@@ -7,6 +7,7 @@ import { CanViewReelContentUseCase } from '@friend/application/use-cases/can-vie
 import { CancelFriendRequestUseCase } from '@friend/application/use-cases/cancel-friend-request.use-case';
 import { GetFriendshipStatusUseCase } from '@friend/application/use-cases/get-friendship-status.use-case';
 import { GetReelFeedAudienceUseCase } from '@friend/application/use-cases/get-reel-feed-audience.use-case';
+import { ListBlockedUsersUseCase } from '@friend/application/use-cases/list-blocked-users.use-case';
 import { ListFriendsUseCase } from '@friend/application/use-cases/list-friends.use-case';
 import { ListIncomingFriendRequestsUseCase } from '@friend/application/use-cases/list-incoming-friend-requests.use-case';
 import { ListOutgoingFriendRequestsUseCase } from '@friend/application/use-cases/list-outgoing-friend-requests.use-case';
@@ -36,6 +37,7 @@ export class FriendController {
     private readonly listIncomingFriendRequestsUseCase: ListIncomingFriendRequestsUseCase,
     private readonly listOutgoingFriendRequestsUseCase: ListOutgoingFriendRequestsUseCase,
     private readonly listFriendsUseCase: ListFriendsUseCase,
+    private readonly listBlockedUsersUseCase: ListBlockedUsersUseCase,
     private readonly removeFriendUseCase: RemoveFriendUseCase,
     private readonly getFriendshipStatusUseCase: GetFriendshipStatusUseCase,
     private readonly canShareWithUserUseCase: CanShareWithUserUseCase,
@@ -46,7 +48,13 @@ export class FriendController {
   ) {}
 
   @MessagePattern('friend.send_request')
-  async sendRequest(@Payload() data: { userId: string; recipientId: string }) {
+  async sendRequest(
+    @Payload()
+    data: {
+      userId: string;
+      recipientId: string;
+    },
+  ) {
     try {
       return await this.sendFriendRequestUseCase.execute(
         data.userId,
@@ -58,7 +66,13 @@ export class FriendController {
   }
 
   @MessagePattern('friend.accept_request')
-  async acceptRequest(@Payload() data: { userId: string; requestId: string }) {
+  async acceptRequest(
+    @Payload()
+    data: {
+      userId: string;
+      requestId: string;
+    },
+  ) {
     try {
       return await this.acceptFriendRequestUseCase.execute(
         data.userId,
@@ -70,7 +84,13 @@ export class FriendController {
   }
 
   @MessagePattern('friend.reject_request')
-  async rejectRequest(@Payload() data: { userId: string; requestId: string }) {
+  async rejectRequest(
+    @Payload()
+    data: {
+      userId: string;
+      requestId: string;
+    },
+  ) {
     try {
       return await this.rejectFriendRequestUseCase.execute(
         data.userId,
@@ -82,7 +102,13 @@ export class FriendController {
   }
 
   @MessagePattern('friend.cancel_request')
-  async cancelRequest(@Payload() data: { userId: string; requestId: string }) {
+  async cancelRequest(
+    @Payload()
+    data: {
+      userId: string;
+      requestId: string;
+    },
+  ) {
     try {
       return await this.cancelFriendRequestUseCase.execute(
         data.userId,
@@ -95,7 +121,12 @@ export class FriendController {
 
   @MessagePattern('friend.list_incoming_requests')
   async listIncomingRequests(
-    @Payload() data: { userId: string; limit?: number; cursor?: string },
+    @Payload()
+    data: {
+      userId: string;
+      limit?: number;
+      cursor?: string;
+    },
   ) {
     try {
       const result = await this.listIncomingFriendRequestsUseCase.execute(
@@ -103,6 +134,7 @@ export class FriendController {
         data.limit ?? 20,
         this.parseCursor(data.cursor),
       );
+
       return {
         items: result.items,
         nextCursor: this.serializeCursor(result.nextCursor),
@@ -114,7 +146,12 @@ export class FriendController {
 
   @MessagePattern('friend.list_outgoing_requests')
   async listOutgoingRequests(
-    @Payload() data: { userId: string; limit?: number; cursor?: string },
+    @Payload()
+    data: {
+      userId: string;
+      limit?: number;
+      cursor?: string;
+    },
   ) {
     try {
       const result = await this.listOutgoingFriendRequestsUseCase.execute(
@@ -122,6 +159,7 @@ export class FriendController {
         data.limit ?? 20,
         this.parseCursor(data.cursor),
       );
+
       return {
         items: result.items,
         nextCursor: this.serializeCursor(result.nextCursor),
@@ -133,7 +171,12 @@ export class FriendController {
 
   @MessagePattern('friend.list_friends')
   async listFriends(
-    @Payload() data: { userId: string; limit?: number; cursor?: string },
+    @Payload()
+    data: {
+      userId: string;
+      limit?: number;
+      cursor?: string;
+    },
   ) {
     try {
       const result = await this.listFriendsUseCase.execute(
@@ -141,6 +184,32 @@ export class FriendController {
         data.limit ?? 20,
         this.parseCursor(data.cursor),
       );
+
+      return {
+        items: result.items,
+        nextCursor: this.serializeCursor(result.nextCursor),
+      };
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  @MessagePattern('friend.list_blocked_users')
+  async listBlockedUsers(
+    @Payload()
+    data: {
+      userId: string;
+      limit?: number;
+      cursor?: string;
+    },
+  ) {
+    try {
+      const result = await this.listBlockedUsersUseCase.execute(
+        data.userId,
+        data.limit ?? 20,
+        this.parseCursor(data.cursor),
+      );
+
       return {
         items: result.items,
         nextCursor: this.serializeCursor(result.nextCursor),
@@ -152,7 +221,11 @@ export class FriendController {
 
   @MessagePattern('friend.remove')
   async removeFriend(
-    @Payload() data: { userId: string; friendUserId: string },
+    @Payload()
+    data: {
+      userId: string;
+      friendUserId: string;
+    },
   ) {
     try {
       return await this.removeFriendUseCase.execute(
@@ -165,7 +238,13 @@ export class FriendController {
   }
 
   @MessagePattern('friend.get_status')
-  async getStatus(@Payload() data: { userId: string; otherUserId: string }) {
+  async getStatus(
+    @Payload()
+    data: {
+      userId: string;
+      otherUserId: string;
+    },
+  ) {
     try {
       return await this.getFriendshipStatusUseCase.execute(
         data.userId,
@@ -302,9 +381,12 @@ export class FriendController {
     });
   }
 
-  private parseCursor(
-    cursor?: string,
-  ): { timestamp: Date; id: string } | undefined {
+  private parseCursor(cursor?: string):
+    | {
+        timestamp: Date;
+        id: string;
+      }
+    | undefined {
     if (!cursor) {
       return undefined;
     }
@@ -334,7 +416,10 @@ export class FriendController {
   }
 
   private serializeCursor(
-    cursor: { timestamp: Date; id: string } | null,
+    cursor: {
+      timestamp: Date;
+      id: string;
+    } | null,
   ): string | null {
     return cursor ? `${cursor.timestamp.toISOString()}|${cursor.id}` : null;
   }

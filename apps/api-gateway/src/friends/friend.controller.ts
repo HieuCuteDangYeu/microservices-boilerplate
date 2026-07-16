@@ -2,6 +2,7 @@ import { isRpcError } from '@common/constants/rpc-error.types';
 import { FriendPaginationDto } from '@common/friend/dtos/friend-pagination.dto';
 import { ListFriendsDto } from '@common/friend/dtos/list-friends.dto';
 import { SendFriendRequestDto } from '@common/friend/dtos/send-friend-request.dto';
+import type { BlockedUserSummary } from '@common/friend/interfaces/blocked-user.types';
 import {
   FriendRequestSummary,
   FriendshipActionResponse,
@@ -39,11 +40,14 @@ import { catchError, lastValueFrom } from 'rxjs';
 @Roles(Role.ADMIN, Role.USER)
 export class FriendController {
   constructor(
-    @Inject('FRIEND_SERVICE') private readonly friendClient: ClientProxy,
+    @Inject('FRIEND_SERVICE')
+    private readonly friendClient: ClientProxy,
   ) {}
 
   @Post('requests')
-  @ApiOperation({ summary: 'Send a friend request to another user' })
+  @ApiOperation({
+    summary: 'Send a friend request to another user',
+  })
   async sendRequest(
     @Req() request: AuthenticatedRequest,
     @Body() dto: SendFriendRequestDto,
@@ -59,10 +63,13 @@ export class FriendController {
   }
 
   @Post('requests/:requestId/accept')
-  @ApiOperation({ summary: 'Accept an incoming friend request' })
+  @ApiOperation({
+    summary: 'Accept an incoming friend request',
+  })
   async acceptRequest(
     @Req() request: AuthenticatedRequest,
-    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('requestId', ParseUUIDPipe)
+    requestId: string,
   ): Promise<FriendshipActionResponse> {
     return await lastValueFrom(
       this.friendClient
@@ -75,10 +82,13 @@ export class FriendController {
   }
 
   @Post('requests/:requestId/reject')
-  @ApiOperation({ summary: 'Reject an incoming friend request' })
+  @ApiOperation({
+    summary: 'Reject an incoming friend request',
+  })
   async rejectRequest(
     @Req() request: AuthenticatedRequest,
-    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('requestId', ParseUUIDPipe)
+    requestId: string,
   ): Promise<FriendshipActionResponse> {
     return await lastValueFrom(
       this.friendClient
@@ -130,11 +140,46 @@ export class FriendController {
     );
   }
 
+  @Get('blocked')
+  @ApiOperation({
+    summary: 'List users blocked by the authenticated user',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    type: String,
+  })
+  async listBlockedUsers(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: FriendPaginationDto,
+  ): Promise<PaginatedFriendResults<BlockedUserSummary>> {
+    return await lastValueFrom(
+      this.friendClient
+        .send<PaginatedFriendResults<BlockedUserSummary>>(
+          'friend.list_blocked_users',
+          {
+            userId: request.user!.id,
+            limit: query.limit,
+            cursor: query.cursor,
+          },
+        )
+        .pipe(catchError((error) => this.handleMicroserviceError(error))),
+    );
+  }
+
   @Delete('requests/:requestId')
-  @ApiOperation({ summary: 'Cancel an outgoing friend request' })
+  @ApiOperation({
+    summary: 'Cancel an outgoing friend request',
+  })
   async cancelRequest(
     @Req() request: AuthenticatedRequest,
-    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('requestId', ParseUUIDPipe)
+    requestId: string,
   ): Promise<FriendshipActionResponse> {
     return await lastValueFrom(
       this.friendClient
@@ -147,9 +192,19 @@ export class FriendController {
   }
 
   @Get('requests/incoming')
-  @ApiOperation({ summary: 'List incoming friend requests' })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiOperation({
+    summary: 'List incoming friend requests',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    type: String,
+  })
   async listIncomingRequests(
     @Req() request: AuthenticatedRequest,
     @Query() query: FriendPaginationDto,
@@ -169,9 +224,19 @@ export class FriendController {
   }
 
   @Get('requests/outgoing')
-  @ApiOperation({ summary: 'List outgoing friend requests' })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiOperation({
+    summary: 'List outgoing friend requests',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    type: String,
+  })
   async listOutgoingRequests(
     @Req() request: AuthenticatedRequest,
     @Query() query: FriendPaginationDto,
@@ -191,10 +256,24 @@ export class FriendController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List accepted friends' })
-  @ApiQuery({ name: 'userId', required: false, type: String })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiOperation({
+    summary: 'List accepted friends',
+  })
+  @ApiQuery({
+    name: 'userId',
+    required: false,
+    type: String,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    type: String,
+  })
   async listFriends(
     @Req() request: AuthenticatedRequest,
     @Query() query: ListFriendsDto,
@@ -211,10 +290,13 @@ export class FriendController {
   }
 
   @Delete(':userId')
-  @ApiOperation({ summary: 'Remove an accepted friend' })
+  @ApiOperation({
+    summary: 'Remove an accepted friend',
+  })
   async removeFriend(
     @Req() request: AuthenticatedRequest,
-    @Param('userId', ParseUUIDPipe) friendUserId: string,
+    @Param('userId', ParseUUIDPipe)
+    friendUserId: string,
   ): Promise<FriendshipActionResponse> {
     return await lastValueFrom(
       this.friendClient
@@ -227,10 +309,13 @@ export class FriendController {
   }
 
   @Get('status/:userId')
-  @ApiOperation({ summary: 'Get friendship status with another user' })
+  @ApiOperation({
+    summary: 'Get friendship status with another user',
+  })
   async getStatus(
     @Req() request: AuthenticatedRequest,
-    @Param('userId', ParseUUIDPipe) otherUserId: string,
+    @Param('userId', ParseUUIDPipe)
+    otherUserId: string,
   ): Promise<FriendshipStatusResponse> {
     return await lastValueFrom(
       this.friendClient

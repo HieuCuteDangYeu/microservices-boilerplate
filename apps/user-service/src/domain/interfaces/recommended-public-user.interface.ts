@@ -1,8 +1,8 @@
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
 export interface GetRecommendedPublicUsersInput {
+  viewerId: string;
   limit?: number;
-  excludeUserId?: string;
   feedSessionId?: string;
 }
 

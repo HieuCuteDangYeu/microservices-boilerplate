@@ -1,3 +1,18 @@
+export interface UserBlockPaginationCursor {
+  timestamp: Date;
+  id: string;
+}
+
+export interface UserBlockRecord {
+  blockedUserId: string;
+  createdAt: Date;
+}
+
+export interface PaginatedUserBlockRecords {
+  items: UserBlockRecord[];
+  nextCursor: UserBlockPaginationCursor | null;
+}
+
 export interface IUserBlockRepository {
   blockAndRemoveRelationship(
     blockerId: string,
@@ -9,4 +24,10 @@ export interface IUserBlockRepository {
   isBlockedBetween(firstUserId: string, secondUserId: string): Promise<boolean>;
 
   listExcludedUserIds(userId: string): Promise<string[]>;
+
+  listBlocked(
+    blockerId: string,
+    limit: number,
+    cursor?: UserBlockPaginationCursor,
+  ): Promise<PaginatedUserBlockRecords>;
 }

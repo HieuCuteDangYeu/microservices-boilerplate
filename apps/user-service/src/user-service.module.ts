@@ -23,6 +23,7 @@ import { ValidateUserUseCase } from '@user/application/use-cases/validate-user.u
 import { ValidateUsersListUseCase } from '@user/application/use-cases/validate-users-list.use-case';
 import { VerifyUserUseCase } from '@user/application/use-cases/verify-user.use-case';
 import { AuthServiceAdapter } from '@user/infrastructure/adapters/auth-service.adapter';
+import { FriendDiscoveryServiceAdapter } from '@user/infrastructure/adapters/friend-discovery-service.adapter';
 import { RecommendationTelemetryServiceAdapter } from '@user/infrastructure/adapters/recommendation-telemetry-service.adapter';
 import { UserController } from '@user/infrastructure/controllers/user.controller';
 import { PrismaService } from '@user/infrastructure/prisma/prisma.service';
@@ -59,6 +60,7 @@ function createRmqClientRegistration(
     ClientsModule.registerAsync([
       createRmqClientRegistration('AUTH_SERVICE_RMQ', 'auth_queue'),
       createRmqClientRegistration('MONITORING_SERVICE_RMQ', 'monitoring_queue'),
+      createRmqClientRegistration('FRIEND_SERVICE_RMQ', 'friend_queue'),
     ]),
   ],
   controllers: [UserController],
@@ -90,6 +92,10 @@ function createRmqClientRegistration(
       useClass: AuthServiceAdapter,
     },
     {
+      provide: 'IFriendDiscoveryService',
+      useClass: FriendDiscoveryServiceAdapter,
+    },
+    {
       provide: 'IStorageService',
       useClass: R2StorageService,
     },
@@ -97,7 +103,6 @@ function createRmqClientRegistration(
       provide: 'IRecommendationConfig',
       useClass: RecommendationConfigService,
     },
-
     {
       provide: 'IRecommendationTelemetryService',
       useClass: RecommendationTelemetryServiceAdapter,

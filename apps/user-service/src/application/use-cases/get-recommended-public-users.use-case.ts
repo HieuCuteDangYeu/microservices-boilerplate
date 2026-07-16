@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { IFriendDiscoveryService } from '@user/domain/interfaces/friend-discovery.service.interface';
 import type { IRecommendationConfig } from '@user/domain/interfaces/recommendation-config.interface';
 import type { IRecommendationTelemetryService } from '@user/domain/interfaces/recommendation-telemetry-service.interface';
 import type {
@@ -12,8 +13,13 @@ export class GetRecommendedPublicUsersUseCase {
   constructor(
     @Inject('IUserRepository')
     private readonly userRepository: IUserRepository,
+
+    @Inject('IFriendDiscoveryService')
+    private readonly friendDiscoveryService: IFriendDiscoveryService,
+
     @Inject('IRecommendationConfig')
     private readonly recommendationConfig: IRecommendationConfig,
+
     @Inject('IRecommendationTelemetryService')
     private readonly recommendationTelemetryService: IRecommendationTelemetryService,
   ) {}
@@ -22,16 +28,37 @@ export class GetRecommendedPublicUsersUseCase {
     input: GetRecommendedPublicUsersInput,
   ): Promise<RecommendedPublicUserProfile[]> {
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 30);
+
     const feedSessionId = input.feedSessionId ?? globalThis.crypto.randomUUID();
+
     const algorithmVersion = this.recommendationConfig.getAlgorithmVersion();
+
     const candidateSource = this.recommendationConfig.getCandidateSource();
+
     const featureFlags = this.recommendationConfig.getFeatureFlags();
+
     const startedAt = Date.now();
 
     try {
+      const audience = await this.friendDiscoveryService.getAudience(
+        input.viewerId,
+      );
+
+      // Contact recommendations must exclude:
+      // - the current user;
+      // - users blocked in either direction;
+      // - users who are already accepted friends.
+      const excludedUserIds = [
+        ...new Set([
+          input.viewerId,
+          ...audience.excludedUserIds,
+          ...audience.friendUserIds,
+        ]),
+      ];
+
       const users = await this.userRepository.findRecommendedPublicUsers({
         limit,
-        excludeUserId: input.excludeUserId,
+        excludedUserIds,
       });
 
       const generatedAt = new Date().toISOString();

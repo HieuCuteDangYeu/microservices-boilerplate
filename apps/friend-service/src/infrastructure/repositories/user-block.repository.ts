@@ -1,5 +1,9 @@
 import { Friendship } from '@friend/domain/entities/friendship.entity';
-import type { IUserBlockRepository } from '@friend/domain/interfaces/user-block.repository.interface';
+import type {
+  IUserBlockRepository,
+  PaginatedUserBlockRecords,
+  UserBlockPaginationCursor,
+} from '@friend/domain/interfaces/user-block.repository.interface';
 import { PrismaService } from '@friend/infrastructure/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
 
@@ -101,5 +105,66 @@ export class UserBlockRepository implements IUserBlockRepository {
         ),
       ),
     ];
+  }
+
+  async listBlocked(
+    blockerId: string,
+    limit: number,
+    cursor?: UserBlockPaginationCursor,
+  ): Promise<PaginatedUserBlockRecords> {
+    const safeLimit = Math.min(Math.max(limit, 1), 50);
+
+    const records = await this.prisma.userBlock.findMany({
+      where: {
+        blockerId,
+        ...(cursor
+          ? {
+              OR: [
+                {
+                  createdAt: {
+                    lt: cursor.timestamp,
+                  },
+                },
+                {
+                  createdAt: cursor.timestamp,
+                  blockedUserId: {
+                    gt: cursor.id,
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [
+        {
+          createdAt: 'desc',
+        },
+        {
+          blockedUserId: 'asc',
+        },
+      ],
+      take: safeLimit + 1,
+      select: {
+        blockedUserId: true,
+        createdAt: true,
+      },
+    });
+
+    const hasMore = records.length > safeLimit;
+
+    const items = records.slice(0, safeLimit);
+
+    const last = items.at(-1);
+
+    return {
+      items,
+      nextCursor:
+        hasMore && last
+          ? {
+              timestamp: last.createdAt,
+              id: last.blockedUserId,
+            }
+          : null,
+    };
   }
 }

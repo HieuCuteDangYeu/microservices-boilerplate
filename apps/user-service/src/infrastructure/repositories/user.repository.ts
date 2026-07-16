@@ -5,14 +5,14 @@ import {
 import { UserResponse } from '@common/user/interfaces/find-all-users.types';
 import { Injectable } from '@nestjs/common';
 import { Prisma, User as PrismaUser } from '@prisma/user-client';
-import { User } from '../../domain/entities/user.entity';
-import {
+import { User } from '@user/domain/entities/user.entity';
+import type {
   FindAllParams,
   IUserRepository,
   RecommendedPublicUsersParams,
   SearchPublicUsersParams,
-} from '../../domain/interfaces/user.repository.interface';
-import { PrismaService } from '../prisma/prisma.service';
+} from '@user/domain/interfaces/user.repository.interface';
+import { PrismaService } from '@user/infrastructure/prisma/prisma.service';
 
 @Injectable()
 export class UserRepository implements IUserRepository {
@@ -28,6 +28,7 @@ export class UserRepository implements IUserRepository {
     }
 
     const cdnDomain = process.env.R2_PUBLIC_DOMAIN || '';
+
     return `${cdnDomain}/${avatarKey}`;
   }
 
@@ -48,11 +49,15 @@ export class UserRepository implements IUserRepository {
         providerId: user.providerId,
       },
     });
+
     return this.toDomain(saved);
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    const found = await this.prisma.user.findUnique({ where: { email } });
+    const found = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
     return found ? this.toDomain(found) : null;
   }
 
@@ -60,6 +65,7 @@ export class UserRepository implements IUserRepository {
     const found = await this.prisma.user.findUnique({
       where: { id },
     });
+
     return found ? this.toDomain(found) : null;
   }
 
@@ -86,17 +92,32 @@ export class UserRepository implements IUserRepository {
     );
   }
 
-  async findAll(
-    params: FindAllParams,
-  ): Promise<{ users: UserResponse[]; total: number }> {
+  async findAll(params: FindAllParams): Promise<{
+    users: UserResponse[];
+    total: number;
+  }> {
     const { skip, limit, search, sort } = params;
 
     const where: Prisma.UserWhereInput = search
       ? {
           OR: [
-            { email: { contains: search, mode: 'insensitive' } },
-            { username: { contains: search.toLowerCase() } },
-            { fullName: { contains: search, mode: 'insensitive' } },
+            {
+              email: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+            {
+              username: {
+                contains: search.toLowerCase(),
+              },
+            },
+            {
+              fullName: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
           ],
         }
       : {};
@@ -135,22 +156,31 @@ export class UserRepository implements IUserRepository {
   }
 
   async searchPublicUsers(params: SearchPublicUsersParams): Promise<User[]> {
-    const excludedUserIds = [BOT_USER_ID, DEFAULT_ADMIN_ID];
-
-    if (params.excludeUserId) {
-      excludedUserIds.push(params.excludeUserId);
-    }
+    const excludedUserIds = this.buildExcludedIds(params.excludedUserIds);
 
     const users = await this.prisma.user.findMany({
       where: {
-        id: { notIn: excludedUserIds },
-        username: { not: null },
+        id: {
+          notIn: excludedUserIds,
+        },
+        username: {
+          not: null,
+        },
         OR: [
-          { username: { contains: params.query.toLowerCase() } },
-          { fullName: { contains: params.query, mode: 'insensitive' } },
+          {
+            username: {
+              contains: params.query.toLowerCase(),
+            },
+          },
+          {
+            fullName: {
+              contains: params.query,
+              mode: 'insensitive',
+            },
+          },
         ],
       },
-      take: params.limit,
+      take: Math.min(Math.max(params.limit, 1), 30),
       orderBy: [{ username: 'asc' }, { fullName: 'asc' }],
     });
 
@@ -160,18 +190,18 @@ export class UserRepository implements IUserRepository {
   async findRecommendedPublicUsers(
     params: RecommendedPublicUsersParams,
   ): Promise<User[]> {
-    const excludedUserIds = [BOT_USER_ID, DEFAULT_ADMIN_ID];
-
-    if (params.excludeUserId) {
-      excludedUserIds.push(params.excludeUserId);
-    }
+    const excludedUserIds = this.buildExcludedIds(params.excludedUserIds);
 
     const limit = Math.min(Math.max(params.limit ?? 20, 1), 30);
 
     const users = await this.prisma.user.findMany({
       where: {
-        id: { notIn: excludedUserIds },
-        username: { not: null },
+        id: {
+          notIn: excludedUserIds,
+        },
+        username: {
+          not: null,
+        },
       },
       take: limit,
       orderBy: [
@@ -191,7 +221,11 @@ export class UserRepository implements IUserRepository {
     const count = await this.prisma.user.count({
       where: {
         username,
-        id: excludeUserId ? { not: excludeUserId } : undefined,
+        id: excludeUserId
+          ? {
+              not: excludeUserId,
+            }
+          : undefined,
       },
     });
 
@@ -202,7 +236,9 @@ export class UserRepository implements IUserRepository {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id: _id, createdAt: _date, picture, ...cleanData } = data;
 
-    const updateData: Prisma.UserUpdateInput = { ...cleanData };
+    const updateData: Prisma.UserUpdateInput = {
+      ...cleanData,
+    };
 
     if (picture !== undefined) {
       updateData.avatarKey = picture
@@ -229,7 +265,9 @@ export class UserRepository implements IUserRepository {
   async findByIds(ids: string[]): Promise<User[]> {
     const users = await this.prisma.user.findMany({
       where: {
-        id: { in: ids },
+        id: {
+          in: ids,
+        },
       },
     });
 
@@ -238,7 +276,17 @@ export class UserRepository implements IUserRepository {
 
   async countUsersByIds(ids: string[]): Promise<number> {
     return this.prisma.user.count({
-      where: { id: { in: ids } },
+      where: {
+        id: {
+          in: ids,
+        },
+      },
     });
+  }
+
+  private buildExcludedIds(excludedUserIds?: string[]): string[] {
+    return [
+      ...new Set([BOT_USER_ID, DEFAULT_ADMIN_ID, ...(excludedUserIds ?? [])]),
+    ].filter(Boolean);
   }
 }
