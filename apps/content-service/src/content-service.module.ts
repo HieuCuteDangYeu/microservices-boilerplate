@@ -1,3 +1,13 @@
+import { ContentSimilarityCandidateSource } from '@content/application/recommendation/candidate-generation/content-similarity-candidate.source';
+import { CreatorAffinityCandidateSource } from '@content/application/recommendation/candidate-generation/creator-affinity-candidate.source';
+import { ExplorationCandidateSource } from '@content/application/recommendation/candidate-generation/exploration-candidate.source';
+import { RecentQualityCandidateSource } from '@content/application/recommendation/candidate-generation/recent-quality-candidate.source';
+import { SocialCandidateSource } from '@content/application/recommendation/candidate-generation/social-candidate.source';
+import { TagAffinityCandidateSource } from '@content/application/recommendation/candidate-generation/tag-affinity-candidate.source';
+import { TrendingCandidateSource } from '@content/application/recommendation/candidate-generation/trending-candidate.source';
+import { GenerateRecommendationCandidatesUseCase } from '@content/application/recommendation/generate-recommendation-candidates.use-case';
+import { RecommendationCandidateMerger } from '@content/application/recommendation/recommendation-candidate-merger';
+import { RecommendationEligibilityFilter } from '@content/application/recommendation/recommendation-eligibility-filter';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
@@ -28,6 +38,7 @@ import { RecommendationTelemetryServiceAdapter } from '@content/infrastructure/a
 import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
 import { ContentController } from '@content/infrastructure/controllers/content.controller';
 import { ContentRepository } from '@content/infrastructure/repositories/content.repository';
+import { RecommendationCandidateRepository } from '@content/infrastructure/repositories/recommendation-candidate.repository';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { RecommendationConfigService } from '@content/infrastructure/services/recommendation-config.service';
 import { Module } from '@nestjs/common';
@@ -41,7 +52,6 @@ function createRmqClientRegistration(name: string, queue: string) {
       const heartbeat = Number(
         configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
       );
-
       return {
         transport: Transport.RMQ as const,
         options: {
@@ -50,9 +60,7 @@ function createRmqClientRegistration(name: string, queue: string) {
               'amqp://localhost:5672',
           ],
           queue,
-          queueOptions: {
-            durable: true,
-          },
+          queueOptions: { durable: true },
           heartbeat:
             Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
           retryAttempts: 10,
@@ -66,10 +74,7 @@ function createRmqClientRegistration(name: string, queue: string) {
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: '.env',
-    }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
     ClientsModule.registerAsync([
       createRmqClientRegistration('PROCESSING_SERVICE', 'processing_queue'),
       createRmqClientRegistration('AI_SERVICE_RMQ', 'ai_queue'),
@@ -85,6 +90,21 @@ function createRmqClientRegistration(name: string, queue: string) {
   controllers: [ContentController],
   providers: [
     ContentRepository,
+    RecommendationCandidateRepository,
+    {
+      provide: 'IRecommendationCandidateRepository',
+      useExisting: RecommendationCandidateRepository,
+    },
+    RecentQualityCandidateSource,
+    TrendingCandidateSource,
+    TagAffinityCandidateSource,
+    CreatorAffinityCandidateSource,
+    ContentSimilarityCandidateSource,
+    SocialCandidateSource,
+    ExplorationCandidateSource,
+    RecommendationCandidateMerger,
+    RecommendationEligibilityFilter,
+    GenerateRecommendationCandidatesUseCase,
     CreateReelUseCase,
     ListReelsUseCase,
     GetReelUseCase,
@@ -110,42 +130,21 @@ function createRmqClientRegistration(name: string, queue: string) {
       provide: 'IFriendContentAccessService',
       useClass: FriendContentAccessAdapter,
     },
-    {
-      provide: 'IContentRepository',
-      useExisting: ContentRepository,
-    },
-    {
-      provide: 'IReelViewEventRepository',
-      useExisting: ContentRepository,
-    },
-    {
-      provide: 'IStorageService',
-      useClass: R2StorageService,
-    },
-    {
-      provide: 'IProcessingService',
-      useClass: ProcessingServiceAdapter,
-    },
-    {
-      provide: 'IAiEmbeddingService',
-      useClass: AiEmbeddingServiceAdapter,
-    },
+    { provide: 'IContentRepository', useExisting: ContentRepository },
+    { provide: 'IReelViewEventRepository', useExisting: ContentRepository },
+    { provide: 'IStorageService', useClass: R2StorageService },
+    { provide: 'IProcessingService', useClass: ProcessingServiceAdapter },
+    { provide: 'IAiEmbeddingService', useClass: AiEmbeddingServiceAdapter },
     {
       provide: 'IFriendSharePolicyService',
       useClass: FriendSharePolicyAdapter,
     },
-    {
-      provide: 'IUserService',
-      useClass: UserServiceAdapter,
-    },
+    { provide: 'IUserService', useClass: UserServiceAdapter },
     {
       provide: 'IConversationMessageService',
       useClass: ConversationMessageAdapter,
     },
-    {
-      provide: 'IRecommendationConfig',
-      useClass: RecommendationConfigService,
-    },
+    { provide: 'IRecommendationConfig', useClass: RecommendationConfigService },
     {
       provide: 'IRecommendationTelemetryService',
       useClass: RecommendationTelemetryServiceAdapter,

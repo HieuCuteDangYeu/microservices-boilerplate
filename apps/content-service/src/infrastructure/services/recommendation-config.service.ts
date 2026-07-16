@@ -15,22 +15,19 @@ export class RecommendationConfigService implements IRecommendationConfig {
   constructor(private readonly configService: ConfigService) {
     this.algorithmVersion = this.readVersion(
       'REEL_RECOMMENDATION_VERSION',
-      'heuristic-v1',
+      'multi-source-v1',
     );
-
     this.telemetryEnabled = this.readBoolean(
       'RECOMMENDATION_TELEMETRY_ENABLED',
       true,
     );
-
     this.collaborativePoolEnabled = this.readBoolean(
       'REEL_COLLABORATIVE_POOL_ENABLED',
       false,
     );
-
     this.socialPoolEnabled = this.readBoolean(
       'REEL_SOCIAL_POOL_ENABLED',
-      false,
+      true,
     );
   }
 
@@ -39,11 +36,17 @@ export class RecommendationConfigService implements IRecommendationConfig {
   }
 
   getCandidateSource(): string {
-    return 'HEURISTIC_RECENT_WINDOW';
+    return 'MULTI_SOURCE_PHASE4';
   }
 
   getFeatureFlags(): RecommendationFeatureFlags {
     return {
+      recentQualityPool: true,
+      trendingPool: true,
+      tagAffinityPool: true,
+      creatorAffinityPool: true,
+      metadataSimilarityPool: true,
+      explorationPool: true,
       collaborativePool: this.collaborativePoolEnabled,
       socialPool: this.socialPoolEnabled,
     };
@@ -55,35 +58,19 @@ export class RecommendationConfigService implements IRecommendationConfig {
 
   private readVersion(key: string, fallback: string): string {
     const value = this.configService.get<string>(key)?.trim() || fallback;
-
     if (!VERSION_PATTERN.test(value)) {
       throw new Error(`${key} has an invalid value`);
     }
-
     return value;
   }
 
   private readBoolean(key: string, fallback: boolean): boolean {
     const value = this.configService.get<string | boolean>(key);
-
-    if (value === undefined || value === null || value === '') {
-      return fallback;
-    }
-
-    if (typeof value === 'boolean') {
-      return value;
-    }
-
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'boolean') return value;
     const normalized = value.trim().toLowerCase();
-
-    if (['true', '1', 'yes', 'on'].includes(normalized)) {
-      return true;
-    }
-
-    if (['false', '0', 'no', 'off'].includes(normalized)) {
-      return false;
-    }
-
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
     throw new Error(`${key} has an invalid boolean value`);
   }
 }
