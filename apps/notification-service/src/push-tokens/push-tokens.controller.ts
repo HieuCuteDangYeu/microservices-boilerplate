@@ -3,9 +3,11 @@ import {
   Body,
   Controller,
   Headers,
+  InternalServerErrorException,
   Post,
   UnauthorizedException,
 } from '@nestjs/common';
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 
 import { PushTokensService } from './push-tokens.service';
@@ -47,13 +49,13 @@ export class PushTokensController {
   @Post()
   register(
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-notification-gateway-secret') gatewaySecret: string | undefined,
     @Body() body: unknown,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException(
-        'Missing x-user-id. Replace with real auth guard in N6.',
-      );
-    }
+    const authenticatedUserId = this.assertGatewayRequest(
+      userId,
+      gatewaySecret,
+    );
 
     const parsed = registerPushTokenSchema.safeParse(body);
 
@@ -61,19 +63,19 @@ export class PushTokensController {
       throw new BadRequestException(parsed.error.flatten());
     }
 
-    return this.pushTokensService.register(userId, parsed.data);
+    return this.pushTokensService.register(authenticatedUserId, parsed.data);
   }
 
   @Post('deactivate')
   deactivate(
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-notification-gateway-secret') gatewaySecret: string | undefined,
     @Body() body: unknown,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException(
-        'Missing x-user-id. Replace with real auth guard in N6.',
-      );
-    }
+    const authenticatedUserId = this.assertGatewayRequest(
+      userId,
+      gatewaySecret,
+    );
 
     const parsed = deactivatePushTokenSchema.safeParse(body);
 
@@ -81,6 +83,41 @@ export class PushTokensController {
       throw new BadRequestException(parsed.error.flatten());
     }
 
-    return this.pushTokensService.deactivate(userId, parsed.data);
+    return this.pushTokensService.deactivate(authenticatedUserId, parsed.data);
+  }
+
+  private assertGatewayRequest(
+    userId: string | undefined,
+    gatewaySecret: string | undefined,
+  ): string {
+    const expectedSecret = process.env.NOTIFICATION_GATEWAY_SECRET;
+
+    if (!expectedSecret) {
+      throw new InternalServerErrorException(
+        'Missing NOTIFICATION_GATEWAY_SECRET',
+      );
+    }
+
+    if (
+      !userId ||
+      !gatewaySecret ||
+      !this.secretsMatch(gatewaySecret, expectedSecret)
+    ) {
+      throw new UnauthorizedException(
+        'Invalid notification gateway credentials',
+      );
+    }
+
+    return userId;
+  }
+
+  private secretsMatch(actual: string, expected: string) {
+    const actualBuffer = Buffer.from(actual);
+    const expectedBuffer = Buffer.from(expected);
+
+    return (
+      actualBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(actualBuffer, expectedBuffer)
+    );
   }
 }

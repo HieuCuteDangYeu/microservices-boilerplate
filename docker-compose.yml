@@ -9,6 +9,7 @@ services:
       - '3000:3000'
     env_file:
       - .env
+      - /opt/velora/secrets/notification-gateway.env
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -188,6 +189,7 @@ services:
     restart: always
     env_file:
       - .env
+      - /opt/velora/secrets/notification-gateway.env
     depends_on:
       rabbitmq:
         condition: service_healthy

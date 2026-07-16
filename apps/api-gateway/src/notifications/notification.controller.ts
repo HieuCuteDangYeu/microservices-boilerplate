@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Post,
   Req,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -39,12 +40,16 @@ type DeactivatePushTokenResponse = {
 @ApiBearerAuth()
 export class NotificationController {
   private readonly notificationServiceUrl: string;
+  private readonly notificationGatewaySecret: string | undefined;
 
   constructor(private readonly configService: ConfigService) {
     this.notificationServiceUrl = (
       this.configService.get<string>('NOTIFICATION_SERVICE_URL') ||
       'http://localhost:3015'
     ).replace(/\/$/, '');
+    this.notificationGatewaySecret = this.configService.get<string>(
+      'NOTIFICATION_GATEWAY_SECRET',
+    );
   }
 
   @Post('push-tokens')
@@ -82,6 +87,12 @@ export class NotificationController {
     userId: string;
     body: unknown;
   }): Promise<TResponse> {
+    if (!this.notificationGatewaySecret) {
+      throw new ServiceUnavailableException(
+        'Notification token registration is not configured',
+      );
+    }
+
     let response: Response;
 
     try {
@@ -90,6 +101,7 @@ export class NotificationController {
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': userId,
+          'x-notification-gateway-secret': this.notificationGatewaySecret,
         },
         body: JSON.stringify(body),
       });

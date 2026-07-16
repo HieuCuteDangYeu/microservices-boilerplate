@@ -23,6 +23,7 @@ import {
   Post,
   Req,
   Res,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
@@ -39,6 +40,7 @@ type LogoutResponse = {
 @Controller('auth')
 export class AuthController {
   private readonly notificationServiceUrl: string;
+  private readonly notificationGatewaySecret: string | undefined;
 
   constructor(
     @Inject('AUTH_SERVICE') private readonly authClient: ClientProxy,
@@ -48,6 +50,9 @@ export class AuthController {
       this.configService.get<string>('NOTIFICATION_SERVICE_URL') ||
       'http://localhost:3015'
     ).replace(/\/$/, '');
+    this.notificationGatewaySecret = this.configService.get<string>(
+      'NOTIFICATION_GATEWAY_SECRET',
+    );
   }
 
   @Post('register')
@@ -320,6 +325,12 @@ export class AuthController {
     userId: string;
     body: unknown;
   }) {
+    if (!this.notificationGatewaySecret) {
+      throw new ServiceUnavailableException(
+        'Notification token registration is not configured',
+      );
+    }
+
     let response: Response;
 
     try {
@@ -328,6 +339,7 @@ export class AuthController {
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': userId,
+          'x-notification-gateway-secret': this.notificationGatewaySecret,
         },
         body: JSON.stringify(body),
       });
