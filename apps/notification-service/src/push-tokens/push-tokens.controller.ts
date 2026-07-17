@@ -19,6 +19,7 @@ const registerPushTokenSchema = z.discriminatedUnion('provider', [
     token: z.string().min(10),
     deviceId: z.string().optional(),
     appVersion: z.string().optional(),
+    lifecycleVersion: z.number().int().min(1).max(2_147_483_647).optional(),
   }),
   z.object({
     provider: z.literal('apns_voip'),
@@ -26,6 +27,7 @@ const registerPushTokenSchema = z.discriminatedUnion('provider', [
     token: z.string().min(10),
     deviceId: z.string().optional(),
     appVersion: z.string().optional(),
+    lifecycleVersion: z.number().int().min(1).max(2_147_483_647).optional(),
     bundleId: z.string().min(1),
     deliveryEnvironment: z.enum(['development', 'production']),
   }),
@@ -35,10 +37,14 @@ const deactivatePushTokenSchema = z.discriminatedUnion('provider', [
   z.object({
     provider: z.literal('fcm'),
     token: z.string().min(10),
+    deviceId: z.string().optional(),
+    lifecycleVersion: z.number().int().min(1).max(2_147_483_647).optional(),
   }),
   z.object({
     provider: z.literal('apns_voip'),
     token: z.string().min(10),
+    deviceId: z.string().optional(),
+    lifecycleVersion: z.number().int().min(1).max(2_147_483_647).optional(),
   }),
 ]);
 
@@ -63,6 +69,8 @@ export class PushTokensController {
       throw new BadRequestException(parsed.error.flatten());
     }
 
+    this.assertVersionedLifecycleHasDeviceId(parsed.data);
+
     return this.pushTokensService.register(authenticatedUserId, parsed.data);
   }
 
@@ -82,6 +90,8 @@ export class PushTokensController {
     if (!parsed.success) {
       throw new BadRequestException(parsed.error.flatten());
     }
+
+    this.assertVersionedLifecycleHasDeviceId(parsed.data);
 
     return this.pushTokensService.deactivate(authenticatedUserId, parsed.data);
   }
@@ -109,6 +119,17 @@ export class PushTokensController {
     }
 
     return userId;
+  }
+
+  private assertVersionedLifecycleHasDeviceId(input: {
+    deviceId?: string;
+    lifecycleVersion?: number;
+  }) {
+    if (input.lifecycleVersion !== undefined && !input.deviceId) {
+      throw new BadRequestException(
+        'deviceId is required when lifecycleVersion is provided',
+      );
+    }
   }
 
   private secretsMatch(actual: string, expected: string) {

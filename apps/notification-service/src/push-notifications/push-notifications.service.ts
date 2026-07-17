@@ -36,6 +36,7 @@ export type SendIncomingCallNotificationInput = {
 
 export type SendCallStateUpdateInput = {
   recipientUserIds: string[];
+  iosRecipientUserIds?: string[];
   conversationId: string;
   callId: string;
   status: 'active' | 'rejected' | 'ended' | 'cancelled';
@@ -123,32 +124,29 @@ export class PushNotificationsService {
 
   async sendCallStateUpdate(input: SendCallStateUpdateInput) {
     const uniqueRecipientIds = [...new Set(input.recipientUserIds)];
-    const tokenGroups = await Promise.all(
-      uniqueRecipientIds.map(async (userId) => {
-        const androidTokensPromise = this.pushTokensService.findActiveByUserId(
-          userId,
-          {
-            provider: 'fcm',
-            platform: 'android',
-          },
-        );
-
-        if (input.status === 'active') {
-          return androidTokensPromise;
-        }
-
-        const [androidTokens, iosTokens] = await Promise.all([
-          androidTokensPromise,
-          this.pushTokensService.findActiveByUserId(userId, {
-            provider: 'fcm',
-            platform: 'ios',
-          }),
-        ]);
-
-        return [...androidTokens, ...iosTokens];
-      }),
+    const androidTokenGroups = await Promise.all(
+      uniqueRecipientIds.map((userId) =>
+        this.pushTokensService.findActiveByUserId(userId, {
+          provider: 'fcm',
+          platform: 'android',
+        }),
+      ),
     );
-    const tokens = tokenGroups.flat();
+    const iosRecipientUserIds = [
+      ...new Set(
+        input.iosRecipientUserIds ??
+          (input.status === 'active' ? [] : uniqueRecipientIds),
+      ),
+    ];
+    const iosTokenGroups = await Promise.all(
+      iosRecipientUserIds.map((userId) =>
+        this.pushTokensService.findActiveByUserId(userId, {
+          provider: 'fcm',
+          platform: 'ios',
+        }),
+      ),
+    );
+    const tokens = [...androidTokenGroups.flat(), ...iosTokenGroups.flat()];
 
     if (tokens.length === 0) {
       return {

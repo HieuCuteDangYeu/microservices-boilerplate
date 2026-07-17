@@ -35,6 +35,7 @@ const incomingCallNotificationSchema = z.object({
 
 const callStateUpdateSchema = z.object({
   recipientUserIds: z.array(z.string().uuid()).min(1),
+  iosRecipientUserIds: z.array(z.string().uuid()).min(1).optional(),
   conversationId: z.string().min(1),
   callId: z.string().min(1),
   status: z.enum(['active', 'rejected', 'ended', 'cancelled']),

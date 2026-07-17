@@ -49,7 +49,12 @@ export class NotificationServiceAdapter {
     }
 
     await this.post('/notifications/internal/call-state-update', {
-      recipientUserIds: [...new Set([payload.initiatorId, payload.targetUserId])],
+      recipientUserIds: [
+        ...new Set([payload.initiatorId, payload.targetUserId]),
+      ],
+      ...(event === 'call.answered'
+        ? { iosRecipientUserIds: [payload.targetUserId] }
+        : {}),
       conversationId: payload.conversationId,
       callId: payload.callId,
       status: this.mapCallState(event, payload.reason),

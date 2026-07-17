@@ -36,6 +36,13 @@ type LogoutResponse = {
   userId?: string;
 };
 
+type LogoutPushToken = {
+  provider: 'fcm' | 'apns_voip';
+  token: string;
+  deviceId?: string;
+  lifecycleVersion?: number;
+};
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -194,7 +201,7 @@ export class AuthController {
   ) {
     const refreshToken = request.cookies['refresh_token'];
     let logoutResult: LogoutResponse | null = null;
-    const pushToken = dto?.pushToken?.trim();
+    const pushTokens = this.getLogoutPushTokens(dto);
 
     if (refreshToken) {
       logoutResult = await lastValueFrom(
@@ -202,7 +209,7 @@ export class AuthController {
           .send<LogoutResponse>('auth.logout', { refreshToken })
           .pipe(
             catchError((error) => {
-              if (pushToken) {
+              if (pushTokens.length > 0) {
                 this.handleMicroserviceError(error);
               }
 
@@ -210,14 +217,14 @@ export class AuthController {
             }),
           ),
       );
-    } else if (pushToken) {
+    } else if (pushTokens.length > 0) {
       throw new HttpException(
         'No refresh token found for push token cleanup',
         HttpStatus.UNAUTHORIZED,
       );
     }
 
-    if (pushToken) {
+    if (pushTokens.length > 0) {
       if (!logoutResult?.userId) {
         throw new HttpException(
           'Unable to resolve user for push token cleanup',
@@ -225,14 +232,15 @@ export class AuthController {
         );
       }
 
-      await this.forwardToNotificationService({
-        path: '/notifications/push-tokens/deactivate',
-        userId: logoutResult.userId,
-        body: {
-          provider: 'fcm',
-          token: pushToken,
-        },
-      });
+      await Promise.all(
+        pushTokens.map((pushToken) =>
+          this.forwardToNotificationService({
+            path: '/notifications/push-tokens/deactivate',
+            userId: logoutResult!.userId!,
+            body: pushToken,
+          }),
+        ),
+      );
     }
 
     response.clearCookie('access_token', {
@@ -243,6 +251,36 @@ export class AuthController {
     });
 
     return { message: logoutResult?.message ?? 'Logged out successfully' };
+  }
+
+  private getLogoutPushTokens(dto?: LogoutDto): LogoutPushToken[] {
+    const tokens: LogoutPushToken[] = [];
+    const legacyPushToken = dto?.pushToken?.trim();
+
+    if (legacyPushToken) {
+      tokens.push({ provider: 'fcm', token: legacyPushToken });
+    }
+
+    for (const pushToken of dto?.pushTokens ?? []) {
+      const token = pushToken.token.trim();
+
+      if (token) {
+        tokens.push({
+          provider: pushToken.provider,
+          token,
+          ...(pushToken.deviceId ? { deviceId: pushToken.deviceId } : {}),
+          ...(pushToken.lifecycleVersion !== undefined
+            ? { lifecycleVersion: pushToken.lifecycleVersion }
+            : {}),
+        });
+      }
+    }
+
+    return [
+      ...new Map(
+        tokens.map((token) => [`${token.provider}:${token.token}`, token]),
+      ).values(),
+    ];
   }
 
   @Post('google/verify')
