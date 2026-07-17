@@ -12,7 +12,6 @@ import { isRpcError } from '@common/constants/rpc-error.types';
 import { CreateUserResponse } from '@common/user/interfaces/create-user-response.types';
 import type { AuthenticatedRequest } from '@gateway/auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
-import { ConfigService } from '@nestjs/config';
 import {
   Body,
   Controller,
@@ -26,10 +25,11 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response as ExpressResponse } from 'express';
-import { catchError, lastValueFrom } from 'rxjs';
+import { catchError, lastValueFrom, timeout } from 'rxjs';
 
 type LogoutResponse = {
   message: string;
@@ -203,6 +203,27 @@ export class AuthController {
     let logoutResult: LogoutResponse | null = null;
     const pushTokens = this.getLogoutPushTokens(dto);
 
+    if (!refreshToken && pushTokens.length > 0) {
+      throw new HttpException(
+        'No refresh token found for push token cleanup',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    if (pushTokens.length > 0) {
+      const cleanupUser = await this.resolvePushTokenCleanupUser(request);
+
+      await Promise.all(
+        pushTokens.map((pushToken) =>
+          this.forwardToNotificationService({
+            path: '/notifications/push-tokens/deactivate',
+            userId: cleanupUser.id,
+            body: pushToken,
+          }),
+        ),
+      );
+    }
+
     if (refreshToken) {
       logoutResult = await lastValueFrom(
         this.authClient
@@ -217,30 +238,6 @@ export class AuthController {
             }),
           ),
       );
-    } else if (pushTokens.length > 0) {
-      throw new HttpException(
-        'No refresh token found for push token cleanup',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
-
-    if (pushTokens.length > 0) {
-      if (!logoutResult?.userId) {
-        throw new HttpException(
-          'Unable to resolve user for push token cleanup',
-          HttpStatus.BAD_GATEWAY,
-        );
-      }
-
-      await Promise.all(
-        pushTokens.map((pushToken) =>
-          this.forwardToNotificationService({
-            path: '/notifications/push-tokens/deactivate',
-            userId: logoutResult!.userId!,
-            body: pushToken,
-          }),
-        ),
-      );
     }
 
     response.clearCookie('access_token', {
@@ -251,6 +248,32 @@ export class AuthController {
     });
 
     return { message: logoutResult?.message ?? 'Logged out successfully' };
+  }
+
+  private async resolvePushTokenCleanupUser(
+    request: AuthenticatedRequest,
+  ): Promise<AuthUser> {
+    const accessToken = request.cookies['access_token'];
+
+    if (!accessToken) {
+      throw new HttpException(
+        'No access token found for push token cleanup',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    try {
+      return await lastValueFrom(
+        this.authClient
+          .send<AuthUser>('auth.verify_token', { token: accessToken })
+          .pipe(timeout(5000)),
+      );
+    } catch {
+      throw new HttpException(
+        'Unable to authenticate push token cleanup',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
   }
 
   private getLogoutPushTokens(dto?: LogoutDto): LogoutPushToken[] {

@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/notification-client';
-import { createHash } from 'node:crypto';
 import Redis from 'ioredis';
+import { createHash } from 'node:crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -114,6 +114,23 @@ export class PushTokensService {
         },
       });
       throw new ConflictException('Push token lifecycle has advanced');
+    }
+
+    if (input.deviceId) {
+      await this.prisma.pushToken.updateMany({
+        where: {
+          userId,
+          provider: input.provider,
+          platform: input.platform,
+          deviceId: input.deviceId,
+          token: { not: input.token },
+          isActive: true,
+        },
+        data: {
+          isActive: false,
+          lastSeenAt: new Date(),
+        },
+      });
     }
 
     return pushToken;
@@ -237,12 +254,14 @@ export class PushTokensService {
   }
 
   private lifecycleKey(
-    input: Pick<RegisterPushTokenInput, 'provider' | 'token' | 'deviceId'>,
+    input: Pick<RegisterPushTokenInput, 'provider' | 'deviceId'>,
   ) {
-    const identity = `${input.provider}:${input.deviceId}:${input.token}`;
-    const tokenHash = createHash('sha256').update(identity).digest('hex');
+    const identity = `${input.provider}:${input.deviceId}`;
+    const installationHash = createHash('sha256')
+      .update(identity)
+      .digest('hex');
 
-    return `notification:push-token-lifecycle:${tokenHash}`;
+    return `notification:push-token-lifecycle:${installationHash}`;
   }
 
   private async isCurrentLifecycle(
