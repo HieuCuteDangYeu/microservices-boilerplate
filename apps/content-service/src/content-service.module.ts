@@ -2,12 +2,15 @@ import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfi
 import { BuildReelMediaJobUseCase } from '@content/application/use-cases/build-reel-media-job.use-case';
 import { ClassifyReelJobLengthUseCase } from '@content/application/use-cases/classify-reel-job-length.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
+import { ClaimReelIndexingAttemptUseCase } from '@content/application/use-cases/claim-reel-indexing-attempt.use-case';
+import { CompleteReelIndexingUseCase } from '@content/application/use-cases/complete-reel-indexing.use-case';
 import { CompleteReelMediaProcessingUseCase } from '@content/application/use-cases/complete-reel-media-processing.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { CreateReelUseCase } from '@content/application/use-cases/create-reel.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { DispatchOutboxEventsUseCase } from '@content/application/use-cases/dispatch-outbox-events.use-case';
 import { GetFriendsReelsUseCase } from '@content/application/use-cases/get-friends-reels.use-case';
+import { FailReelIndexingUseCase } from '@content/application/use-cases/fail-reel-indexing.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
@@ -15,6 +18,7 @@ import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
+import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
@@ -30,6 +34,7 @@ import { ConversationMessageAdapter } from '@content/infrastructure/adapters/con
 import { FriendContentAccessAdapter } from '@content/infrastructure/adapters/friend-content-access.adapter';
 import { FriendSharePolicyAdapter } from '@content/infrastructure/adapters/friend-share-policy.adapter';
 import { ReelMediaJobPublisherAdapter } from '@content/infrastructure/adapters/reel-media-job-publisher.adapter';
+import { ReelIndexJobPublisherAdapter } from '@content/infrastructure/adapters/reel-index-job-publisher.adapter';
 import { RecommendationTelemetryServiceAdapter } from '@content/infrastructure/adapters/recommendation-telemetry-service.adapter';
 import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
 import { ContentController } from '@content/infrastructure/controllers/content.controller';
@@ -98,6 +103,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     PrismaService,
     ContentRepository,
     ReelMediaJobPublisherAdapter,
+    ReelIndexJobPublisherAdapter,
     OutboxDispatcherService,
 
     CreateReelUseCase,
@@ -120,6 +126,10 @@ function createRmqClientRegistration(name: string, queue: string) {
     TrackReelEventsUseCase,
     ReprocessReelUseCase,
     ClaimReelProcessingAttemptUseCase,
+    ClaimReelIndexingAttemptUseCase,
+    CompleteReelIndexingUseCase,
+    FailReelIndexingUseCase,
+    ReportReelIndexingProgressUseCase,
     CompleteReelMediaProcessingUseCase,
     UpdateReelMediaStatusUseCase,
     UpdateReelIndexStatusUseCase,
@@ -159,6 +169,10 @@ function createRmqClientRegistration(name: string, queue: string) {
     {
       provide: 'IReelMediaJobPublisher',
       useExisting: ReelMediaJobPublisherAdapter,
+    },
+    {
+      provide: 'IReelIndexJobPublisher',
+      useExisting: ReelIndexJobPublisherAdapter,
     },
     {
       provide: 'IAiEmbeddingService',

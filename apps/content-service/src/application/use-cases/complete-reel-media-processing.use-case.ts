@@ -23,7 +23,8 @@ export class CompleteReelMediaProcessingUseCase {
       !input.mediaAttemptId.trim() ||
       !input.mediaOutput.thumbnailKey.trim() ||
       !input.mediaOutput.hlsMasterKey.trim() ||
-      !input.mediaOutput.transcriptionAudioManifestKey.trim()
+      !input.mediaMetadata.sourceDurationMs ||
+      !input.mediaMetadata.sourceOrientation
     ) {
       return false;
     }

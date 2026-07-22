@@ -7,10 +7,13 @@ import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-o
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
+import { ClaimReelIndexingAttemptUseCase } from '@content/application/use-cases/claim-reel-indexing-attempt.use-case';
+import { CompleteReelIndexingUseCase } from '@content/application/use-cases/complete-reel-indexing.use-case';
 import { CompleteReelMediaProcessingUseCase } from '@content/application/use-cases/complete-reel-media-processing.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetFriendsReelsUseCase } from '@content/application/use-cases/get-friends-reels.use-case';
+import { FailReelIndexingUseCase } from '@content/application/use-cases/fail-reel-indexing.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
@@ -18,6 +21,7 @@ import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
+import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
@@ -73,6 +77,10 @@ export class ContentController {
     private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
     private readonly reprocessReelUseCase: ReprocessReelUseCase,
     private readonly claimReelProcessingAttemptUseCase: ClaimReelProcessingAttemptUseCase,
+    private readonly claimReelIndexingAttemptUseCase: ClaimReelIndexingAttemptUseCase,
+    private readonly completeReelIndexingUseCase: CompleteReelIndexingUseCase,
+    private readonly failReelIndexingUseCase: FailReelIndexingUseCase,
+    private readonly reportReelIndexingProgressUseCase: ReportReelIndexingProgressUseCase,
     private readonly completeReelMediaProcessingUseCase: CompleteReelMediaProcessingUseCase,
     private readonly updateReelMediaStatusUseCase: UpdateReelMediaStatusUseCase,
     private readonly updateReelIndexStatusUseCase: UpdateReelIndexStatusUseCase,
@@ -696,6 +704,40 @@ export class ContentController {
       processingAttemptId: data.processingAttemptId,
       allowReclaim: data.allowReclaim === true,
     });
+  }
+
+  @MessagePattern('content.claim_reel_indexing_attempt')
+  async claimReelIndexingAttempt(
+    @Payload()
+    data: Parameters<ClaimReelIndexingAttemptUseCase['execute']>[0],
+  ) {
+    return await this.claimReelIndexingAttemptUseCase.execute(data);
+  }
+
+  @MessagePattern('content.persist_reel_indexing_progress')
+  async persistReelIndexingProgress(
+    @Payload()
+    data: Parameters<ReportReelIndexingProgressUseCase['execute']>[0],
+  ) {
+    return {
+      applied: await this.reportReelIndexingProgressUseCase.execute(data),
+    };
+  }
+
+  @MessagePattern('content.persist_reel_index_completed')
+  async persistReelIndexCompleted(
+    @Payload()
+    data: Parameters<CompleteReelIndexingUseCase['execute']>[0],
+  ) {
+    return { applied: await this.completeReelIndexingUseCase.execute(data) };
+  }
+
+  @MessagePattern('content.persist_reel_index_failed')
+  async persistReelIndexFailed(
+    @Payload()
+    data: Parameters<FailReelIndexingUseCase['execute']>[0],
+  ) {
+    return { applied: await this.failReelIndexingUseCase.execute(data) };
   }
 
   @MessagePattern('content.reprocess_reel')

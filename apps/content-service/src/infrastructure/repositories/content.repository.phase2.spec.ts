@@ -19,6 +19,12 @@ describe('ContentRepository Phase 2 state guards', () => {
     ) as ContentRepository;
 
     Object.defineProperty(repository, 'reel', { value: reel });
+    Object.defineProperty(repository, '$transaction', {
+      value: jest.fn(
+        async (callback: (tx: { reel: typeof reel }) => Promise<unknown>) =>
+          await callback({ reel }),
+      ),
+    });
 
     return repository;
   }
@@ -64,6 +70,34 @@ describe('ContentRepository Phase 2 state guards', () => {
       mediaStatus: 'COMPLETED',
       indexStatus: 'PENDING',
     });
+  });
+
+  it('rejects stale index completion without replacing chunks', async () => {
+    const transaction = {
+      reel: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      reelChunk: { deleteMany: jest.fn() },
+      $executeRaw: jest.fn(),
+    };
+    const repository = Object.create(
+      ContentRepository.prototype,
+    ) as ContentRepository;
+    Object.defineProperty(repository, '$transaction', {
+      value: jest.fn((callback: (tx: typeof transaction) => Promise<unknown>) =>
+        callback(transaction),
+      ),
+    });
+
+    await expect(
+      repository.completeIndexing({
+        reelId: 'reel-1',
+        indexAttemptId: 'stale-index-attempt',
+        metadata: { tags: [] },
+        chunks: [],
+      }),
+    ).resolves.toBe(false);
+    expect(transaction.reelChunk.deleteMany).not.toHaveBeenCalled();
   });
 
   it('rejects a stale index attempt', async () => {

@@ -1,0 +1,83 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/@prisma/reel-indexing-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("REEL_INDEXING_DATABASE_URL")
+}
+
+enum IndexJobStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum IndexCheckpointStage {
+  TRANSCRIBING_AUDIO_SEGMENTS
+  MERGING_TRANSCRIPT
+  EXTRACTING_METADATA
+  BUILDING_SECTIONS
+  BUILDING_CHUNKS
+  EMBEDDING
+  VALIDATING
+  PERSISTING
+}
+
+enum AudioSegmentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model IndexJobCheckpoint {
+  indexAttemptId    String               @id
+  jobId             String               @unique
+  reelId            String
+  mediaAttemptId    String
+  indexVersion      String
+  status            IndexJobStatus       @default(PROCESSING)
+  stage             IndexCheckpointStage @default(TRANSCRIBING_AUDIO_SEGMENTS)
+  mergedTranscript  String?              @db.Text
+  mergedSegments    Json?
+  extractedMetadata Json?
+  sections          Json?
+  chunks             Json?
+  lastError          String?              @db.Text
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  audioSegments AudioSegmentCheckpoint[]
+
+  @@index([reelId])
+  @@index([status, updatedAt])
+}
+
+model AudioSegmentCheckpoint {
+  id                   String             @id @default(uuid())
+  indexAttemptId       String
+  segmentNumber        Int
+  artifactKey          String
+  artifactChecksum     String
+  startMs              Int
+  endMs                Int
+  overlapBeforeMs      Int
+  provider             String?
+  transcriptionModel   String?
+  transcriptionVersion String?
+  status               AudioSegmentStatus @default(PENDING)
+  attemptCount         Int                @default(0)
+  transcriptText       String?            @db.Text
+  transcriptSegments   Json?
+  lastError            String?            @db.Text
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  checkpoint IndexJobCheckpoint @relation(fields: [indexAttemptId], references: [indexAttemptId], onDelete: Cascade)
+
+  @@unique([indexAttemptId, segmentNumber])
+  @@index([indexAttemptId, status])
+}

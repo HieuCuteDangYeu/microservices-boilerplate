@@ -114,6 +114,9 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
       vtt,
       segments: segments.length > 0 ? segments : undefined,
       wordCount,
+      provider: 'cloudflare-workers-ai',
+      model: this.model,
+      version: '1',
     };
   }
 

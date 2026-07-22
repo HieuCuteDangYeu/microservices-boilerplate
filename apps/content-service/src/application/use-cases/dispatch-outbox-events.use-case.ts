@@ -2,10 +2,15 @@ import {
   isReelMediaJob,
   REEL_MEDIA_JOB_EVENT_TYPE,
 } from '@common/processing/interfaces/reel-media-job.interface';
+import {
+  isReelIndexJob,
+  REEL_INDEX_JOB_EVENT_TYPE,
+} from '@common/processing/interfaces/reel-index-job.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { IOutboxRepository } from '../../domain/interfaces/outbox.repository.interface';
 import type { IReelMediaJobPublisher } from '../../domain/interfaces/reel-media-job-publisher.interface';
+import type { IReelIndexJobPublisher } from '../../domain/interfaces/reel-index-job-publisher.interface';
 
 export interface DispatchOutboxEventsResult {
   claimed: number;
@@ -22,6 +27,8 @@ export class DispatchOutboxEventsUseCase {
     private readonly outboxRepository: IOutboxRepository,
     @Inject('IReelMediaJobPublisher')
     private readonly reelMediaJobPublisher: IReelMediaJobPublisher,
+    @Inject('IReelIndexJobPublisher')
+    private readonly reelIndexJobPublisher: IReelIndexJobPublisher,
   ) {}
 
   async execute(input: {
@@ -44,13 +51,18 @@ export class DispatchOutboxEventsUseCase {
     for (const event of events) {
       try {
         if (
-          event.eventType !== REEL_MEDIA_JOB_EVENT_TYPE ||
-          !isReelMediaJob(event.payload)
+          event.eventType === REEL_MEDIA_JOB_EVENT_TYPE &&
+          isReelMediaJob(event.payload)
         ) {
+          await this.reelMediaJobPublisher.publish(event.payload);
+        } else if (
+          event.eventType === REEL_INDEX_JOB_EVENT_TYPE &&
+          isReelIndexJob(event.payload)
+        ) {
+          await this.reelIndexJobPublisher.publish(event.payload);
+        } else {
           throw new Error(`Unsupported outbox event ${event.eventType}`);
         }
-
-        await this.reelMediaJobPublisher.publish(event.payload);
 
         const marked = await this.outboxRepository.markPublished({
           eventId: event.id,

@@ -103,6 +103,41 @@ services:
     networks:
       - microservices-net
 
+  reel-indexing-service:
+    image: ${DOCKERHUB_USERNAME}/reel-indexing-service:latest
+    build:
+      context: .
+      dockerfile: ./apps/reel-indexing-service/Dockerfile
+    restart: always
+    env_file:
+      - .env
+    environment:
+      INDEX_WORKER_LANE: SHORT
+      INDEX_SHORT_PREFETCH: ${INDEX_SHORT_PREFETCH:-4}
+      INDEX_TRANSCRIPTION_CONCURRENCY: ${INDEX_TRANSCRIPTION_CONCURRENCY:-2}
+      INDEX_EMBEDDING_CONCURRENCY: ${INDEX_EMBEDDING_CONCURRENCY:-4}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  reel-indexing-long-service:
+    image: ${DOCKERHUB_USERNAME}/reel-indexing-service:latest
+    restart: always
+    env_file:
+      - .env
+    environment:
+      INDEX_WORKER_LANE: LONG
+      INDEX_LONG_PREFETCH: ${INDEX_LONG_PREFETCH:-1}
+      INDEX_TRANSCRIPTION_CONCURRENCY: ${INDEX_TRANSCRIPTION_CONCURRENCY:-2}
+      INDEX_EMBEDDING_CONCURRENCY: ${INDEX_EMBEDDING_CONCURRENCY:-4}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
   content-service:
     image: ${DOCKERHUB_USERNAME}/content-service:latest
     build:

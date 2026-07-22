@@ -1,6 +1,12 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
+import {
+  REEL_INDEX_JOB_EVENT_TYPE,
+  REEL_INDEX_JOB_SCHEMA_VERSION,
+  type ReelIndexJob,
+} from '@common/processing/interfaces/reel-index-job.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { OutboxEvent } from '@content/domain/entities/outbox-event.entity';
@@ -457,33 +463,81 @@ export class ContentRepository
     mediaMetadata: ReelProcessingMediaMetadata;
     mediaOutput: ReelMediaOutput;
   }): Promise<boolean> {
-    const result = await this.reel.updateMany({
-      where: {
-        id: input.reelId,
+    return await this.$transaction(async (transaction) => {
+      const completedAt = new Date();
+      const result = await transaction.reel.updateMany({
+        where: {
+          id: input.reelId,
+          mediaAttemptId: input.mediaAttemptId,
+          mediaStatus: { in: ['PROBING', 'PROCESSING'] },
+        },
+        data: {
+          status: 'COMPLETED',
+          mediaStatus: 'COMPLETED',
+          indexStatus: 'PENDING',
+          thumbnailKey: input.mediaOutput.thumbnailKey,
+          hlsMasterKey: input.mediaOutput.hlsMasterKey,
+          transcriptionAudioManifestKey:
+            input.mediaOutput.transcriptionAudioManifestKey,
+          mediaOutput: input.mediaOutput as unknown as Prisma.InputJsonValue,
+          processingStage: 'MEDIA_READY',
+          processingMessage: 'Video is ready; indexing in progress',
+          processingProgress: 90,
+          processingCompletedAt: completedAt,
+          processingFailedAt: null,
+          processingErrorCode: null,
+          processingErrorDetail: null,
+          ...this.toMediaMetadataData(input.mediaMetadata),
+        },
+      });
+
+      if (result.count === 0) return false;
+
+      const reel = await transaction.reel.findUniqueOrThrow({
+        where: { id: input.reelId },
+      });
+
+      if (!reel.indexAttemptId) {
+        throw new Error(`Reel ${reel.id} has no index attempt ID`);
+      }
+
+      const jobId = randomUUID();
+      const indexJob: ReelIndexJob = {
+        jobId,
+        reelId: reel.id,
+        userId: reel.userId,
         mediaAttemptId: input.mediaAttemptId,
-        mediaStatus: { in: ['PROBING', 'PROCESSING'] },
-      },
-      data: {
-        status: 'COMPLETED',
-        mediaStatus: 'COMPLETED',
-        indexStatus: 'PENDING',
-        thumbnailKey: input.mediaOutput.thumbnailKey,
-        hlsMasterKey: input.mediaOutput.hlsMasterKey,
+        indexAttemptId: reel.indexAttemptId,
+        indexVersion:
+          this.configService.get<string>('INDEX_VERSION')?.trim() ||
+          'reel-index-v1',
+        mediaKey: reel.mediaKey,
         transcriptionAudioManifestKey:
           input.mediaOutput.transcriptionAudioManifestKey,
-        mediaOutput: input.mediaOutput as unknown as Prisma.InputJsonValue,
-        processingStage: 'MEDIA_READY',
-        processingMessage: 'Video is ready; indexing in progress',
-        processingProgress: 90,
-        processingCompletedAt: new Date(),
-        processingFailedAt: null,
-        processingErrorCode: null,
-        processingErrorDetail: null,
-        ...this.toMediaMetadataData(input.mediaMetadata),
-      },
-    });
+        sourceDurationMs: input.mediaMetadata.sourceDurationMs!,
+        sourceOrientation: input.mediaMetadata.sourceOrientation!,
+        sourceLengthClass: input.mediaOutput.sourceLengthClass,
+        title: reel.title ?? undefined,
+        description: reel.description ?? undefined,
+        tags: reel.tags,
+        createdAt: completedAt.toISOString(),
+        schemaVersion: REEL_INDEX_JOB_SCHEMA_VERSION,
+      };
 
-    return result.count > 0;
+      await transaction.outboxEvent.create({
+        data: {
+          id: jobId,
+          aggregateType: 'REEL',
+          aggregateId: reel.id,
+          eventType: REEL_INDEX_JOB_EVENT_TYPE,
+          payload: indexJob as unknown as Prisma.InputJsonValue,
+          createdAt: completedAt,
+          nextAttemptAt: completedAt,
+        },
+      });
+
+      return true;
+    });
   }
 
   async updateMediaStatus(input: {
@@ -534,6 +588,160 @@ export class ContentRepository
       data: { indexStatus: input.indexStatus },
     });
 
+    return result.count > 0;
+  }
+
+  async claimIndexingAttempt(input: {
+    reelId: string;
+    indexAttemptId: string;
+    allowReclaim?: boolean;
+  }): Promise<boolean> {
+    const result = await this.reel.updateMany({
+      where: {
+        id: input.reelId,
+        indexAttemptId: input.indexAttemptId,
+        mediaStatus: 'COMPLETED',
+        indexStatus: input.allowReclaim
+          ? { in: ['PENDING', 'PROCESSING'] }
+          : 'PENDING',
+      },
+      data: {
+        indexStatus: 'PROCESSING',
+        processingStage: 'TRANSCRIBING_AUDIO_SEGMENTS',
+        processingMessage: 'Video is ready; indexing in progress',
+        processingProgress: 10,
+        processingErrorCode: null,
+        processingErrorDetail: null,
+      },
+    });
+    return result.count > 0;
+  }
+
+  async reportIndexingProgress(input: {
+    reelId: string;
+    indexAttemptId: string;
+    stage: string;
+    progress: number;
+  }): Promise<boolean> {
+    const result = await this.reel.updateMany({
+      where: {
+        id: input.reelId,
+        indexAttemptId: input.indexAttemptId,
+        mediaStatus: 'COMPLETED',
+        indexStatus: 'PROCESSING',
+      },
+      data: {
+        processingStage: input.stage,
+        processingMessage: 'Video is ready; indexing in progress',
+        processingProgress: Math.min(
+          100,
+          Math.max(0, Math.round(input.progress)),
+        ),
+      },
+    });
+    return result.count > 0;
+  }
+
+  async completeIndexing(input: {
+    reelId: string;
+    indexAttemptId: string;
+    transcript?: string;
+    transcriptSegments?: TranscriptSegment[];
+    metadata: ExtractedReelMetadata;
+    chunks: ReelChunkIndexInput[];
+  }): Promise<boolean> {
+    return await this.$transaction(async (transaction) => {
+      const current = await transaction.reel.findFirst({
+        where: {
+          id: input.reelId,
+          indexAttemptId: input.indexAttemptId,
+          mediaStatus: 'COMPLETED',
+          indexStatus: 'PROCESSING',
+        },
+      });
+      if (!current) return false;
+
+      const result = await transaction.reel.updateMany({
+        where: {
+          id: input.reelId,
+          indexAttemptId: input.indexAttemptId,
+          mediaStatus: 'COMPLETED',
+          indexStatus: 'PROCESSING',
+        },
+        data: {
+          ...(input.transcript !== undefined
+            ? { transcript: input.transcript }
+            : {}),
+          ...(input.transcriptSegments !== undefined
+            ? {
+                transcriptSegments:
+                  input.transcriptSegments as unknown as Prisma.InputJsonValue,
+              }
+            : {}),
+          title: input.metadata.title ?? current.title,
+          description: input.metadata.description ?? current.description,
+          tags: input.metadata.tags,
+          indexStatus: input.chunks.length > 0 ? 'COMPLETED' : 'DEGRADED',
+          status: 'COMPLETED',
+          processingStage: 'READY',
+          processingMessage: 'Video is ready to watch',
+          processingProgress: 100,
+          processingErrorCode: null,
+          processingErrorDetail: null,
+        },
+      });
+      if (result.count === 0) return false;
+
+      await transaction.reelChunk.deleteMany({
+        where: { reelId: input.reelId },
+      });
+      if (input.chunks.length > 0) {
+        const rows = input.chunks.map((chunk) => {
+          if (!chunk.embedding.length) {
+            throw new Error(
+              `Chunk ${chunk.chunkIndex} has an invalid embedding`,
+            );
+          }
+          return Prisma.sql`(
+            ${randomUUID()}, ${input.reelId}, ${current.userId}, ${chunk.chunkIndex},
+            ${chunk.text}, ${chunk.startTime ?? null}, ${chunk.endTime ?? null},
+            ${chunk.embeddingModel}, ${`[${chunk.embedding.join(',')}]`}::vector
+          )`;
+        });
+        await transaction.$executeRaw(Prisma.sql`
+          INSERT INTO "ReelChunk" (
+            "id", "reelId", "userId", "chunkIndex", "text", "startTime",
+            "endTime", "embeddingModel", "embedding"
+          ) VALUES ${Prisma.join(rows)}
+        `);
+      }
+      return true;
+    });
+  }
+
+  async failIndexing(input: {
+    reelId: string;
+    indexAttemptId: string;
+    errorDetail: string;
+  }): Promise<boolean> {
+    const result = await this.reel.updateMany({
+      where: {
+        id: input.reelId,
+        indexAttemptId: input.indexAttemptId,
+        mediaStatus: 'COMPLETED',
+        indexStatus: { in: ['PENDING', 'PROCESSING'] },
+      },
+      data: {
+        status: 'COMPLETED',
+        indexStatus: 'FAILED',
+        processingStage: 'READY',
+        processingMessage: 'Video is ready to watch',
+        processingProgress: 100,
+        processingFailedAt: new Date(),
+        processingErrorCode: 'INDEXING_FAILED',
+        processingErrorDetail: input.errorDetail.slice(0, 4000),
+      },
+    });
     return result.count > 0;
   }
 

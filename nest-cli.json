@@ -138,6 +138,16 @@
         "webpack": true
       }
     },
+    "reel-indexing-service": {
+      "type": "application",
+      "root": "apps/reel-indexing-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/reel-indexing-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/reel-indexing-service/tsconfig.app.json",
+        "webpack": true
+      }
+    },
     "user-service": {
       "type": "application",
       "root": "apps/user-service",

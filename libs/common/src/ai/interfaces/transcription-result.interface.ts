@@ -11,4 +11,7 @@ export interface TranscriptionResult {
   vtt?: string;
   segments?: TranscriptSegment[];
   wordCount?: number;
+  provider?: string;
+  model?: string;
+  version?: string;
 }

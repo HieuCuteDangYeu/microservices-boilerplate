@@ -45,10 +45,14 @@
       "@prisma/payment-client": ["node_modules/@prisma/payment-client"],
       "@prisma/user-client": ["node_modules/@prisma/user-client"],
       "@processing/*": ["apps/media-processing-service/src/*"],
+      "@indexing/*": ["apps/reel-indexing-service/src/*"],
       "@user/*": ["apps/user-service/src/*"],
       "@ai/*": ["apps/ai-service/src/*"],
       "@prisma/ai-client": ["node_modules/@prisma/ai-client"],
-      "@prisma/processing-client": ["node_modules/@prisma/processing-client"]
+      "@prisma/processing-client": ["node_modules/@prisma/processing-client"],
+      "@prisma/reel-indexing-client": [
+        "node_modules/@prisma/reel-indexing-client"
+      ]
     }
   }
 }
