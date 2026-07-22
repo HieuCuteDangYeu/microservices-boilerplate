@@ -1,3 +1,8 @@
+/**
+ * TEMPORARY REFACTOR TEST
+ * Remove during Phase 10 after production validation.
+ */
+
 import type { GenerateEmbeddingBatchResult } from '@common/ai/interfaces/generate-embedding.interface';
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';

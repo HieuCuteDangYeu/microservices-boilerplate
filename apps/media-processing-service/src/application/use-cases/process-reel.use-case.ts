@@ -230,6 +230,10 @@ export class ProcessReelUseCase {
       return true;
     }
 
+    if (error.retryable) {
+      return true;
+    }
+
     return [
       'DOWNLOADING',
       'UPLOADING_STREAM',

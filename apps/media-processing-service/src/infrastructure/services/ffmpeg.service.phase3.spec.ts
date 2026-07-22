@@ -71,4 +71,34 @@ describe('FfmpegService Phase 3 process controls', () => {
       ),
     ).rejects.toThrow('was cancelled');
   });
+
+  it('marks a process interrupted by service shutdown as retryable', async () => {
+    const shutdownService = new FfmpegService(
+      new ConfigService({
+        FFMPEG_PATH: process.execPath,
+        FFPROBE_PATH: process.execPath,
+      }),
+    );
+    const shutdownRunner = shutdownService as unknown as ProcessRunner;
+    const running = shutdownRunner.runProcess(
+      'ffmpeg',
+      process.execPath,
+      ['-e', 'setInterval(() => undefined, 1000)'],
+      { timeoutMs: 5_000 },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    shutdownService.onModuleDestroy();
+
+    expect.assertions(3);
+    try {
+      await running;
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(MediaProcessError);
+      expect((error as MediaProcessError).retryable).toBe(true);
+      expect((error as MediaProcessError).message).toContain(
+        'interrupted by service shutdown',
+      );
+    }
+  });
 });

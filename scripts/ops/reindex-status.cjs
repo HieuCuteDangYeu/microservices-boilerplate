@@ -12,7 +12,8 @@ async function getReindexStatus(reelId) {
 }
 
 async function main() {
-  const status = await getReindexStatus(process.argv[2]);
+  const reelId = process.argv.slice(2).find((value) => value !== '--');
+  const status = await getReindexStatus(reelId);
   process.stdout.write(
     `${JSON.stringify(
       {

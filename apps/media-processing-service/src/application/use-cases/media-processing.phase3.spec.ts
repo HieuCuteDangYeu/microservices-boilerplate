@@ -7,6 +7,8 @@ import { ConfigService } from '@nestjs/config';
 import type { VideoMetadata } from '../../domain/interfaces/video-processing.service.interface';
 import { buildHlsTranscodeArguments } from '../../infrastructure/services/ffmpeg-arguments';
 import { BuildTranscriptionAudioManifestUseCase } from './build-transcription-audio-manifest.use-case';
+import { PrepareReelMediaError } from './prepare-reel-media.use-case';
+import { ProcessReelUseCase } from './process-reel.use-case';
 import { SelectReelEncodingProfileUseCase } from './select-reel-encoding-profile.use-case';
 import {
   ReelSourceMediaValidationError,
@@ -131,6 +133,22 @@ describe('Phase 3 media matrix', () => {
     expect(longProfile.timeoutMs).toBeGreaterThan(shortProfile.timeoutMs);
   });
 
+  it('bounds x264 threads independently for every variant', () => {
+    const profile = new SelectReelEncodingProfileUseCase(
+      new ConfigService({ MEDIA_FFMPEG_THREADS_PER_VARIANT: '1' }),
+    ).execute(baseMetadata);
+    const args = buildHlsTranscodeArguments({
+      inputPath: '/tmp/source.mp4',
+      outputDir: '/tmp/hls',
+      profile,
+    });
+
+    expect(profile.threadsPerVariant).toBe(1);
+    expect(
+      args.filter((argument) => argument.startsWith('-threads:v:')),
+    ).toEqual(['-threads:v:0', '-threads:v:1', '-threads:v:2']);
+  });
+
   it.each([24, 25, 30, 50, 60])('accepts %s FPS source media', (fps) => {
     expect(() => validate.execute({ ...baseMetadata, fps })).not.toThrow();
   });
@@ -174,6 +192,29 @@ describe('Phase 3 media matrix', () => {
         errorCode: 'INSUFFICIENT_TEMP_STORAGE',
       }) as ReelSourceMediaValidationError,
     );
+  });
+});
+
+describe('Phase 8 worker shutdown recovery', () => {
+  const classifier = ProcessReelUseCase.prototype as unknown as {
+    isTransientFailure(error: unknown): boolean;
+  };
+
+  it('retries only a transcode error explicitly marked as retryable', () => {
+    const interrupted = Object.assign(new Error('service shutdown'), {
+      retryable: true,
+    });
+    const retryable = new PrepareReelMediaError(interrupted, 35, {
+      stage: 'TRANSCODING',
+    });
+    const permanent = new PrepareReelMediaError(
+      new Error('invalid codec'),
+      35,
+      { stage: 'TRANSCODING' },
+    );
+
+    expect(classifier.isTransientFailure(retryable)).toBe(true);
+    expect(classifier.isTransientFailure(permanent)).toBe(false);
   });
 });
 

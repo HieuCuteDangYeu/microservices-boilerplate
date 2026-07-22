@@ -22,6 +22,7 @@ const loadTest: {
     total: number;
     concurrency: number;
     timeoutMs: number;
+    clientObservedDurationMs?: number;
   };
   pollForTerminalStatus(options: {
     requestStatus: () => Promise<{ status: string }>;
@@ -52,6 +53,7 @@ describe('reel pipeline baseline utilities', () => {
           REEL_LOAD_TEST_TOTAL: '3',
           REEL_LOAD_TEST_CONCURRENCY: '5',
           REEL_LOAD_TEST_TIMEOUT_MS: '120000',
+          REEL_LOAD_TEST_CLIENT_DURATION_MS: '15000',
         },
         () => true,
       ),
@@ -62,6 +64,7 @@ describe('reel pipeline baseline utilities', () => {
       total: 3,
       concurrency: 3,
       timeoutMs: 120000,
+      clientObservedDurationMs: 15000,
     });
   });
 

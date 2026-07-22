@@ -1,3 +1,8 @@
+/**
+ * TEMPORARY REFACTOR TEST
+ * Remove during Phase 10 after production validation.
+ */
+
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import { ProcessReelIndexJobUseCase } from './process-reel-index-job.use-case';
 

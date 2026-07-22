@@ -81,6 +81,8 @@ export function buildHlsTranscodeArguments(input: {
       'main',
       `-level:v:${index}`,
       '4.0',
+      `-threads:v:${index}`,
+      String(profile.threadsPerVariant),
       `-b:v:${index}`,
       toKbps(variant.bitrateKbps),
       `-maxrate:v:${index}`,

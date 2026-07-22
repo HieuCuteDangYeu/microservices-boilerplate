@@ -37,6 +37,7 @@ export class PrepareReelMediaError extends Error {
   readonly publicMessage: string;
   readonly errorCode: string;
   readonly mediaMetadata?: ReelProcessingMediaMetadata;
+  readonly retryable: boolean;
 
   constructor(
     error: unknown,
@@ -46,6 +47,7 @@ export class PrepareReelMediaError extends Error {
       publicMessage?: string;
       errorCode?: string;
       mediaMetadata?: ReelProcessingMediaMetadata;
+      retryable?: boolean;
     } = {},
   ) {
     const { message, stack } = formatProcessingError(error);
@@ -56,6 +58,16 @@ export class PrepareReelMediaError extends Error {
     this.publicMessage = options.publicMessage ?? 'Video processing failed';
     this.errorCode = options.errorCode ?? this.stage;
     this.mediaMetadata = options.mediaMetadata;
+    this.retryable = options.retryable ?? this.isRetryable(error);
+  }
+
+  private isRetryable(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'retryable' in error &&
+      error.retryable === true
+    );
   }
 }
 
@@ -192,6 +204,7 @@ export class PrepareReelMediaUseCase {
         profileName: encodingProfile.profileName,
         outputFps: encodingProfile.outputFps,
         hlsSegmentSeconds: encodingProfile.segmentSeconds,
+        threadsPerVariant: encodingProfile.threadsPerVariant,
         ffmpegTimeoutMs: encodingProfile.timeoutMs,
         variants: encodingProfile.variants.map(({ name, width, height }) => ({
           name,

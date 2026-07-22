@@ -1,3 +1,8 @@
+/**
+ * TEMPORARY REFACTOR TEST
+ * Remove during Phase 10 after production validation.
+ */
+
 import { ConfigService } from '@nestjs/config';
 import { GenerateEmbeddingBatchUseCase } from './generate-embedding-batch.use-case';
 

@@ -66,6 +66,13 @@ function parseLoadTestConfig(env = process.env, pathExists = fs.existsSync) {
     DEFAULT_TIMEOUT_MS,
     'REEL_LOAD_TEST_TIMEOUT_MS',
   );
+  const clientObservedDurationMs = env.REEL_LOAD_TEST_CLIENT_DURATION_MS
+    ? parsePositiveInteger(
+        env.REEL_LOAD_TEST_CLIENT_DURATION_MS,
+        undefined,
+        'REEL_LOAD_TEST_CLIENT_DURATION_MS',
+      )
+    : undefined;
 
   return {
     apiUrl,
@@ -74,6 +81,7 @@ function parseLoadTestConfig(env = process.env, pathExists = fs.existsSync) {
     total,
     concurrency,
     timeoutMs,
+    clientObservedDurationMs,
   };
 }
 
@@ -218,6 +226,9 @@ async function runOne(config, index) {
         title: `Phase 0 pipeline baseline ${index + 1}`,
         tags: ['phase-0-baseline'],
         visibility: 'private',
+        ...(config.clientObservedDurationMs
+          ? { clientObservedDurationMs: config.clientObservedDurationMs }
+          : {}),
       }),
     },
     config.timeoutMs,

@@ -99,6 +99,11 @@
     "tmp:explain:semantic-index": "node scripts/tmp/explain-semantic-index.cjs",
     "tmp:benchmark:semantic-index": "node scripts/tmp/benchmark-semantic-index.cjs",
     "tmp:test:semantic-connections": "jest --runInBand apps/ai-service/src/application/use-cases/retrieval-agent.use-case.spec.ts apps/content-service/src/infrastructure/adapters/semantic-recommendation-service.adapter.spec.ts",
+    "tmp:test:reel-indexing": "jest --runInBand apps/content-service/src/infrastructure/repositories/content.repository.phase4.spec.ts apps/content-service/src/infrastructure/repositories/content.repository.phase5.spec.ts apps/ai-service/src/application/use-cases/generate-embedding-batch.use-case.spec.ts apps/reel-indexing-service/src/application/use-cases/reel-indexing.phase4.spec.ts apps/reel-indexing-service/src/application/use-cases/reel-indexing.phase5.spec.ts apps/reel-indexing-service/src/application/use-cases/reel-indexing.phase6.spec.ts apps/reel-indexing-service/src/infrastructure/repositories/prisma-semantic-index.repository.spec.ts",
+    "tmp:test:reel-upgrade": "pnpm run tmp:test:reel-pipeline && pnpm run tmp:test:reel-queues && pnpm run tmp:test:reel-state && pnpm run tmp:test:reel-indexing && pnpm run tmp:test:semantic-connections",
+    "tmp:seed:phase8-semantic-index": "node scripts/tmp/seed-phase8-semantic-index.cjs",
+    "tmp:serve:phase8-auth-stub": "node scripts/tmp/phase8-auth-stub.cjs",
+    "tmp:serve:phase8-ai-stub": "node scripts/tmp/phase8-ai-stub.cjs",
     "ops:reindex:reel": "node scripts/ops/reindex-reel.cjs",
     "ops:reindex:status": "node scripts/ops/reindex-status.cjs"
   },

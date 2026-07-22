@@ -34,6 +34,7 @@ export interface ReelEncodingProfile {
   outputFps: number;
   segmentSeconds: number;
   x264Preset: string;
+  threadsPerVariant: number;
   timeoutMs: number;
   hasAudio: boolean;
   variants: ReelEncodingVariant[];

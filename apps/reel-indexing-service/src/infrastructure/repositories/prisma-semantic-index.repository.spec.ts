@@ -1,3 +1,8 @@
+/**
+ * TEMPORARY REFACTOR TEST
+ * Remove during Phase 10 after production validation.
+ */
+
 import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import { SEMANTIC_INDEX_EMBEDDING_DIMENSIONS } from '@common/processing/interfaces/semantic-index.interface';

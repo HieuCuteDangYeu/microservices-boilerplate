@@ -12,7 +12,7 @@ async function reindexReel(reelId) {
 }
 
 async function main() {
-  const reelId = process.argv[2];
+  const reelId = process.argv.slice(2).find((value) => value !== '--');
   const result = await reindexReel(reelId);
   process.stdout.write(
     `${JSON.stringify({ reelId, queued: result.queued, indexAttemptId: result.indexAttemptId }, null, 2)}\n`,

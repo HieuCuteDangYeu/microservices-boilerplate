@@ -38,6 +38,7 @@ export class MediaProcessError extends Error {
     readonly exitCode: number | null,
     readonly exitSignal: NodeJS.Signals | null,
     readonly stderr: string,
+    readonly retryable = false,
   ) {
     super(message);
     this.name = 'MediaProcessError';
@@ -99,6 +100,7 @@ export class FfmpegService implements IVideoProcessingService, OnModuleDestroy {
   private readonly ffmpegPath: string;
   private readonly ffprobePath: string;
   private readonly maxStderrBytes: number;
+  private shuttingDown = false;
 
   constructor(private readonly configService: ConfigService) {
     this.ffmpegPath = this.resolveBinaryPath('ffmpeg', 'FFMPEG_PATH');
@@ -112,6 +114,7 @@ export class FfmpegService implements IVideoProcessingService, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    this.shuttingDown = true;
     for (const process of this.activeProcesses) {
       this.terminateProcess(process);
     }
@@ -409,11 +412,14 @@ export class FfmpegService implements IVideoProcessingService, OnModuleDestroy {
           return;
         }
 
+        const interruptedByShutdown = this.shuttingDown;
         const reason = timedOut
           ? `timed out after ${options.timeoutMs}ms`
           : aborted
             ? 'was cancelled'
-            : `exited with code ${String(exitCode)} and signal ${String(exitSignal)}`;
+            : interruptedByShutdown
+              ? 'was interrupted by service shutdown'
+              : `exited with code ${String(exitCode)} and signal ${String(exitSignal)}`;
 
         reject(
           new MediaProcessError(
@@ -422,6 +428,7 @@ export class FfmpegService implements IVideoProcessingService, OnModuleDestroy {
             exitCode,
             exitSignal,
             stderrText,
+            interruptedByShutdown,
           ),
         );
       });

@@ -119,6 +119,12 @@ export class SelectReelEncodingProfileUseCase {
       x264Preset:
         this.configService.get<string>('MEDIA_HLS_X264_PRESET')?.trim() ||
         'faster',
+      threadsPerVariant: this.getPositiveInt(
+        'MEDIA_FFMPEG_THREADS_PER_VARIANT',
+        2,
+        1,
+        16,
+      ),
       timeoutMs: this.getTranscodeTimeoutMs(metadata.durationMs),
       hasAudio: metadata.hasAudio === true,
       variants,
