@@ -58,7 +58,9 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 /generated/prisma
 
 # Docs folder
-/docs
+/docs/*
+!/docs/reel-pipeline-temporary-artifacts.md
+!/docs/reel-pipeline-phase-0-baseline.md
 
 # Local notification service secrets
 apps/notification-service/secrets/

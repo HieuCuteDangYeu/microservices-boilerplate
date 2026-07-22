@@ -5,6 +5,17 @@ import type { IAiService } from '../../domain/interfaces/ai-service.interface';
 import { formatProcessingError } from '../utils/format-processing-error';
 import { BuildReelEmbeddingTextUseCase } from './build-reel-embedding-text.use-case';
 
+export interface ReelChunkEmbeddingMetrics {
+  requestCount: number;
+  totalItemCount: number;
+  failedRequestCount: number;
+}
+
+export interface ReelChunkEmbeddingResult {
+  chunks: ReelChunkIndexInput[];
+  metrics: ReelChunkEmbeddingMetrics;
+}
+
 @Injectable()
 export class EmbedReelChunksUseCase {
   private readonly logger = new Logger(EmbedReelChunksUseCase.name);
@@ -22,7 +33,22 @@ export class EmbedReelChunksUseCase {
     tags?: string[];
     chunks: BuiltTranscriptChunk[];
   }): Promise<ReelChunkIndexInput[]> {
+    return (await this.executeWithMetrics(data)).chunks;
+  }
+
+  async executeWithMetrics(data: {
+    reelId: string;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    chunks: BuiltTranscriptChunk[];
+  }): Promise<ReelChunkEmbeddingResult> {
     const indexedChunks: ReelChunkIndexInput[] = [];
+    const metrics: ReelChunkEmbeddingMetrics = {
+      requestCount: 0,
+      totalItemCount: 0,
+      failedRequestCount: 0,
+    };
 
     for (let index = 0; index < data.chunks.length; index++) {
       const chunk = data.chunks[index];
@@ -33,6 +59,9 @@ export class EmbedReelChunksUseCase {
       );
 
       try {
+        metrics.requestCount += 1;
+        metrics.totalItemCount += 1;
+
         const embedding = await this.aiService.generateEmbedding({
           text: embeddingDocument.text,
           taskType: 'RETRIEVAL_DOCUMENT',
@@ -48,6 +77,7 @@ export class EmbedReelChunksUseCase {
           embeddingModel: `${embedding.model}:${embedding.dimensions}`,
         });
       } catch (error: unknown) {
+        metrics.failedRequestCount += 1;
         const { message, stack } = formatProcessingError(error);
 
         this.logger.warn(
@@ -57,6 +87,6 @@ export class EmbedReelChunksUseCase {
       }
     }
 
-    return indexedChunks;
+    return { chunks: indexedChunks, metrics };
   }
 }

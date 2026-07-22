@@ -10,6 +10,17 @@ interface SemanticUnit {
   embedding?: number[];
 }
 
+export interface TranscriptChunkBuildMetrics {
+  semanticUnitCount: number;
+  semanticEmbeddingRequestCount: number;
+  finalChunkCount: number;
+}
+
+export interface TranscriptChunkBuildResult {
+  chunks: BuiltTranscriptChunk[];
+  metrics: TranscriptChunkBuildMetrics;
+}
+
 @Injectable()
 export class BuildTranscriptChunksUseCase {
   private readonly logger = new Logger(BuildTranscriptChunksUseCase.name);
@@ -34,7 +45,22 @@ export class BuildTranscriptChunksUseCase {
     transcript?: string;
     transcriptSegments?: TranscriptSegment[];
   }): Promise<BuiltTranscriptChunk[]> {
+    return (await this.executeWithMetrics(data)).chunks;
+  }
+
+  async executeWithMetrics(data: {
+    title?: string;
+    description?: string;
+    tags?: string[];
+    transcript?: string;
+    transcriptSegments?: TranscriptSegment[];
+  }): Promise<TranscriptChunkBuildResult> {
     const chunks: BuiltTranscriptChunk[] = [];
+    const metrics: TranscriptChunkBuildMetrics = {
+      semanticUnitCount: 0,
+      semanticEmbeddingRequestCount: 0,
+      finalChunkCount: 0,
+    };
 
     const metadataChunk = this.buildMetadataChunk(data);
 
@@ -44,21 +70,26 @@ export class BuildTranscriptChunksUseCase {
 
     let transcriptChunks = await this.buildSemanticChunksFromSegments(
       data.transcriptSegments,
+      metrics,
     );
 
     if (transcriptChunks.length === 0) {
       transcriptChunks = await this.buildSemanticChunksFromTranscript(
         data.transcript,
+        metrics,
       );
     }
 
     chunks.push(...transcriptChunks);
 
-    return chunks;
+    metrics.finalChunkCount = chunks.length;
+
+    return { chunks, metrics };
   }
 
   private async buildSemanticChunksFromSegments(
     segments?: TranscriptSegment[],
+    metrics?: TranscriptChunkBuildMetrics,
   ): Promise<BuiltTranscriptChunk[]> {
     if (!Array.isArray(segments) || segments.length === 0) {
       return [];
@@ -93,11 +124,15 @@ export class BuildTranscriptChunksUseCase {
       return [];
     }
 
-    return this.buildSemanticTranscriptChunks(this.mergeSmallUnits(units));
+    return this.buildSemanticTranscriptChunks(
+      this.mergeSmallUnits(units),
+      metrics,
+    );
   }
 
   private async buildSemanticChunksFromTranscript(
     transcript?: string,
+    metrics?: TranscriptChunkBuildMetrics,
   ): Promise<BuiltTranscriptChunk[]> {
     const text = transcript?.trim();
 
@@ -113,14 +148,20 @@ export class BuildTranscriptChunksUseCase {
 
     return this.buildSemanticTranscriptChunks(
       this.mergeSmallUnits(sentences.map((sentence) => ({ text: sentence }))),
+      metrics,
     );
   }
 
   private async buildSemanticTranscriptChunks(
     units: SemanticUnit[],
+    metrics?: TranscriptChunkBuildMetrics,
   ): Promise<BuiltTranscriptChunk[]> {
+    if (metrics) {
+      metrics.semanticUnitCount = units.length;
+    }
+
     try {
-      const embeddedUnits = await this.embedSemanticUnits(units);
+      const embeddedUnits = await this.embedSemanticUnits(units, metrics);
 
       return this.groupUnitsBySemanticSimilarity(embeddedUnits);
     } catch (error: unknown) {
@@ -136,10 +177,15 @@ export class BuildTranscriptChunksUseCase {
 
   private async embedSemanticUnits(
     units: SemanticUnit[],
+    metrics?: TranscriptChunkBuildMetrics,
   ): Promise<SemanticUnit[]> {
     const embeddedUnits: SemanticUnit[] = [];
 
     for (const unit of units) {
+      if (metrics) {
+        metrics.semanticEmbeddingRequestCount += 1;
+      }
+
       const embedding = await this.aiService.generateEmbedding({
         text: unit.text,
         taskType: 'RETRIEVAL_DOCUMENT',

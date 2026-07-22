@@ -194,6 +194,11 @@ export class FfmpegService implements IVideoProcessingService {
       outputFps: profile.outputFps,
       segmentSeconds: profile.segmentSeconds,
       variantNames: profile.variants.map((variant) => variant.name),
+      variants: profile.variants.map((variant) => ({
+        name: variant.name,
+        width: variant.width,
+        height: variant.height,
+      })),
     };
   }
 

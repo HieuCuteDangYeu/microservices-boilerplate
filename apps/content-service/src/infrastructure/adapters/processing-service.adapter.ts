@@ -48,6 +48,7 @@ export class ProcessingServiceAdapter implements IProcessingService {
     mediaKey: string;
     userId: string;
     processingAttemptId: string;
+    queuedAt: string;
     title?: string;
     description?: string;
     tags: string[];

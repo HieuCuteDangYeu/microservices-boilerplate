@@ -1,7 +1,9 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import type { IProcessingMetrics } from '@processing/domain/interfaces/processing-metrics.interface';
 import { firstValueFrom } from 'rxjs';
 import type {
   IContentService,
@@ -12,6 +14,8 @@ import type {
 export class ContentServiceAdapter implements IContentService {
   constructor(
     @Inject('CONTENT_RMQ') private readonly messageBroker: ClientProxy,
+    @Inject('IProcessingMetrics')
+    private readonly processingMetrics: IProcessingMetrics,
   ) {}
 
   private describeError(error: unknown): string {
@@ -112,12 +116,26 @@ export class ContentServiceAdapter implements IContentService {
     description?: string;
     tags?: string[];
     mediaMetadata?: ReelProcessingMediaMetadata;
+    metricsContext?: ReelPipelineMetricContext;
   }): Promise<void> {
+    const timer = data.metricsContext
+      ? this.processingMetrics.startStage(
+          data.metricsContext,
+          'RABBITMQ_PUBLISH_COMPLETED',
+          {
+            rabbitMqPayloadBytesEstimate:
+              this.processingMetrics.estimatePayloadBytes(data),
+          },
+        )
+      : undefined;
+
     try {
       await firstValueFrom(
         this.messageBroker.emit('reel.processing_completed', data),
       );
+      timer?.succeed();
     } catch (error: unknown) {
+      timer?.fail('RABBITMQ_PUBLISH_COMPLETED');
       throw new Error(
         `Failed to emit reel.processing_completed: ${this.describeError(error)}`,
       );
@@ -134,12 +152,26 @@ export class ContentServiceAdapter implements IContentService {
     errorCode?: string;
     errorDetail?: string;
     mediaMetadata?: ReelProcessingMediaMetadata;
+    metricsContext?: ReelPipelineMetricContext;
   }): Promise<void> {
+    const timer = data.metricsContext
+      ? this.processingMetrics.startStage(
+          data.metricsContext,
+          'RABBITMQ_PUBLISH_FAILED',
+          {
+            rabbitMqPayloadBytesEstimate:
+              this.processingMetrics.estimatePayloadBytes(data),
+          },
+        )
+      : undefined;
+
     try {
       await firstValueFrom(
         this.messageBroker.emit('reel.processing_failed', data),
       );
+      timer?.succeed();
     } catch (error: unknown) {
+      timer?.fail('RABBITMQ_PUBLISH_FAILED');
       throw new Error(
         `Failed to emit reel.processing_failed: ${this.describeError(error)}`,
       );

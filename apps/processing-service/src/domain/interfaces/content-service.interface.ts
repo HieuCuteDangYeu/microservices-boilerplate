@@ -1,5 +1,6 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 
 export interface ReelProcessingMediaMetadata {
   sourceDurationMs?: number;
@@ -54,6 +55,7 @@ export interface IContentService {
     message?: string;
     progress?: number;
     mediaMetadata?: ReelProcessingMediaMetadata;
+    metricsContext?: ReelPipelineMetricContext;
   }): Promise<void>;
 
   emitProcessingFailed(data: {
@@ -66,5 +68,6 @@ export interface IContentService {
     errorCode?: string;
     errorDetail?: string;
     mediaMetadata?: ReelProcessingMediaMetadata;
+    metricsContext?: ReelPipelineMetricContext;
   }): Promise<void>;
 }

@@ -64,6 +64,7 @@ export class ReprocessReelUseCase {
         mediaKey: reel.mediaKey,
         userId: reel.userId,
         processingAttemptId,
+        queuedAt: new Date().toISOString(),
         title: reel.title,
         description: reel.description,
         tags: reel.tags,

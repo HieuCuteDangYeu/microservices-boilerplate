@@ -76,7 +76,10 @@
     "purge:content-reels": "node scripts/purge-content-reels.cjs",
     "backfill:conversation-client-message-ids": "node scripts/backfill-conversation-client-message-ids.cjs",
     "backfill:reel-chunks": "node scripts/send-rmq-message.cjs content_queue content.backfill_reel_chunks '{\"limit\":20}'",
-    "backfill:user-memory-embeddings": "node scripts/send-rmq-message.cjs ai_queue ai.backfill_user_memory_embeddings '{\"limit\":100}'"
+    "backfill:user-memory-embeddings": "node scripts/send-rmq-message.cjs ai_queue ai.backfill_user_memory_embeddings '{\"limit\":100}'",
+    "tmp:load-test:reel-pipeline": "node scripts/tmp/load-test-reel-pipeline.cjs",
+    "tmp:inspect:media-output": "node scripts/tmp/inspect-media-output.cjs",
+    "tmp:test:reel-pipeline": "jest --runInBand apps/processing-service/src/application/use-cases/classify-reel-media.use-case.spec.ts apps/processing-service/src/infrastructure/services/processing-metrics.service.spec.ts scripts/tmp/load-test-reel-pipeline.spec.ts"
   },
   "packageManager": "pnpm@9.15.0",
   "overrides": {

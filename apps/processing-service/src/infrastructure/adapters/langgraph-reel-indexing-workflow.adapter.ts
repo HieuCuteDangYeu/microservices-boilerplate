@@ -5,11 +5,16 @@ import {
 } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { BuiltTranscriptChunk } from '@common/conversation/interfaces/built-transcript-chunk.interface';
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import { END, START, StateGraph, StateSchema } from '@langchain/langgraph';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BuildReelTranscriptionPromptUseCase } from '@processing/application/use-cases/build-reel-transcription-prompt.use-case';
 import { BuildTranscriptChunksUseCase } from '@processing/application/use-cases/build-transcript-chunks.use-case';
-import { EmbedReelChunksUseCase } from '@processing/application/use-cases/embed-reel-chunks.use-case';
+import type { TranscriptChunkBuildMetrics } from '@processing/application/use-cases/build-transcript-chunks.use-case';
+import {
+  EmbedReelChunksUseCase,
+  ReelChunkEmbeddingMetrics,
+} from '@processing/application/use-cases/embed-reel-chunks.use-case';
 import {
   NormalizedReelMetadata,
   NormalizeReelMetadataUseCase,
@@ -20,6 +25,7 @@ import {
 } from '@processing/application/use-cases/validate-reel-index.use-case';
 import { formatProcessingError } from '@processing/application/utils/format-processing-error';
 import type { IAiService } from '@processing/domain/interfaces/ai-service.interface';
+import type { IProcessingMetrics } from '@processing/domain/interfaces/processing-metrics.interface';
 import type {
   IReelIndexingWorkflow,
   ReelIndexingWorkflowInput,
@@ -50,6 +56,8 @@ interface ReelIndexingWorkflowState {
   indexedChunks: ReelChunkIndexInput[];
 
   validation?: ReelIndexValidationResult;
+  chunkBuildMetrics?: TranscriptChunkBuildMetrics;
+  chunkEmbeddingMetrics?: ReelChunkEmbeddingMetrics;
 
   trace: ReelIndexingWorkflowTraceStep[];
 }
@@ -74,6 +82,8 @@ const ReelIndexingStateSchema = new StateSchema({
   indexedChunks: z.array(z.any()).default([]),
 
   validation: z.any().optional(),
+  chunkBuildMetrics: z.any().optional(),
+  chunkEmbeddingMetrics: z.any().optional(),
 
   trace: z.array(z.any()).default([]),
 });
@@ -91,6 +101,8 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
     private readonly videoProcessingService: IVideoProcessingService,
     @Inject('ITempFileService')
     private readonly tempFileService: ITempFileService,
+    @Inject('IProcessingMetrics')
+    private readonly processingMetrics: IProcessingMetrics,
     private readonly buildReelTranscriptionPromptUseCase: BuildReelTranscriptionPromptUseCase,
     private readonly normalizeReelMetadataUseCase: NormalizeReelMetadataUseCase,
     private readonly buildTranscriptChunksUseCase: BuildTranscriptChunksUseCase,
@@ -102,7 +114,11 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
     input: ReelIndexingWorkflowInput,
   ): Promise<ReelIndexingWorkflowResult> {
     const nodeTimings: Record<string, number> = {};
-    const graph = this.buildGraph(nodeTimings);
+    const graph = this.buildGraph(nodeTimings, input.metricsContext);
+    const totalTimer = this.processingMetrics.startStage(
+      input.metricsContext,
+      'TOTAL_INDEXING',
+    );
 
     const initialState: ReelIndexingWorkflowState = {
       reelId: input.reelId,
@@ -116,8 +132,25 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
       trace: [],
     };
 
-    const rawResult: unknown = await graph.invoke(initialState);
-    const result = this.toWorkflowState(rawResult, initialState);
+    let result: ReelIndexingWorkflowState;
+
+    try {
+      const rawResult: unknown = await graph.invoke(initialState);
+      result = this.toWorkflowState(rawResult, initialState);
+      totalTimer.succeed({
+        semanticUnitCount: result.chunkBuildMetrics?.semanticUnitCount ?? 0,
+        finalChunkCount: result.chunkBuildMetrics?.finalChunkCount ?? 0,
+        embeddingRequestCount:
+          (result.chunkBuildMetrics?.semanticEmbeddingRequestCount ?? 0) +
+          (result.chunkEmbeddingMetrics?.requestCount ?? 0),
+        embeddingTotalItemCount:
+          (result.chunkBuildMetrics?.semanticEmbeddingRequestCount ?? 0) +
+          (result.chunkEmbeddingMetrics?.totalItemCount ?? 0),
+      });
+    } catch (error: unknown) {
+      totalTimer.fail('INDEXING_WORKFLOW');
+      throw error;
+    }
 
     const normalizedMetadata = result.normalizedMetadata;
 
@@ -138,16 +171,28 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
     };
   }
 
-  private buildGraph(nodeTimings: Record<string, number>) {
+  private buildGraph(
+    nodeTimings: Record<string, number>,
+    metricsContext: ReelPipelineMetricContext,
+  ) {
     return new StateGraph(ReelIndexingStateSchema)
-      .addNode('transcriptionNode', this.createTranscriptionNode(nodeTimings))
+      .addNode(
+        'transcriptionNode',
+        this.createTranscriptionNode(nodeTimings, metricsContext),
+      )
       .addNode(
         'metadataExtractionNode',
-        this.createMetadataExtractionNode(nodeTimings),
+        this.createMetadataExtractionNode(nodeTimings, metricsContext),
       )
       .addNode('normalizationNode', this.createNormalizationNode(nodeTimings))
-      .addNode('chunkingNode', this.createChunkingNode(nodeTimings))
-      .addNode('embeddingNode', this.createEmbeddingNode(nodeTimings))
+      .addNode(
+        'chunkingNode',
+        this.createChunkingNode(nodeTimings, metricsContext),
+      )
+      .addNode(
+        'embeddingNode',
+        this.createEmbeddingNode(nodeTimings, metricsContext),
+      )
       .addNode('validationNode', this.createValidationNode(nodeTimings))
 
       .addEdge(START, 'transcriptionNode')
@@ -161,7 +206,10 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
       .compile();
   }
 
-  private createTranscriptionNode(nodeTimings: Record<string, number>) {
+  private createTranscriptionNode(
+    nodeTimings: Record<string, number>,
+    metricsContext: ReelPipelineMetricContext,
+  ) {
     return async (
       state: ReelIndexingWorkflowState,
     ): Promise<Partial<ReelIndexingWorkflowState>> => {
@@ -170,20 +218,69 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
           const transcription = await this.withRetry(
             'transcriptionNode',
             2,
-            async () => {
-              await this.videoProcessingService.extractAudioForTranscription(
-                state.inputPath,
-                state.audioPath,
+            async (attempt) => {
+              const retryNumber = attempt - 1;
+              const audioTimer = this.processingMetrics.startStage(
+                metricsContext,
+                'AUDIO_EXTRACTION',
+                { retryNumber },
               );
+
+              try {
+                await this.videoProcessingService.extractAudioForTranscription(
+                  state.inputPath,
+                  state.audioPath,
+                );
+
+                const audioStats = this.tempFileService.getPathStats(
+                  state.audioPath,
+                );
+                audioTimer.succeed({
+                  retryNumber,
+                  audioArtifactBytes: audioStats.totalBytes,
+                });
+              } catch (error: unknown) {
+                audioTimer.fail('AUDIO_EXTRACTION', { retryNumber });
+                throw error;
+              }
 
               const audioBuffer = this.tempFileService.readFile(
                 state.audioPath,
               );
-
-              return this.aiService.transcribeAudio(audioBuffer, {
+              const transcriptionPayload = {
+                audioBase64BytesEstimate: Math.ceil(
+                  (audioBuffer.byteLength * 4) / 3,
+                ),
                 initialPrompt:
                   this.buildReelTranscriptionPromptUseCase.execute(state),
-              });
+              };
+              const transcriptionTimer = this.processingMetrics.startStage(
+                metricsContext,
+                'TRANSCRIPTION',
+                { retryNumber },
+              );
+
+              try {
+                const result = await this.aiService.transcribeAudio(
+                  audioBuffer,
+                  {
+                    initialPrompt: transcriptionPayload.initialPrompt,
+                  },
+                );
+                transcriptionTimer.succeed({
+                  retryNumber,
+                  audioArtifactBytes: audioBuffer.byteLength,
+                  rabbitMqPayloadBytesEstimate:
+                    transcriptionPayload.audioBase64BytesEstimate +
+                    Buffer.byteLength(transcriptionPayload.initialPrompt),
+                  transcriptChars: result.text?.length ?? 0,
+                  transcriptSegmentCount: result.segments?.length ?? 0,
+                });
+                return result;
+              } catch (error: unknown) {
+                transcriptionTimer.fail('TRANSCRIPTION', { retryNumber });
+                throw error;
+              }
             },
           );
 
@@ -233,7 +330,10 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
     };
   }
 
-  private createMetadataExtractionNode(nodeTimings: Record<string, number>) {
+  private createMetadataExtractionNode(
+    nodeTimings: Record<string, number>,
+    metricsContext: ReelPipelineMetricContext,
+  ) {
     return async (
       state: ReelIndexingWorkflowState,
     ): Promise<Partial<ReelIndexingWorkflowState>> => {
@@ -242,14 +342,35 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
           const extractedMetadata = await this.withRetry(
             'metadataExtractionNode',
             2,
-            () =>
-              this.aiService.extractReelMetadata({
+            async (attempt) => {
+              const retryNumber = attempt - 1;
+              const payload = {
                 title: state.title,
                 description: state.description,
                 tags: state.tags,
                 transcript: state.transcript,
                 maxTags: 8,
-              }),
+              };
+              const timer = this.processingMetrics.startStage(
+                metricsContext,
+                'METADATA_EXTRACTION',
+                { retryNumber },
+              );
+
+              try {
+                const result =
+                  await this.aiService.extractReelMetadata(payload);
+                timer.succeed({
+                  retryNumber,
+                  rabbitMqPayloadBytesEstimate:
+                    this.processingMetrics.estimatePayloadBytes(payload),
+                });
+                return result;
+              } catch (error: unknown) {
+                timer.fail('METADATA_EXTRACTION', { retryNumber });
+                throw error;
+              }
+            },
           );
 
           return {
@@ -309,23 +430,39 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
     };
   }
 
-  private createChunkingNode(nodeTimings: Record<string, number>) {
+  private createChunkingNode(
+    nodeTimings: Record<string, number>,
+    metricsContext: ReelPipelineMetricContext,
+  ) {
     return async (
       state: ReelIndexingWorkflowState,
     ): Promise<Partial<ReelIndexingWorkflowState>> => {
       return this.timed('chunkingNode', nodeTimings, async () => {
         const metadata = state.normalizedMetadata;
 
-        const builtChunks = await this.buildTranscriptChunksUseCase.execute({
-          title: metadata?.title,
-          description: metadata?.description,
-          tags: metadata?.tags,
-          transcript: state.transcript,
-          transcriptSegments: state.transcriptSegments,
+        const timer = this.processingMetrics.startStage(
+          metricsContext,
+          'CHUNKING',
+        );
+        const result =
+          await this.buildTranscriptChunksUseCase.executeWithMetrics({
+            title: metadata?.title,
+            description: metadata?.description,
+            tags: metadata?.tags,
+            transcript: state.transcript,
+            transcriptSegments: state.transcriptSegments,
+          });
+        const builtChunks = result.chunks;
+        timer.succeed({
+          semanticUnitCount: result.metrics.semanticUnitCount,
+          finalChunkCount: result.metrics.finalChunkCount,
+          embeddingRequestCount: result.metrics.semanticEmbeddingRequestCount,
+          embeddingTotalItemCount: result.metrics.semanticEmbeddingRequestCount,
         });
 
         return {
           builtChunks,
+          chunkBuildMetrics: result.metrics,
           trace: this.appendTrace(state, {
             node: 'chunkingNode',
             status: builtChunks.length > 0 ? 'SUCCESS' : 'FALLBACK',
@@ -336,25 +473,55 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
     };
   }
 
-  private createEmbeddingNode(nodeTimings: Record<string, number>) {
+  private createEmbeddingNode(
+    nodeTimings: Record<string, number>,
+    metricsContext: ReelPipelineMetricContext,
+  ) {
     return async (
       state: ReelIndexingWorkflowState,
     ): Promise<Partial<ReelIndexingWorkflowState>> => {
       return this.timed('embeddingNode', nodeTimings, async () => {
         const metadata = state.normalizedMetadata;
 
-        const indexedChunks = await this.withRetry('embeddingNode', 2, () =>
-          this.embedReelChunksUseCase.execute({
-            reelId: state.reelId,
-            title: metadata?.title,
-            description: metadata?.description,
-            tags: metadata?.tags,
-            chunks: state.builtChunks,
-          }),
+        const result = await this.withRetry(
+          'embeddingNode',
+          2,
+          async (attempt) => {
+            const retryNumber = attempt - 1;
+            const timer = this.processingMetrics.startStage(
+              metricsContext,
+              'EMBEDDING',
+              { retryNumber },
+            );
+
+            try {
+              const embeddingResult =
+                await this.embedReelChunksUseCase.executeWithMetrics({
+                  reelId: state.reelId,
+                  title: metadata?.title,
+                  description: metadata?.description,
+                  tags: metadata?.tags,
+                  chunks: state.builtChunks,
+                });
+              timer.succeed({
+                retryNumber,
+                embeddingRequestCount: embeddingResult.metrics.requestCount,
+                embeddingTotalItemCount: embeddingResult.metrics.totalItemCount,
+                embeddingFailedRequestCount:
+                  embeddingResult.metrics.failedRequestCount,
+              });
+              return embeddingResult;
+            } catch (error: unknown) {
+              timer.fail('EMBEDDING', { retryNumber });
+              throw error;
+            }
+          },
         );
+        const indexedChunks = result.chunks;
 
         return {
           indexedChunks,
+          chunkEmbeddingMetrics: result.metrics,
           trace: this.appendTrace(state, {
             node: 'embeddingNode',
             status: indexedChunks.length > 0 ? 'SUCCESS' : 'FALLBACK',
@@ -426,13 +593,13 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
   private async withRetry<T>(
     label: string,
     attempts: number,
-    fn: () => Promise<T>,
+    fn: (attempt: number) => Promise<T>,
   ): Promise<T> {
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
-        return await fn();
+        return await fn(attempt);
       } catch (error: unknown) {
         lastError = error;
 
@@ -489,6 +656,10 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
       indexedChunks: this.toIndexedChunks(value['indexedChunks']),
 
       validation: this.toValidationResult(value['validation']),
+      chunkBuildMetrics: this.toChunkBuildMetrics(value['chunkBuildMetrics']),
+      chunkEmbeddingMetrics: this.toChunkEmbeddingMetrics(
+        value['chunkEmbeddingMetrics'],
+      ),
       trace: this.toTraceSteps(value['trace']),
     };
   }
@@ -646,6 +817,35 @@ export class LangGraphReelIndexingWorkflowAdapter implements IReelIndexingWorkfl
     return {
       valid: value['valid'] === true,
       warnings: this.toOptionalStringArray(value['warnings']) ?? [],
+    };
+  }
+
+  private toChunkBuildMetrics(
+    value: unknown,
+  ): TranscriptChunkBuildMetrics | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+
+    return {
+      semanticUnitCount: Number(value['semanticUnitCount']) || 0,
+      semanticEmbeddingRequestCount:
+        Number(value['semanticEmbeddingRequestCount']) || 0,
+      finalChunkCount: Number(value['finalChunkCount']) || 0,
+    };
+  }
+
+  private toChunkEmbeddingMetrics(
+    value: unknown,
+  ): ReelChunkEmbeddingMetrics | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+
+    return {
+      requestCount: Number(value['requestCount']) || 0,
+      totalItemCount: Number(value['totalItemCount']) || 0,
+      failedRequestCount: Number(value['failedRequestCount']) || 0,
     };
   }
 

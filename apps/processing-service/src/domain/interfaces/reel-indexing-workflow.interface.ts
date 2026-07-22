@@ -1,5 +1,6 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 
 export interface ReelIndexingWorkflowInput {
   reelId: string;
@@ -8,6 +9,7 @@ export interface ReelIndexingWorkflowInput {
   tags?: string[];
   inputPath: string;
   audioPath: string;
+  metricsContext: ReelPipelineMetricContext;
 }
 
 export interface ReelIndexingWorkflowTraceStep {

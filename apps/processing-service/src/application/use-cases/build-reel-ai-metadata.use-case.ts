@@ -1,5 +1,6 @@
 import { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type {
   IReelIndexingWorkflow,
@@ -22,6 +23,7 @@ export class BuildReelAiMetadataUseCase {
     tags?: string[];
     inputPath: string;
     audioPath: string;
+    metricsContext: ReelPipelineMetricContext;
   }): Promise<{
     title?: string;
     description?: string;

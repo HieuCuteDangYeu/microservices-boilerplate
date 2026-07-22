@@ -1,5 +1,7 @@
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { IProcessingMetrics } from '@processing/domain/interfaces/processing-metrics.interface';
 import type {
   IContentService,
   ReelProcessingMediaMetadata,
@@ -27,6 +29,8 @@ export class ProcessReelUseCase {
     private readonly tempFileService: ITempFileService,
     @Inject('IJobConcurrencyLimiterService')
     private readonly jobConcurrencyLimiter: IJobConcurrencyLimiterService,
+    @Inject('IProcessingMetrics')
+    private readonly processingMetrics: IProcessingMetrics,
   ) {}
 
   async execute(data: {
@@ -34,6 +38,7 @@ export class ProcessReelUseCase {
     mediaKey: string;
     userId: string;
     processingAttemptId?: string;
+    queuedAt?: string;
     title?: string;
     description?: string;
     tags?: string[];
@@ -50,10 +55,44 @@ export class ProcessReelUseCase {
         return;
       }
 
-      const claimed = await this.contentService.claimReelProcessingAttempt({
+      const metricsContext: ReelPipelineMetricContext = {
         reelId,
         processingAttemptId,
+        mediaClass: 'UNKNOWN',
+        orientation: 'UNKNOWN',
+        retryNumber: 0,
+      };
+      const queuedAtMs = data.queuedAt ? Date.parse(data.queuedAt) : Number.NaN;
+
+      this.processingMetrics.record(metricsContext, {
+        stage: 'QUEUE_WAIT',
+        success: Number.isFinite(queuedAtMs),
+        durationMs: Number.isFinite(queuedAtMs)
+          ? Math.max(0, Date.now() - queuedAtMs)
+          : 0,
+        details: {
+          queueName: 'processing_queue',
+          measurementAvailable: Number.isFinite(queuedAtMs),
+        },
       });
+
+      const claimTimer = this.processingMetrics.startStage(
+        metricsContext,
+        'JOB_CLAIM',
+      );
+
+      let claimed: boolean;
+
+      try {
+        claimed = await this.contentService.claimReelProcessingAttempt({
+          reelId,
+          processingAttemptId,
+        });
+        claimTimer.succeed({ claimed });
+      } catch (error: unknown) {
+        claimTimer.fail('JOB_CLAIM');
+        throw error;
+      }
 
       if (!claimed) {
         this.logger.warn(
@@ -64,6 +103,11 @@ export class ProcessReelUseCase {
 
       this.logger.log(
         `[Reel ${reelId}] Claimed processing attempt ${processingAttemptId} for ${mediaKey}`,
+      );
+
+      const totalPipelineTimer = this.processingMetrics.startStage(
+        metricsContext,
+        'TOTAL_PIPELINE',
       );
 
       const workspace = this.tempFileService.createReelProcessingWorkspace();
@@ -82,6 +126,7 @@ export class ProcessReelUseCase {
           inputPath: workspace.inputPath,
           hlsOutputDir: workspace.hlsOutputDir,
           thumbnailPath: workspace.thumbnailPath,
+          metricsContext,
         });
 
         currentProgress = 90;
@@ -109,9 +154,10 @@ export class ProcessReelUseCase {
           tags: data.tags,
           inputPath: workspace.inputPath,
           audioPath: workspace.audioPath,
+          metricsContext,
         });
 
-        await this.contentService.emitProcessingCompleted({
+        const completedPayload = {
           reelId,
           status: 'COMPLETED',
           processingAttemptId,
@@ -127,6 +173,14 @@ export class ProcessReelUseCase {
           message: 'Video is ready to watch',
           progress: 100,
           mediaMetadata: mediaResult.mediaMetadata,
+          metricsContext,
+        } as const;
+
+        await this.contentService.emitProcessingCompleted(completedPayload);
+
+        totalPipelineTimer.succeed({
+          rabbitMqPayloadBytesEstimate:
+            this.processingMetrics.estimatePayloadBytes(completedPayload),
         });
 
         this.logger.log(
@@ -150,6 +204,8 @@ export class ProcessReelUseCase {
           failureMediaMetadata = error.mediaMetadata;
         }
 
+        totalPipelineTimer.fail(failedStage);
+
         await this.emitFailed({
           reelId,
           processingAttemptId,
@@ -159,6 +215,7 @@ export class ProcessReelUseCase {
           errorCode: failedStage,
           errorDetail: failureDetail,
           mediaMetadata: failureMediaMetadata,
+          metricsContext,
         });
       } finally {
         this.tempFileService.removeDirIfExists(workspace.workDir);
@@ -211,6 +268,7 @@ export class ProcessReelUseCase {
     errorCode: string;
     errorDetail: string;
     mediaMetadata?: ReelProcessingMediaMetadata;
+    metricsContext: ReelPipelineMetricContext;
   }): Promise<void> {
     try {
       await this.contentService.emitProcessingFailed({
@@ -223,6 +281,7 @@ export class ProcessReelUseCase {
         errorCode: data.errorCode,
         errorDetail: data.errorDetail,
         mediaMetadata: data.mediaMetadata,
+        metricsContext: data.metricsContext,
       });
     } catch (error: unknown) {
       const { message, stack } = formatProcessingError(error);

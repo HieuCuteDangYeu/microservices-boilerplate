@@ -32,6 +32,11 @@ export interface TranscodeToHlsResult {
   outputFps: number;
   segmentSeconds: number;
   variantNames: string[];
+  variants: Array<{
+    name: ReelEncodingVariant['name'];
+    width: number;
+    height: number;
+  }>;
 }
 
 export interface IVideoProcessingService {

@@ -51,6 +51,7 @@ export class CreateReelUseCase {
         mediaKey: savedReel.mediaKey,
         userId,
         processingAttemptId,
+        queuedAt: new Date().toISOString(),
         title: savedReel.title,
         description: savedReel.description,
         tags: savedReel.tags,

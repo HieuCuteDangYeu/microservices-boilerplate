@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type {
   ChatVideoProcessingWorkspace,
+  FileSystemPathStats,
   ITempFileService,
   ReelProcessingWorkspace,
 } from '@processing/domain/interfaces/temp-file.service.interface';
@@ -34,6 +35,33 @@ export class TempFileService implements ITempFileService {
 
   readFile(path: string): Buffer {
     return fs.readFileSync(path);
+  }
+
+  getPathStats(targetPath: string): FileSystemPathStats {
+    if (!fs.existsSync(targetPath)) {
+      return { fileCount: 0, totalBytes: 0 };
+    }
+
+    const stats = fs.statSync(targetPath);
+
+    if (stats.isFile()) {
+      return { fileCount: 1, totalBytes: stats.size };
+    }
+
+    if (!stats.isDirectory()) {
+      return { fileCount: 0, totalBytes: 0 };
+    }
+
+    return fs.readdirSync(targetPath, { withFileTypes: true }).reduce(
+      (total, entry) => {
+        const entryStats = this.getPathStats(path.join(targetPath, entry.name));
+        return {
+          fileCount: total.fileCount + entryStats.fileCount,
+          totalBytes: total.totalBytes + entryStats.totalBytes,
+        };
+      },
+      { fileCount: 0, totalBytes: 0 },
+    );
   }
 
   removeFileIfExists(path: string): void {

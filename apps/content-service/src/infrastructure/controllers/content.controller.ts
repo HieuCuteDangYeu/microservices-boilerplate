@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { TrackReelEventPayload } from '@common/content/dtos/track-reel-events.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
@@ -35,7 +36,7 @@ import {
   ReelProcessingMediaMetadata,
   ReelUpdateData,
 } from '@content/domain/interfaces/content.repository.interface';
-import { Controller } from '@nestjs/common';
+import { Controller, Logger } from '@nestjs/common';
 import {
   EventPattern,
   MessagePattern,
@@ -47,6 +48,8 @@ import { SearchReelContextUseCase } from './../../application/use-cases/search-r
 
 @Controller()
 export class ContentController {
+  private readonly logger = new Logger(ContentController.name);
+
   constructor(
     private readonly createReelUseCase: CreateReelUseCase,
     private readonly listReelsUseCase: ListReelsUseCase,
@@ -199,8 +202,12 @@ export class ContentController {
       message?: string;
       progress?: number;
       mediaMetadata?: ReelProcessingMediaMetadata;
+      metricsContext?: ReelPipelineMetricContext;
     },
   ) {
+    const persistenceStartedAt = Date.now();
+    const metricsContext = this.resolveMetricsContext(data);
+
     try {
       await this.updateReelStatusUseCase.execute(
         data.reelId,
@@ -221,7 +228,18 @@ export class ContentController {
         undefined,
         data.mediaMetadata,
       );
+      this.logPersistenceMetric(
+        metricsContext,
+        true,
+        Date.now() - persistenceStartedAt,
+      );
     } catch (err: unknown) {
+      this.logPersistenceMetric(
+        metricsContext,
+        false,
+        Date.now() - persistenceStartedAt,
+        'DATABASE_PERSISTENCE',
+      );
       const error = err as Error;
 
       console.error(
@@ -270,8 +288,12 @@ export class ContentController {
       errorCode?: string;
       errorDetail?: string;
       mediaMetadata?: ReelProcessingMediaMetadata;
+      metricsContext?: ReelPipelineMetricContext;
     },
   ) {
+    const persistenceStartedAt = Date.now();
+    const metricsContext = this.resolveMetricsContext(data);
+
     try {
       await this.updateReelStatusUseCase.execute(
         data.reelId,
@@ -292,13 +314,63 @@ export class ContentController {
         data.errorDetail,
         data.mediaMetadata,
       );
+      this.logPersistenceMetric(
+        metricsContext,
+        true,
+        Date.now() - persistenceStartedAt,
+      );
     } catch (err: unknown) {
+      this.logPersistenceMetric(
+        metricsContext,
+        false,
+        Date.now() - persistenceStartedAt,
+        'DATABASE_PERSISTENCE',
+      );
       const error = err as Error;
 
       console.error(
         `[processing_failed] ${error.message} — reel ${data.reelId} NOT updated to FAILED`,
       );
     }
+  }
+
+  private resolveMetricsContext(data: {
+    reelId: string;
+    processingAttemptId?: string;
+    metricsContext?: ReelPipelineMetricContext;
+  }): ReelPipelineMetricContext {
+    return (
+      data.metricsContext ?? {
+        reelId: data.reelId,
+        processingAttemptId: data.processingAttemptId ?? 'UNKNOWN',
+        mediaClass: 'UNKNOWN',
+        orientation: 'UNKNOWN',
+        retryNumber: 0,
+      }
+    );
+  }
+
+  private logPersistenceMetric(
+    context: ReelPipelineMetricContext,
+    success: boolean,
+    durationMs: number,
+    failureStage?: string,
+  ): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'reel_pipeline_metric',
+        timestamp: new Date().toISOString(),
+        reelId: context.reelId,
+        processingAttemptId: context.processingAttemptId,
+        stage: 'DATABASE_PERSISTENCE',
+        mediaClass: context.mediaClass,
+        orientation: context.orientation,
+        success,
+        durationMs: Math.max(0, Math.round(durationMs)),
+        retryNumber: context.retryNumber,
+        ...(failureStage ? { failureStage } : {}),
+      }),
+    );
   }
 
   @EventPattern('reel.processing_started')

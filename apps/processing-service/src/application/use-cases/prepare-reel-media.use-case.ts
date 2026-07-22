@@ -1,4 +1,6 @@
+import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { IProcessingMetrics } from '@processing/domain/interfaces/processing-metrics.interface';
 import type {
   IContentService,
   ReelProcessingMediaMetadata,
@@ -11,6 +13,10 @@ import type {
   VideoMetadata,
 } from '../../domain/interfaces/video-processing.service.interface';
 import { formatProcessingError } from '../utils/format-processing-error';
+import {
+  ClassifyReelMediaUseCase,
+  ReelMediaClassification,
+} from './classify-reel-media.use-case';
 import { SelectReelEncodingProfileUseCase } from './select-reel-encoding-profile.use-case';
 import {
   ReelSourceMediaValidationError,
@@ -61,9 +67,12 @@ export class PrepareReelMediaUseCase {
     private readonly contentService: IContentService,
     @Inject('ITempFileService')
     private readonly tempFileService: ITempFileService,
+    @Inject('IProcessingMetrics')
+    private readonly processingMetrics: IProcessingMetrics,
     private readonly validateReelStreamUseCase: ValidateReelStreamUseCase,
     private readonly validateReelSourceMediaUseCase: ValidateReelSourceMediaUseCase,
     private readonly selectReelEncodingProfileUseCase: SelectReelEncodingProfileUseCase,
+    private readonly classifyReelMediaUseCase: ClassifyReelMediaUseCase,
   ) {}
 
   async execute(data: {
@@ -73,6 +82,7 @@ export class PrepareReelMediaUseCase {
     inputPath: string;
     hlsOutputDir: string;
     thumbnailPath: string;
+    metricsContext: ReelPipelineMetricContext;
   }): Promise<{
     thumbnailKey: string;
     mediaMetadata: ReelProcessingMediaMetadata;
@@ -82,6 +92,11 @@ export class PrepareReelMediaUseCase {
     let currentPublicMessage = 'Video processing failed';
     let currentErrorCode = 'PROCESSING_FAILED';
     let mediaMetadata: ReelProcessingMediaMetadata | undefined;
+    let classification: ReelMediaClassification | undefined;
+    const totalMediaTimer = this.processingMetrics.startStage(
+      data.metricsContext,
+      'TOTAL_MEDIA',
+    );
 
     try {
       await this.contentService.emitProcessingStarted({
@@ -93,10 +108,25 @@ export class PrepareReelMediaUseCase {
         progress: currentProgress,
       });
 
-      await this.mediaStorageService.downloadVideo(
-        data.mediaKey,
-        data.inputPath,
+      const downloadTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'SOURCE_DOWNLOAD',
       );
+
+      try {
+        await this.mediaStorageService.downloadVideo(
+          data.mediaKey,
+          data.inputPath,
+        );
+        const sourceStats = this.tempFileService.getPathStats(data.inputPath);
+        downloadTimer.succeed({
+          sourceBytes: sourceStats.totalBytes,
+          temporaryDiskBytes: sourceStats.totalBytes,
+        });
+      } catch (error: unknown) {
+        downloadTimer.fail(currentStage);
+        throw error;
+      }
 
       this.logger.log(`[Reel ${data.reelId}] Downloaded source video`);
 
@@ -114,16 +144,66 @@ export class PrepareReelMediaUseCase {
         progress: currentProgress,
       });
 
-      const sourceMetadata = await this.videoProcessingService.getVideoMetadata(
-        data.inputPath,
+      const probeTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'FFPROBE',
       );
+      let sourceMetadata: VideoMetadata;
+
+      try {
+        sourceMetadata = await this.videoProcessingService.getVideoMetadata(
+          data.inputPath,
+        );
+        classification = this.classifyReelMediaUseCase.execute(sourceMetadata);
+        data.metricsContext.mediaClass = classification.mediaClass;
+        data.metricsContext.orientation = classification.orientation;
+        probeTimer.succeed(
+          this.toSourceMetricDetails(sourceMetadata, classification),
+        );
+      } catch (error: unknown) {
+        probeTimer.fail(currentStage);
+        throw error;
+      }
 
       mediaMetadata = this.toSourceMetadata(sourceMetadata);
 
-      this.validateReelSourceMediaUseCase.execute(sourceMetadata);
+      const validationTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'SOURCE_VALIDATION',
+      );
 
+      try {
+        this.validateReelSourceMediaUseCase.execute(sourceMetadata);
+        validationTimer.succeed(
+          this.toSourceMetricDetails(sourceMetadata, classification),
+        );
+      } catch (error: unknown) {
+        validationTimer.fail(
+          error instanceof ReelSourceMediaValidationError
+            ? error.errorCode
+            : currentStage,
+          this.toSourceMetricDetails(sourceMetadata, classification),
+        );
+        throw error;
+      }
+
+      const profileTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'PROFILE_SELECTION',
+      );
       const encodingProfile =
         this.selectReelEncodingProfileUseCase.execute(sourceMetadata);
+      profileTimer.succeed({
+        profileName: encodingProfile.profileName,
+        outputFps: encodingProfile.outputFps,
+        hlsSegmentSeconds: encodingProfile.segmentSeconds,
+        variantCount: encodingProfile.variants.length,
+        variants: encodingProfile.variants.map((variant) => ({
+          name: variant.name,
+          width: variant.width,
+          height: variant.height,
+        })),
+      });
 
       this.logger.log(
         `[Reel ${data.reelId}] Selected encoding profile ${encodingProfile.profileName}: fps=${encodingProfile.outputFps}, variants=${encodingProfile.variants
@@ -143,11 +223,35 @@ export class PrepareReelMediaUseCase {
         progress: currentProgress,
       });
 
-      const transcodeResult = await this.videoProcessingService.transcodeToHls(
-        data.inputPath,
-        data.hlsOutputDir,
-        encodingProfile,
+      const transcodeTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'FFMPEG_TRANSCODE',
       );
+      let transcodeResult: TranscodeToHlsResult;
+
+      try {
+        transcodeResult = await this.videoProcessingService.transcodeToHls(
+          data.inputPath,
+          data.hlsOutputDir,
+          encodingProfile,
+        );
+        const sourceStats = this.tempFileService.getPathStats(data.inputPath);
+        const hlsStats = this.tempFileService.getPathStats(data.hlsOutputDir);
+        transcodeTimer.succeed({
+          ffmpegCpuUsagePercent: null,
+          ffmpegCpuMeasurement: 'not_exposed_by_fluent_ffmpeg',
+          hlsObjectCount: hlsStats.fileCount,
+          hlsTotalBytes: hlsStats.totalBytes,
+          temporaryDiskBytes: sourceStats.totalBytes + hlsStats.totalBytes,
+          actualVariantDimensions: transcodeResult.variants,
+        });
+      } catch (error: unknown) {
+        transcodeTimer.fail(currentStage, {
+          ffmpegCpuUsagePercent: null,
+          ffmpegCpuMeasurement: 'not_exposed_by_fluent_ffmpeg',
+        });
+        throw error;
+      }
 
       mediaMetadata = {
         ...mediaMetadata,
@@ -172,10 +276,28 @@ export class PrepareReelMediaUseCase {
         progress: currentProgress,
       });
 
-      await this.mediaStorageService.uploadHlsDirectory(
-        data.hlsOutputDir,
-        s3Prefix,
+      const hlsStats = this.tempFileService.getPathStats(data.hlsOutputDir);
+      const uploadTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'HLS_UPLOAD',
       );
+
+      try {
+        await this.mediaStorageService.uploadHlsDirectory(
+          data.hlsOutputDir,
+          s3Prefix,
+        );
+        uploadTimer.succeed({
+          hlsObjectCount: hlsStats.fileCount,
+          hlsTotalBytes: hlsStats.totalBytes,
+        });
+      } catch (error: unknown) {
+        uploadTimer.fail(currentStage, {
+          hlsObjectCount: hlsStats.fileCount,
+          hlsTotalBytes: hlsStats.totalBytes,
+        });
+        throw error;
+      }
 
       this.logger.log(
         `[Reel ${data.reelId}] Uploaded HLS files to ${s3Prefix}`,
@@ -193,17 +315,32 @@ export class PrepareReelMediaUseCase {
         progress: currentProgress,
       });
 
-      await this.videoProcessingService.extractThumbnail(
-        data.inputPath,
-        data.thumbnailPath,
+      const thumbnailTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'THUMBNAIL',
       );
-
       const thumbnailKey = `${s3Prefix}/thumbnail.jpg`;
 
-      await this.mediaStorageService.uploadThumbnail(
-        data.thumbnailPath,
-        thumbnailKey,
-      );
+      try {
+        await this.videoProcessingService.extractThumbnail(
+          data.inputPath,
+          data.thumbnailPath,
+        );
+
+        await this.mediaStorageService.uploadThumbnail(
+          data.thumbnailPath,
+          thumbnailKey,
+        );
+        const thumbnailStats = this.tempFileService.getPathStats(
+          data.thumbnailPath,
+        );
+        thumbnailTimer.succeed({
+          thumbnailBytes: thumbnailStats.totalBytes,
+        });
+      } catch (error: unknown) {
+        thumbnailTimer.fail(currentStage);
+        throw error;
+      }
 
       this.logger.log(
         `[Reel ${data.reelId}] Uploaded thumbnail ${thumbnailKey}`,
@@ -223,20 +360,46 @@ export class PrepareReelMediaUseCase {
         progress: currentProgress,
       });
 
-      await this.validateReelStreamUseCase.execute({
-        reelId: data.reelId,
-        s3Prefix,
-        thumbnailKey,
-      });
+      const streamValidationTimer = this.processingMetrics.startStage(
+        data.metricsContext,
+        'STREAM_VALIDATION',
+      );
+
+      try {
+        await this.validateReelStreamUseCase.execute({
+          reelId: data.reelId,
+          s3Prefix,
+          thumbnailKey,
+        });
+        streamValidationTimer.succeed();
+      } catch (error: unknown) {
+        streamValidationTimer.fail(currentStage);
+        throw error;
+      }
 
       this.tempFileService.removeDirIfExists(data.hlsOutputDir);
       this.tempFileService.removeFileIfExists(data.thumbnailPath);
+
+      totalMediaTimer.succeed({
+        ...this.toSourceMetricDetails(sourceMetadata, classification),
+        encodedVariantCount: transcodeResult.variantCount,
+        actualVariantDimensions: transcodeResult.variants,
+      });
 
       return {
         thumbnailKey,
         mediaMetadata,
       };
     } catch (error: unknown) {
+      totalMediaTimer.fail(
+        error instanceof ReelSourceMediaValidationError
+          ? error.errorCode
+          : currentStage,
+        {
+          ...(mediaMetadata ?? {}),
+        },
+      );
+
       if (error instanceof ReelSourceMediaValidationError) {
         throw new PrepareReelMediaError(error, currentProgress, {
           stage: error.errorCode,
@@ -275,6 +438,26 @@ export class PrepareReelMediaUseCase {
       sourceBitrateKbps: metadata.bitrateKbps,
       sourceHasAudio: metadata.hasAudio,
       sourceRotation: metadata.rotation,
+    };
+  }
+
+  private toSourceMetricDetails(
+    metadata: VideoMetadata,
+    classification?: ReelMediaClassification,
+  ): Record<string, unknown> {
+    return {
+      sourceDurationMs: metadata.durationMs,
+      sourceWidth: metadata.width,
+      sourceHeight: metadata.height,
+      sourceFps: metadata.fps,
+      sourceBitrateKbps: metadata.bitrateKbps,
+      sourceHasAudio: metadata.hasAudio,
+      sourceRotation: metadata.rotation ?? 0,
+      sourceEffectiveWidth: classification?.effectiveWidth,
+      sourceEffectiveHeight: classification?.effectiveHeight,
+      sourceAspectRatio: classification?.aspectRatio,
+      lengthClassification: classification?.mediaClass ?? 'UNKNOWN',
+      orientationClassification: classification?.orientation ?? 'UNKNOWN',
     };
   }
 

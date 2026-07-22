@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { EmbedReelChunksUseCase } from '@processing/application/use-cases/embed-reel-chunks.use-case';
+import { ClassifyReelMediaUseCase } from '@processing/application/use-cases/classify-reel-media.use-case';
 import { NormalizeReelMetadataUseCase } from '@processing/application/use-cases/normalize-reel-metadata.use-case';
 import { SelectReelEncodingProfileUseCase } from '@processing/application/use-cases/select-reel-encoding-profile.use-case';
 import { ValidateReelIndexUseCase } from '@processing/application/use-cases/validate-reel-index.use-case';
@@ -22,6 +23,7 @@ import { ProcessReelUseCase } from './application/use-cases/process-reel.use-cas
 import { ProcessingController } from './infrastructure/controllers/processing.controller';
 import { FfmpegService } from './infrastructure/services/ffmpeg.service';
 import { JobConcurrencyLimiterService } from './infrastructure/services/job-concurrency-limiter.service';
+import { ProcessingMetricsService } from './infrastructure/services/processing-metrics.service';
 import { R2Service } from './infrastructure/services/r2.service';
 import { TempFileService } from './infrastructure/services/temp-file.service';
 
@@ -125,6 +127,8 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     NormalizeReelMetadataUseCase,
     ValidateReelIndexUseCase,
     SelectReelEncodingProfileUseCase,
+    ClassifyReelMediaUseCase,
+    ProcessingMetricsService,
     ValidateReelSourceMediaUseCase,
     {
       provide: 'IAiService',
@@ -149,6 +153,10 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     {
       provide: 'IJobConcurrencyLimiterService',
       useExisting: JobConcurrencyLimiterService,
+    },
+    {
+      provide: 'IProcessingMetrics',
+      useExisting: ProcessingMetricsService,
     },
     {
       provide: 'IConversationMediaService',
