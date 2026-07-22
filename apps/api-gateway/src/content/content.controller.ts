@@ -390,6 +390,8 @@ export class ContentController {
     return {
       reelId: status.reelId,
       status: status.status,
+      mediaStatus: status.mediaStatus,
+      indexStatus: status.indexStatus,
       stage: status.stage,
       message: status.message,
       progress: status.progress,

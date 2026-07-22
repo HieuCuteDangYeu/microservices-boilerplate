@@ -164,6 +164,13 @@ jobs:
           fi
 
           for service in "${deploy_services[@]}"; do
+            if [ "$service" = "media-processing-service" ]; then
+              deploy_services+=("media-processing-long-service")
+              break
+            fi
+          done
+
+          for service in "${deploy_services[@]}"; do
             if [ "$service" = "reel-indexing-service" ]; then
               deploy_services+=("reel-indexing-long-service")
               break

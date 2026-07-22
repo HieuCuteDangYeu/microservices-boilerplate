@@ -12,17 +12,24 @@ const loadTest: {
     p95: number | null;
     max: number | null;
   };
+  isTerminalPipelineStatus(status: {
+    status: string;
+    indexStatus?: string;
+  }): boolean;
   parseLoadTestConfig(
     env: Record<string, string>,
     pathExists: (fixture: string) => boolean,
   ): {
     apiUrl: string;
     token: string;
+    refreshToken?: string;
     fixture: string;
     total: number;
     concurrency: number;
     timeoutMs: number;
     clientObservedDurationMs?: number;
+    titlePrefix: string;
+    tag: string;
   };
   pollForTerminalStatus(options: {
     requestStatus: () => Promise<{ status: string }>;
@@ -49,22 +56,28 @@ describe('reel pipeline baseline utilities', () => {
         {
           REEL_LOAD_TEST_API_URL: 'http://localhost:3000/',
           REEL_LOAD_TEST_TOKEN: 'test-token',
+          REEL_LOAD_TEST_REFRESH_TOKEN: 'refresh-token',
           REEL_LOAD_TEST_FIXTURE: '/tmp/fixture.mp4',
           REEL_LOAD_TEST_TOTAL: '3',
           REEL_LOAD_TEST_CONCURRENCY: '5',
           REEL_LOAD_TEST_TIMEOUT_MS: '120000',
           REEL_LOAD_TEST_CLIENT_DURATION_MS: '15000',
+          REEL_LOAD_TEST_TITLE_PREFIX: 'Phase 9 production canary',
+          REEL_LOAD_TEST_TAG: 'phase-9-production-canary',
         },
         () => true,
       ),
     ).toEqual({
       apiUrl: 'http://localhost:3000',
       token: 'test-token',
+      refreshToken: 'refresh-token',
       fixture: '/tmp/fixture.mp4',
       total: 3,
       concurrency: 3,
       timeoutMs: 120000,
       clientObservedDurationMs: 15000,
+      titlePrefix: 'Phase 9 production canary',
+      tag: 'phase-9-production-canary',
     });
   });
 
@@ -96,5 +109,20 @@ describe('reel pipeline baseline utilities', () => {
         },
       }),
     ).rejects.toThrow('Polling timed out after 100ms.');
+  });
+
+  it('waits for semantic indexing after legacy media completion', () => {
+    expect(
+      loadTest.isTerminalPipelineStatus({
+        status: 'COMPLETED',
+        indexStatus: 'PROCESSING',
+      }),
+    ).toBe(false);
+    expect(
+      loadTest.isTerminalPipelineStatus({
+        status: 'COMPLETED',
+        indexStatus: 'COMPLETED',
+      }),
+    ).toBe(true);
   });
 });

@@ -218,6 +218,22 @@ describe('Phase 4 resumable audio transcription', () => {
     );
   });
 
+  it('preserves an RPC error message instead of stringifying it as an object', async () => {
+    const { useCase, ai, checkpoints } = setup([
+      { ...completedSegment(0, ''), status: 'PENDING', attemptCount: 0 },
+    ]);
+    ai.transcribeAudioKey.mockRejectedValue({
+      message: 'provider unavailable',
+    });
+
+    await expect(useCase.execute(job)).rejects.toThrow(
+      'Audio segment 0 failed: provider unavailable',
+    );
+    expect(checkpoints.failAudioSegment).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'provider unavailable' }),
+    );
+  });
+
   it('resumes a long transcript after restart without resending successful segments', async () => {
     const { useCase, ai } = setup([
       completedSegment(0, 'checkpointed'),

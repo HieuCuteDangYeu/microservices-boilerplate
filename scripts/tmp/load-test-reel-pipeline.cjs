@@ -3,6 +3,13 @@ const path = require('node:path');
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED']);
+const TERMINAL_INDEX_STATUSES = new Set(['COMPLETED', 'DEGRADED', 'FAILED']);
+
+function isTerminalPipelineStatus(status) {
+  if (!TERMINAL_STATUSES.has(status.status)) return false;
+  if (status.status === 'FAILED' || !status.indexStatus) return true;
+  return TERMINAL_INDEX_STATUSES.has(status.indexStatus);
+}
 
 function parsePositiveInteger(value, fallback, name) {
   const parsed = value === undefined || value === '' ? fallback : Number(value);
@@ -17,7 +24,11 @@ function parsePositiveInteger(value, fallback, name) {
 function parseLoadTestConfig(env = process.env, pathExists = fs.existsSync) {
   const apiUrl = env.REEL_LOAD_TEST_API_URL?.trim().replace(/\/+$/, '');
   const token = env.REEL_LOAD_TEST_TOKEN?.trim();
+  const refreshToken = env.REEL_LOAD_TEST_REFRESH_TOKEN?.trim();
   const fixture = env.REEL_LOAD_TEST_FIXTURE?.trim();
+  const titlePrefix =
+    env.REEL_LOAD_TEST_TITLE_PREFIX?.trim() || 'Phase 0 pipeline baseline';
+  const tag = env.REEL_LOAD_TEST_TAG?.trim() || 'phase-0-baseline';
 
   if (!apiUrl) {
     throw new Error('REEL_LOAD_TEST_API_URL is required.');
@@ -77,11 +88,14 @@ function parseLoadTestConfig(env = process.env, pathExists = fs.existsSync) {
   return {
     apiUrl,
     token,
+    ...(refreshToken ? { refreshToken } : {}),
     fixture,
     total,
     concurrency,
     timeoutMs,
     clientObservedDurationMs,
+    titlePrefix,
+    tag,
   };
 }
 
@@ -126,7 +140,7 @@ async function pollForTerminalStatus(options) {
   while (now() - startedAt < timeoutMs) {
     const status = await requestStatus();
 
-    if (TERMINAL_STATUSES.has(status.status)) {
+    if (isTerminalPipelineStatus(status)) {
       return status;
     }
 
@@ -166,30 +180,88 @@ async function fetchJson(url, options, timeoutMs) {
       typeof body.message === 'string'
         ? body.message
         : `HTTP ${response.status}`;
-    throw new Error(`${response.status} ${response.statusText}: ${message}`);
+    const error = new Error(
+      `${response.status} ${response.statusText}: ${message}`,
+    );
+    error.status = response.status;
+    throw error;
   }
 
   return body;
 }
 
+function extractCookie(headers, name) {
+  const prefix = `${name}=`;
+  for (const header of headers.getSetCookie()) {
+    const value = header
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(prefix));
+    if (value) return value.slice(prefix.length);
+  }
+  return undefined;
+}
+
+function createAuthenticatedJsonFetcher(config) {
+  let accessToken = config.token;
+  let refreshToken = config.refreshToken;
+
+  const request = (url, options) =>
+    fetchJson(
+      url,
+      {
+        ...options,
+        headers: {
+          ...options?.headers,
+          authorization: `Bearer ${accessToken}`,
+        },
+      },
+      config.timeoutMs,
+    );
+
+  return async (url, options) => {
+    try {
+      return await request(url, options);
+    } catch (error) {
+      if (error?.status !== 401 || !refreshToken) throw error;
+
+      const response = await fetch(`${config.apiUrl}/auth/refresh`, {
+        method: 'POST',
+        headers: { cookie: `refresh_token=${refreshToken}` },
+        signal: AbortSignal.timeout(config.timeoutMs),
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Token refresh failed: ${response.status} ${response.statusText}`,
+        );
+      }
+      accessToken = extractCookie(response.headers, 'access_token');
+      refreshToken =
+        extractCookie(response.headers, 'refresh_token') ?? refreshToken;
+      if (!accessToken) {
+        throw new Error('Token refresh did not return an access token.');
+      }
+      return await request(url, options);
+    }
+  };
+}
+
 async function runOne(config, index) {
-  const authorization = `Bearer ${config.token}`;
+  const fetchAuthenticatedJson = createAuthenticatedJsonFetcher(config);
   const fileType = inferMimeType(config.fixture);
   const fixtureBytes = fs.statSync(config.fixture).size;
   const startedAt = Date.now();
 
   const uploadUrlStartedAt = Date.now();
-  const uploadTarget = await fetchJson(
+  const uploadTarget = await fetchAuthenticatedJson(
     `${config.apiUrl}/media/upload-url`,
     {
       method: 'POST',
       headers: {
-        authorization,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ fileType, purpose: 'reel' }),
     },
-    config.timeoutMs,
   );
   const uploadUrlDurationMs = Date.now() - uploadUrlStartedAt;
 
@@ -213,45 +285,49 @@ async function runOne(config, index) {
 
   const uploadDurationMs = Date.now() - uploadStartedAt;
   const createStartedAt = Date.now();
-  const reel = await fetchJson(
+  const reel = await fetchAuthenticatedJson(
     `${config.apiUrl}/content/reels`,
     {
       method: 'POST',
       headers: {
-        authorization,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
         mediaKey: uploadTarget.key,
-        title: `Phase 0 pipeline baseline ${index + 1}`,
-        tags: ['phase-0-baseline'],
+        title: `${config.titlePrefix} ${index + 1}`,
+        tags: [config.tag],
         visibility: 'private',
         ...(config.clientObservedDurationMs
           ? { clientObservedDurationMs: config.clientObservedDurationMs }
           : {}),
       }),
     },
-    config.timeoutMs,
   );
   const createDurationMs = Date.now() - createStartedAt;
   const processingStartedAt = Date.now();
   const status = await pollForTerminalStatus({
     timeoutMs: config.timeoutMs,
     requestStatus: () =>
-      fetchJson(
+      fetchAuthenticatedJson(
         `${config.apiUrl}/content/reels/${reel.id}/status`,
-        {
-          headers: { authorization },
-        },
-        config.timeoutMs,
+        {},
       ),
   });
+
+  const pipelineStatus =
+    status.mediaStatus === 'FAILED' || status.indexStatus === 'FAILED'
+      ? 'FAILED'
+      : status.indexStatus === 'DEGRADED'
+        ? 'DEGRADED'
+        : status.status;
 
   return {
     index,
     reelId: reel.id,
     mediaKey: uploadTarget.key,
-    status: status.status,
+    status: pipelineStatus,
+    mediaStatus: status.mediaStatus,
+    indexStatus: status.indexStatus,
     stage: status.stage,
     message: status.message,
     uploadUrlDurationMs,
@@ -301,6 +377,7 @@ async function main() {
   );
   const completed = results.filter((result) => result.status === 'COMPLETED');
   const failed = results.filter((result) => result.status === 'FAILED');
+  const degraded = results.filter((result) => result.status === 'DEGRADED');
   const errors = results.filter((result) => result.status === 'ERROR');
 
   process.stdout.write(
@@ -312,6 +389,7 @@ async function main() {
         concurrency: config.concurrency,
         completed: completed.length,
         failed: failed.length,
+        degraded: degraded.length,
         errors: errors.length,
         processingDurationMs: calculatePercentiles(
           results.map((result) => result.processingDurationMs),
@@ -326,13 +404,16 @@ async function main() {
     )}\n`,
   );
 
-  if (errors.length > 0) {
+  if (errors.length > 0 || failed.length > 0 || degraded.length > 0) {
     process.exitCode = 1;
   }
 }
 
 module.exports = {
   calculatePercentiles,
+  createAuthenticatedJsonFetcher,
+  extractCookie,
+  isTerminalPipelineStatus,
   parseLoadTestConfig,
   pollForTerminalStatus,
   runWithConcurrency,

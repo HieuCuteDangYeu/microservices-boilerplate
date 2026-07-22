@@ -94,7 +94,7 @@ export class TranscribeAudioManifestUseCase {
         });
         return;
       } catch (error: unknown) {
-        lastError = error instanceof Error ? error.message : String(error);
+        lastError = this.describeError(error);
         await this.checkpoints.failAudioSegment({
           indexAttemptId: job.indexAttemptId,
           segmentNumber: segment.segmentNumber,
@@ -113,6 +113,19 @@ export class TranscribeAudioManifestUseCase {
       .map((value) => value?.trim())
       .filter((value): value is string => Boolean(value));
     return values.length > 0 ? values.join('. ').slice(0, 1000) : undefined;
+  }
+
+  private describeError(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'message' in error &&
+      typeof error.message === 'string'
+    ) {
+      return error.message;
+    }
+    return String(error);
   }
 
   private async mapWithConcurrency<T>(

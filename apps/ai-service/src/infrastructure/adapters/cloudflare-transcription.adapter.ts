@@ -98,10 +98,6 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
       payload.result.text?.trim() ||
       payload.result.transcription_info?.text?.trim();
 
-    if (!text) {
-      throw new Error('Cloudflare Workers AI transcription returned no text');
-    }
-
     const vtt = payload.result.vtt?.trim() || undefined;
     const segments = this.normalizeSegments(payload.result.segments);
     const wordCount =
@@ -110,7 +106,9 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
       undefined;
 
     return {
-      text,
+      // A successful empty transcript is valid for silence, music, and other
+      // clips without speech. The indexing pipeline can still index metadata.
+      text: text ?? '',
       vtt,
       segments: segments.length > 0 ? segments : undefined,
       wordCount,
