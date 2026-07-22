@@ -70,32 +70,35 @@ enum ReelEventSource {
 }
 
 model Reel {
-  id                    String           @id @default(uuid())
-  userId                String
-  mediaKey              String
-  title                 String?
-  description           String?
-  tags                  String[]
-  status                ProcessingStatus @default(PENDING)
-  mediaStatus           ReelMediaStatus  @default(PENDING)
-  indexStatus           ReelIndexStatus  @default(NOT_REQUESTED)
-  visibility            String           @default("public")
-  viewCount             BigInt           @default(0)
-  transcript            String?          @db.Text
-  transcriptVtt         String?          @db.Text
-  transcriptSegments    Json?
-  thumbnailKey          String?
-  processingStage       String?
-  processingMessage     String?          @db.Text
-  processingProgress    Int?
-  processingAttemptId   String?
-  processingStartedAt   DateTime?
-  processingFailedAt    DateTime?
-  processingCompletedAt DateTime?
-  processingErrorCode   String?
-  processingErrorDetail String?          @db.Text
-  mediaAttemptId        String?
-  indexAttemptId        String?
+  id                            String           @id @default(uuid())
+  userId                        String
+  mediaKey                      String
+  title                         String?
+  description                   String?
+  tags                          String[]
+  status                        ProcessingStatus @default(PENDING)
+  mediaStatus                   ReelMediaStatus  @default(PENDING)
+  indexStatus                   ReelIndexStatus  @default(NOT_REQUESTED)
+  visibility                    String           @default("public")
+  viewCount                     BigInt           @default(0)
+  transcript                    String?          @db.Text
+  transcriptVtt                 String?          @db.Text
+  transcriptSegments            Json?
+  thumbnailKey                  String?
+  hlsMasterKey                  String?
+  transcriptionAudioManifestKey String?
+  mediaOutput                   Json?
+  processingStage               String?
+  processingMessage             String?          @db.Text
+  processingProgress            Int?
+  processingAttemptId           String?
+  processingStartedAt           DateTime?
+  processingFailedAt            DateTime?
+  processingCompletedAt         DateTime?
+  processingErrorCode           String?
+  processingErrorDetail         String?          @db.Text
+  mediaAttemptId                String?
+  indexAttemptId                String?
 
   sourceDurationMs      Int?
   sourceWidth           Int?

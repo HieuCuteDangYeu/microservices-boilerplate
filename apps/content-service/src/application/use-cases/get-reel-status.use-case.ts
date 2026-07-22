@@ -30,6 +30,7 @@ export class GetReelStatusUseCase {
       message: reel.processingMessage,
       progress: reel.processingProgress,
       mediaKey: reel.mediaKey,
+      hlsMasterKey: reel.hlsMasterKey,
       thumbnailKey: reel.thumbnailKey,
     };
   }

@@ -76,7 +76,9 @@ export class PublicReelShareController {
         thumbnailUrl: result.reel.thumbnailKey
           ? `${this.cdnDomain}/${result.reel.thumbnailKey}`
           : undefined,
-        streamUrl: this.buildStreamUrl(result.reel.mediaKey),
+        streamUrl: this.buildStreamUrl(
+          result.reel.hlsMasterKey ?? result.reel.mediaKey,
+        ),
         createdAt: result.reel.createdAt,
       },
     };
@@ -91,6 +93,10 @@ export class PublicReelShareController {
   }
 
   private buildStreamUrl(mediaKey: string): string {
+    if (mediaKey.endsWith('.m3u8')) {
+      return `${this.cdnDomain}/${mediaKey.replace(/^\/+/, '')}`;
+    }
+
     const extIndex = mediaKey.lastIndexOf('.');
     const folderPath =
       extIndex !== -1 ? mediaKey.substring(0, extIndex) : mediaKey;

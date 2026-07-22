@@ -1,5 +1,6 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import { OutboxEvent } from '@content/domain/entities/outbox-event.entity';
@@ -80,6 +81,9 @@ export class ContentRepository
     visibility: true,
     viewCount: true,
     thumbnailKey: true,
+    hlsMasterKey: true,
+    transcriptionAudioManifestKey: true,
+    mediaOutput: true,
     processingStage: true,
     processingMessage: true,
     processingProgress: true,
@@ -217,6 +221,11 @@ export class ContentRepository
     reel.transcriptSegments =
       (record['transcriptSegments'] as TranscriptSegment[] | null) ?? undefined;
     reel.thumbnailKey = (record['thumbnailKey'] as string | null) ?? undefined;
+    reel.hlsMasterKey = (record['hlsMasterKey'] as string | null) ?? undefined;
+    reel.transcriptionAudioManifestKey =
+      (record['transcriptionAudioManifestKey'] as string | null) ?? undefined;
+    reel.mediaOutput =
+      (record['mediaOutput'] as ReelMediaOutput | null) ?? undefined;
     reel.processingStage =
       (record['processingStage'] as string | null) ?? undefined;
     reel.processingMessage =
@@ -445,8 +454,8 @@ export class ContentRepository
   async completeMediaProcessing(input: {
     reelId: string;
     mediaAttemptId: string;
-    thumbnailKey: string;
     mediaMetadata: ReelProcessingMediaMetadata;
+    mediaOutput: ReelMediaOutput;
   }): Promise<boolean> {
     const result = await this.reel.updateMany({
       where: {
@@ -458,7 +467,11 @@ export class ContentRepository
         status: 'COMPLETED',
         mediaStatus: 'COMPLETED',
         indexStatus: 'PENDING',
-        thumbnailKey: input.thumbnailKey,
+        thumbnailKey: input.mediaOutput.thumbnailKey,
+        hlsMasterKey: input.mediaOutput.hlsMasterKey,
+        transcriptionAudioManifestKey:
+          input.mediaOutput.transcriptionAudioManifestKey,
+        mediaOutput: input.mediaOutput as unknown as Prisma.InputJsonValue,
         processingStage: 'MEDIA_READY',
         processingMessage: 'Video is ready; indexing in progress',
         processingProgress: 90,

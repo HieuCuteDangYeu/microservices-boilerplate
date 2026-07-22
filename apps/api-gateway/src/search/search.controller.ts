@@ -157,7 +157,7 @@ export class SearchController {
   }
 
   private enrichReel(reel: SearchableReel): Omit<ReelFeedListItem, 'author'> {
-    const streamUrl = this.buildStreamUrl(reel.mediaKey);
+    const streamUrl = this.buildStreamUrl(reel.hlsMasterKey ?? reel.mediaKey);
     const thumbnailUrl = reel.thumbnailKey
       ? `${this.cdnDomain}/${reel.thumbnailKey}`
       : undefined;
@@ -171,6 +171,7 @@ export class SearchController {
       id: reel.id,
       userId: reel.userId,
       mediaKey: reel.mediaKey,
+      hlsMasterKey: reel.hlsMasterKey,
       title: reel.title,
       description: reel.description,
       tags: reel.tags,
@@ -198,6 +199,10 @@ export class SearchController {
   }
 
   private buildStreamUrl(mediaKey: string): string {
+    if (mediaKey.endsWith('.m3u8')) {
+      return `${this.cdnDomain}/${mediaKey.replace(/^\/+/, '')}`;
+    }
+
     const extIndex = mediaKey.lastIndexOf('.');
     const folderPath =
       extIndex !== -1 ? mediaKey.substring(0, extIndex) : mediaKey;

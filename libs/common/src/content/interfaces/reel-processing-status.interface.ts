@@ -16,5 +16,6 @@ export interface ReelProcessingStatus {
   message?: string;
   progress?: number;
   mediaKey?: string;
+  hlsMasterKey?: string;
   thumbnailKey?: string;
 }

@@ -394,13 +394,15 @@ export class ContentController {
       message: status.message,
       progress: status.progress,
       mediaKey: status.mediaKey,
+      hlsMasterKey: status.hlsMasterKey,
       thumbnailKey: status.thumbnailKey,
       thumbnailUrl: status.thumbnailKey
         ? `${this.cdnDomain}/${status.thumbnailKey}`
         : undefined,
-      streamUrl: status.mediaKey
-        ? this.buildStreamUrl(status.mediaKey)
-        : undefined,
+      streamUrl:
+        status.hlsMasterKey || status.mediaKey
+          ? this.buildStreamUrl(status.hlsMasterKey ?? status.mediaKey!)
+          : undefined,
     };
   }
 
@@ -536,7 +538,7 @@ export class ContentController {
     reel: Reel,
     opts: { includeTranscript?: boolean } = {},
   ): ReelListItem | ReelDetail {
-    const streamUrl = this.buildStreamUrl(reel.mediaKey);
+    const streamUrl = this.buildStreamUrl(reel.hlsMasterKey ?? reel.mediaKey);
     const thumbnailUrl = reel.thumbnailKey
       ? `${this.cdnDomain}/${reel.thumbnailKey}`
       : undefined;
@@ -549,6 +551,7 @@ export class ContentController {
       id: reel.id,
       userId: reel.userId,
       mediaKey: reel.mediaKey,
+      hlsMasterKey: reel.hlsMasterKey,
       title: reel.title,
       description: reel.description,
       tags: reel.tags,
@@ -599,6 +602,10 @@ export class ContentController {
   }
 
   private buildStreamUrl(mediaKey: string): string {
+    if (mediaKey.endsWith('.m3u8')) {
+      return `${this.cdnDomain}/${mediaKey.replace(/^\/+/, '')}`;
+    }
+
     const extIndex = mediaKey.lastIndexOf('.');
     const folderPath =
       extIndex !== -1 ? mediaKey.substring(0, extIndex) : mediaKey;

@@ -31,8 +31,23 @@ describe('ContentRepository Phase 2 state guards', () => {
       repository.completeMediaProcessing({
         reelId: 'reel-1',
         mediaAttemptId: 'stale-media-attempt',
-        thumbnailKey: 'reels/reel-1/thumbnail.jpg',
         mediaMetadata: {},
+        mediaOutput: {
+          hlsMasterKey: 'reels/reel-1/hls/master.m3u8',
+          thumbnailKey: 'reels/reel-1/thumbnail.jpg',
+          transcriptionAudioManifestKey:
+            'reels/reel-1/transcription/attempt/manifest.json',
+          sourceLengthClass: 'SHORT',
+          variants: [],
+          hlsObjectCount: 1,
+          hlsTotalBytes: 1,
+          checksums: {
+            sourceSha256: 'source',
+            hlsMasterSha256: 'master',
+            thumbnailSha256: 'thumbnail',
+            transcriptionAudioManifestSha256: 'manifest',
+          },
+        },
       }),
     ).resolves.toBe(false);
 

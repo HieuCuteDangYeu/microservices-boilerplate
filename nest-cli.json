@@ -128,14 +128,14 @@
         "webpack": false
       }
     },
-    "processing-service": {
+    "media-processing-service": {
       "type": "application",
-      "root": "apps/processing-service",
+      "root": "apps/media-processing-service",
       "entryFile": "main",
-      "sourceRoot": "apps/processing-service/src",
+      "sourceRoot": "apps/media-processing-service/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/processing-service/tsconfig.app.json",
-        "webpack": false
+        "tsConfigPath": "apps/media-processing-service/tsconfig.app.json",
+        "webpack": true
       }
     },
     "user-service": {

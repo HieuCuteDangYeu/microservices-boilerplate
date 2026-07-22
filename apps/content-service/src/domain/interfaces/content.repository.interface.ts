@@ -9,6 +9,7 @@ import type {
   ReelSourceOrientation,
 } from '@common/content/interfaces/reel-state.interface';
 import type { ReelMediaJob } from '@common/processing/interfaces/reel-media-job.interface';
+import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
 import {
   SearchSuggestionItem,
   SearchSuggestionType,
@@ -25,6 +26,11 @@ export interface ReelProcessingMediaMetadata {
   sourceBitrateKbps?: number;
   sourceHasAudio?: boolean;
   sourceRotation?: number;
+  sourceCodec?: string;
+  sourcePixelFormat?: string;
+  sourceAudioCodec?: string;
+  sourceFileSizeBytes?: number;
+  sourceVariableFrameRate?: boolean;
   sourceOrientation?: ReelSourceOrientation;
   sourceLengthClass?: ReelSourceLengthClass;
   sourceAspectRatio?: number;
@@ -201,8 +207,8 @@ export interface IContentRepository {
   completeMediaProcessing(input: {
     reelId: string;
     mediaAttemptId: string;
-    thumbnailKey: string;
     mediaMetadata: ReelProcessingMediaMetadata;
+    mediaOutput: ReelMediaOutput;
   }): Promise<boolean>;
 
   updateMediaStatus(input: {

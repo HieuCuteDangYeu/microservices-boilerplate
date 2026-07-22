@@ -8,6 +8,7 @@ import type {
 } from '@common/content/interfaces/reel-state.interface';
 import { ReelVisibility } from '@common/content/schemas/reel-visibility.schema';
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
+import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
 
 export class Reel {
   id: string;
@@ -25,6 +26,9 @@ export class Reel {
   transcriptVtt?: string;
   transcriptSegments?: TranscriptSegment[];
   thumbnailKey?: string;
+  hlsMasterKey?: string;
+  transcriptionAudioManifestKey?: string;
+  mediaOutput?: ReelMediaOutput;
   processingStage?: string;
   processingMessage?: string;
   processingProgress?: number;

@@ -22,6 +22,7 @@ export interface ReelListItem {
   id: string;
   userId: string;
   mediaKey: string;
+  hlsMasterKey?: string;
   title?: string;
   description?: string;
   tags: string[];

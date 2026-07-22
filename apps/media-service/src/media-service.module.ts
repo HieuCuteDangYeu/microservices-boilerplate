@@ -1,10 +1,9 @@
 import { FinalizeChatUploadUseCase } from '@media/application/use-cases/finalize-chat-upload.use-case';
 import { DeleteRecalledChatMediaUseCase } from '@media/application/use-cases/delete-recalled-chat-media.use-case';
-import { ProcessingServiceAdapter } from '@media/infrastructure/adapters/processing-service.adapter';
+import { MediaProcessingAdapter } from '@media/infrastructure/adapters/media-processing.adapter';
 import { GetPresignedUrlUseCase } from '@media/application/use-cases/get-presigned-url.use-case';
 import { MediaController } from '@media/infrastructure/controllers/media.controller';
 import { S3Service } from '@media/infrastructure/services/s3.service';
-import { VideoProcessingService } from '@media/infrastructure/services/video-processing.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
@@ -17,7 +16,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     }),
     ClientsModule.registerAsync([
       {
-        name: 'PROCESSING_RMQ',
+        name: 'MEDIA_PROCESSING_RMQ',
         useFactory: (configService: ConfigService) => {
           const heartbeat = Number(
             configService.get<string>('RABBITMQ_HEARTBEAT_SECONDS') ?? '300',
@@ -49,10 +48,9 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     DeleteRecalledChatMediaUseCase,
     GetPresignedUrlUseCase,
     S3Service,
-    VideoProcessingService,
     {
       provide: 'IVideoProcessingQueue',
-      useClass: ProcessingServiceAdapter,
+      useClass: MediaProcessingAdapter,
     },
   ],
 })

@@ -72,11 +72,11 @@ services:
     networks:
       - microservices-net
 
-  processing-service:
-    image: ${DOCKERHUB_USERNAME}/processing-service:latest
+  media-processing-service:
+    image: ${DOCKERHUB_USERNAME}/media-processing-service:latest
     build:
       context: .
-      dockerfile: ./apps/processing-service/Dockerfile
+      dockerfile: ./apps/media-processing-service/Dockerfile
     restart: always
     env_file:
       - .env
@@ -89,8 +89,8 @@ services:
     networks:
       - microservices-net
 
-  processing-long-service:
-    image: ${DOCKERHUB_USERNAME}/processing-service:latest
+  media-processing-long-service:
+    image: ${DOCKERHUB_USERNAME}/media-processing-service:latest
     restart: always
     env_file:
       - .env

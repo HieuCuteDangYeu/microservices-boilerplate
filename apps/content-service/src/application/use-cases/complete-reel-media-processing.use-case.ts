@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
 import type {
   IContentRepository,
   ReelProcessingMediaMetadata,
@@ -14,13 +15,15 @@ export class CompleteReelMediaProcessingUseCase {
   async execute(input: {
     reelId: string;
     mediaAttemptId: string;
-    thumbnailKey: string;
     mediaMetadata: ReelProcessingMediaMetadata;
+    mediaOutput: ReelMediaOutput;
   }): Promise<boolean> {
     if (
       !input.reelId.trim() ||
       !input.mediaAttemptId.trim() ||
-      !input.thumbnailKey.trim()
+      !input.mediaOutput.thumbnailKey.trim() ||
+      !input.mediaOutput.hlsMasterKey.trim() ||
+      !input.mediaOutput.transcriptionAudioManifestKey.trim()
     ) {
       return false;
     }

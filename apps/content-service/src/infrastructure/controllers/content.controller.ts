@@ -3,6 +3,7 @@ import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { TrackReelEventPayload } from '@common/content/dtos/track-reel-events.dto';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
+import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
@@ -94,6 +95,8 @@ export class ContentController {
       visibility: reel.visibility,
       viewCount: Number(reel.viewCount),
       thumbnailKey: reel.thumbnailKey,
+      hlsMasterKey: reel.hlsMasterKey,
+      transcriptionAudioManifestKey: reel.transcriptionAudioManifestKey,
       processingStage: reel.processingStage,
       processingMessage: reel.processingMessage,
       processingProgress: reel.processingProgress,
@@ -165,6 +168,7 @@ export class ContentController {
       indexStatus: reel.indexStatus,
       visibility: reel.visibility,
       thumbnailKey: reel.thumbnailKey,
+      hlsMasterKey: reel.hlsMasterKey,
       createdAt: reel.createdAt,
       updatedAt: reel.updatedAt,
     };
@@ -361,15 +365,15 @@ export class ContentController {
     data: {
       reelId: string;
       processingAttemptId: string;
-      thumbnailKey: string;
       mediaMetadata: ReelProcessingMediaMetadata;
+      mediaOutput: ReelMediaOutput;
     },
   ) {
     const applied = await this.completeReelMediaProcessingUseCase.execute({
       reelId: data.reelId,
       mediaAttemptId: data.processingAttemptId,
-      thumbnailKey: data.thumbnailKey,
       mediaMetadata: data.mediaMetadata,
+      mediaOutput: data.mediaOutput,
     });
 
     return { persisted: true, applied };

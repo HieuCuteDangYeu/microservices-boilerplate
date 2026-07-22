@@ -47,7 +47,7 @@ jobs:
             mail-service
             conversation-service
             content-service
-            processing-service
+            media-processing-service
             ai-service
             call-service
             monitoring-service
