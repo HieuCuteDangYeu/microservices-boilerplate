@@ -165,7 +165,7 @@ export class PrepareReelMediaUseCase {
         throw error;
       }
 
-      mediaMetadata = this.toSourceMetadata(sourceMetadata);
+      mediaMetadata = this.toSourceMetadata(sourceMetadata, classification);
 
       const validationTimer = this.processingMetrics.startStage(
         data.metricsContext,
@@ -429,6 +429,7 @@ export class PrepareReelMediaUseCase {
 
   private toSourceMetadata(
     metadata: VideoMetadata,
+    classification: ReelMediaClassification,
   ): ReelProcessingMediaMetadata {
     return {
       sourceDurationMs: metadata.durationMs,
@@ -438,6 +439,15 @@ export class PrepareReelMediaUseCase {
       sourceBitrateKbps: metadata.bitrateKbps,
       sourceHasAudio: metadata.hasAudio,
       sourceRotation: metadata.rotation,
+      ...(classification.orientation !== 'UNKNOWN'
+        ? { sourceOrientation: classification.orientation }
+        : {}),
+      ...(classification.mediaClass !== 'UNKNOWN'
+        ? { sourceLengthClass: classification.mediaClass }
+        : {}),
+      sourceAspectRatio: classification.aspectRatio,
+      sourceEffectiveWidth: classification.effectiveWidth,
+      sourceEffectiveHeight: classification.effectiveHeight,
     };
   }
 

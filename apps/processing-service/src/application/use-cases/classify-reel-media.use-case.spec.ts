@@ -15,7 +15,6 @@ describe('ClassifyReelMediaUseCase', () => {
     [1920, 1080, 0, 'LANDSCAPE'],
     [1080, 1920, 0, 'PORTRAIT'],
     [1080, 1080, 0, 'SQUARE'],
-    [1920, 1080, 90, 'PORTRAIT'],
   ] as const)(
     'classifies %sx%s rotation %s as %s',
     (width, height, rotation, expected) => {
@@ -25,13 +24,36 @@ describe('ClassifyReelMediaUseCase', () => {
     },
   );
 
-  it('classifies duration above the short boundary as long', () => {
+  it('uses rotation-adjusted dimensions and ratio', () => {
     expect(
       useCase.execute({
         width: 1920,
         height: 1080,
-        durationMs: 180_001,
+        rotation: 90,
+        durationMs: 30_000,
       }),
-    ).toMatchObject({ mediaClass: 'LONG' });
+    ).toEqual({
+      orientation: 'PORTRAIT',
+      mediaClass: 'SHORT',
+      effectiveWidth: 1080,
+      effectiveHeight: 1920,
+      aspectRatio: 0.5625,
+    });
   });
+
+  it.each([
+    [180_000, 'SHORT'],
+    [180_001, 'LONG'],
+  ] as const)(
+    'classifies duration %sms as %s at the short/long boundary',
+    (durationMs, expected) => {
+      expect(
+        useCase.execute({
+          width: 1920,
+          height: 1080,
+          durationMs,
+        }),
+      ).toMatchObject({ mediaClass: expected });
+    },
+  );
 });

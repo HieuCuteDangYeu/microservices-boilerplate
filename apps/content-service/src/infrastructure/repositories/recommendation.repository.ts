@@ -7,6 +7,7 @@ import type {
   RecommendationReelEngagement,
 } from '@content/domain/interfaces/recommendation.interface';
 import type { IRecommendationRepository } from '@content/domain/interfaces/recommendation.repository.interface';
+import { mapReelLegacyStatus } from '@content/domain/reel-status-compatibility.mapper';
 import { PrismaService } from '@content/infrastructure/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/content-client';
@@ -19,6 +20,8 @@ const REEL_SELECT = {
   description: true,
   tags: true,
   status: true,
+  mediaStatus: true,
+  indexStatus: true,
   visibility: true,
   viewCount: true,
   thumbnailKey: true,
@@ -31,6 +34,8 @@ const REEL_SELECT = {
   processingCompletedAt: true,
   processingErrorCode: true,
   processingErrorDetail: true,
+  mediaAttemptId: true,
+  indexAttemptId: true,
   sourceDurationMs: true,
   sourceWidth: true,
   sourceHeight: true,
@@ -38,6 +43,11 @@ const REEL_SELECT = {
   sourceBitrateKbps: true,
   sourceHasAudio: true,
   sourceRotation: true,
+  sourceOrientation: true,
+  sourceLengthClass: true,
+  sourceAspectRatio: true,
+  sourceEffectiveWidth: true,
+  sourceEffectiveHeight: true,
   encodedVariantCount: true,
   encodedMaxHeight: true,
   encodedFps: true,
@@ -548,7 +558,7 @@ export class RecommendationRepository implements IRecommendationRepository {
         id: {
           in: reelIds,
         },
-        status: 'COMPLETED',
+        mediaStatus: 'COMPLETED',
         visibility: 'public',
         ...(excludedUserIds.length > 0
           ? {
@@ -958,7 +968,7 @@ export class RecommendationRepository implements IRecommendationRepository {
     query: RecommendationCandidateQuery,
   ): Prisma.ReelWhereInput {
     return {
-      status: 'COMPLETED',
+      mediaStatus: 'COMPLETED',
       visibility: 'public',
       ...(query.excludedUserIds.length > 0
         ? {
@@ -1263,7 +1273,12 @@ export class RecommendationRepository implements IRecommendationRepository {
       title: record.title ?? undefined,
       description: record.description ?? undefined,
       tags: record.tags ?? [],
-      status: record.status,
+      status: mapReelLegacyStatus({
+        mediaStatus: record.mediaStatus,
+        indexStatus: record.indexStatus,
+      }),
+      mediaStatus: record.mediaStatus,
+      indexStatus: record.indexStatus,
       visibility: record.visibility as Reel['visibility'],
       viewCount: record.viewCount,
       thumbnailKey: record.thumbnailKey ?? undefined,
@@ -1276,6 +1291,8 @@ export class RecommendationRepository implements IRecommendationRepository {
       processingCompletedAt: record.processingCompletedAt ?? undefined,
       processingErrorCode: record.processingErrorCode ?? undefined,
       processingErrorDetail: record.processingErrorDetail ?? undefined,
+      mediaAttemptId: record.mediaAttemptId ?? undefined,
+      indexAttemptId: record.indexAttemptId ?? undefined,
       sourceDurationMs: record.sourceDurationMs ?? undefined,
       sourceWidth: record.sourceWidth ?? undefined,
       sourceHeight: record.sourceHeight ?? undefined,
@@ -1283,6 +1300,11 @@ export class RecommendationRepository implements IRecommendationRepository {
       sourceBitrateKbps: record.sourceBitrateKbps ?? undefined,
       sourceHasAudio: record.sourceHasAudio ?? undefined,
       sourceRotation: record.sourceRotation ?? undefined,
+      sourceOrientation: record.sourceOrientation ?? undefined,
+      sourceLengthClass: record.sourceLengthClass ?? undefined,
+      sourceAspectRatio: record.sourceAspectRatio ?? undefined,
+      sourceEffectiveWidth: record.sourceEffectiveWidth ?? undefined,
+      sourceEffectiveHeight: record.sourceEffectiveHeight ?? undefined,
       encodedVariantCount: record.encodedVariantCount ?? undefined,
       encodedMaxHeight: record.encodedMaxHeight ?? undefined,
       encodedFps: record.encodedFps ?? undefined,

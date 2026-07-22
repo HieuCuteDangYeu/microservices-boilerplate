@@ -175,6 +175,8 @@ export class SearchController {
       description: reel.description,
       tags: reel.tags,
       status: reel.status,
+      mediaStatus: reel.mediaStatus,
+      indexStatus: reel.indexStatus,
       visibility: reel.visibility,
       viewCount:
         typeof reel.viewCount === 'bigint'
@@ -185,6 +187,11 @@ export class SearchController {
       processingStage: reel.processingStage,
       processingMessage: reel.processingMessage,
       processingProgress: reel.processingProgress,
+      sourceOrientation: reel.sourceOrientation,
+      sourceLengthClass: reel.sourceLengthClass,
+      sourceAspectRatio: reel.sourceAspectRatio,
+      sourceEffectiveWidth: reel.sourceEffectiveWidth,
+      sourceEffectiveHeight: reel.sourceEffectiveHeight,
       streamUrl,
       createdAt,
     };

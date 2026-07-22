@@ -203,4 +203,28 @@ export class ContentServiceAdapter implements IContentService {
       );
     }
   }
+
+  async persistMediaCompleted(data: {
+    reelId: string;
+    processingAttemptId: string;
+    thumbnailKey: string;
+    mediaMetadata: ReelProcessingMediaMetadata;
+  }): Promise<boolean> {
+    try {
+      const response = await firstValueFrom(
+        this.messageBroker
+          .send<{
+            persisted: true;
+            applied: boolean;
+          }>('content.persist_reel_media_completed', data)
+          .pipe(timeout(30_000)),
+      );
+
+      return response.applied;
+    } catch (error: unknown) {
+      throw new Error(
+        `Failed to persist media completion: ${this.describeError(error)}`,
+      );
+    }
+  }
 }

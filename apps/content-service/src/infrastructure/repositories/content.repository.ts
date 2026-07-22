@@ -11,6 +11,7 @@ import {
   PersistReelViewEventsResult,
 } from '@content/domain/interfaces/reel-view-event.repository.interface';
 import type { IOutboxRepository } from '@content/domain/interfaces/outbox.repository.interface';
+import { mapReelLegacyStatus } from '@content/domain/reel-status-compatibility.mapper';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/content-client';
@@ -74,6 +75,8 @@ export class ContentRepository
     description: true,
     tags: true,
     status: true,
+    mediaStatus: true,
+    indexStatus: true,
     visibility: true,
     viewCount: true,
     thumbnailKey: true,
@@ -86,6 +89,8 @@ export class ContentRepository
     processingCompletedAt: true,
     processingErrorCode: true,
     processingErrorDetail: true,
+    mediaAttemptId: true,
+    indexAttemptId: true,
     sourceDurationMs: true,
     sourceWidth: true,
     sourceHeight: true,
@@ -93,6 +98,11 @@ export class ContentRepository
     sourceBitrateKbps: true,
     sourceHasAudio: true,
     sourceRotation: true,
+    sourceOrientation: true,
+    sourceLengthClass: true,
+    sourceAspectRatio: true,
+    sourceEffectiveWidth: true,
+    sourceEffectiveHeight: true,
     encodedVariantCount: true,
     encodedMaxHeight: true,
     encodedFps: true,
@@ -182,7 +192,23 @@ export class ContentRepository
     reel.title = (record['title'] as string | null) ?? undefined;
     reel.description = (record['description'] as string | null) ?? undefined;
     reel.tags = (record['tags'] as string[]) ?? [];
-    reel.status = record['status'] as Reel['status'];
+    const persistedLegacyStatus = record['status'] as Reel['status'];
+    reel.mediaStatus =
+      (record['mediaStatus'] as Reel['mediaStatus'] | undefined) ??
+      (persistedLegacyStatus === 'COMPLETED'
+        ? 'COMPLETED'
+        : persistedLegacyStatus === 'FAILED'
+          ? 'FAILED'
+          : persistedLegacyStatus === 'PROCESSING'
+            ? 'PROCESSING'
+            : 'PENDING');
+    reel.indexStatus =
+      (record['indexStatus'] as Reel['indexStatus'] | undefined) ??
+      (persistedLegacyStatus === 'COMPLETED' ? 'COMPLETED' : 'NOT_REQUESTED');
+    reel.status = mapReelLegacyStatus({
+      mediaStatus: reel.mediaStatus,
+      indexStatus: reel.indexStatus,
+    });
     reel.visibility = (record['visibility'] as Reel['visibility']) ?? 'public';
     reel.viewCount = record['viewCount'] as bigint;
     reel.transcript = (record['transcript'] as string | null) ?? undefined;
@@ -209,6 +235,10 @@ export class ContentRepository
       (record['processingErrorCode'] as string | null) ?? undefined;
     reel.processingErrorDetail =
       (record['processingErrorDetail'] as string | null) ?? undefined;
+    reel.mediaAttemptId =
+      (record['mediaAttemptId'] as string | null) ?? undefined;
+    reel.indexAttemptId =
+      (record['indexAttemptId'] as string | null) ?? undefined;
     reel.sourceDurationMs =
       (record['sourceDurationMs'] as number | null) ?? undefined;
     reel.sourceWidth = (record['sourceWidth'] as number | null) ?? undefined;
@@ -220,6 +250,18 @@ export class ContentRepository
       (record['sourceHasAudio'] as boolean | null) ?? undefined;
     reel.sourceRotation =
       (record['sourceRotation'] as number | null) ?? undefined;
+    reel.sourceOrientation =
+      (record['sourceOrientation'] as Reel['sourceOrientation'] | null) ??
+      undefined;
+    reel.sourceLengthClass =
+      (record['sourceLengthClass'] as Reel['sourceLengthClass'] | null) ??
+      undefined;
+    reel.sourceAspectRatio =
+      (record['sourceAspectRatio'] as number | null) ?? undefined;
+    reel.sourceEffectiveWidth =
+      (record['sourceEffectiveWidth'] as number | null) ?? undefined;
+    reel.sourceEffectiveHeight =
+      (record['sourceEffectiveHeight'] as number | null) ?? undefined;
     reel.encodedVariantCount =
       (record['encodedVariantCount'] as number | null) ?? undefined;
     reel.encodedMaxHeight =
@@ -229,6 +271,36 @@ export class ContentRepository
     reel.updatedAt = record['updatedAt'] as Date;
 
     return reel;
+  }
+
+  private toMediaMetadataData(
+    metadata: ReelProcessingMediaMetadata,
+  ): Record<string, unknown> {
+    const data: Record<string, unknown> = {};
+
+    for (const key of [
+      'sourceDurationMs',
+      'sourceWidth',
+      'sourceHeight',
+      'sourceFps',
+      'sourceBitrateKbps',
+      'sourceHasAudio',
+      'sourceRotation',
+      'sourceOrientation',
+      'sourceLengthClass',
+      'sourceAspectRatio',
+      'sourceEffectiveWidth',
+      'sourceEffectiveHeight',
+      'encodedVariantCount',
+      'encodedMaxHeight',
+      'encodedFps',
+    ] as const) {
+      if (metadata[key] !== undefined) {
+        data[key] = metadata[key];
+      }
+    }
+
+    return data;
   }
 
   async createReelWithMediaJob(
@@ -245,6 +317,8 @@ export class ContentRepository
           description: reel.description,
           tags: reel.tags || [],
           status: reel.status || 'PENDING',
+          mediaStatus: reel.mediaStatus || 'PENDING',
+          indexStatus: reel.indexStatus || 'NOT_REQUESTED',
           visibility: reel.visibility || 'public',
           processingStage: reel.processingStage,
           processingMessage: reel.processingMessage,
@@ -255,6 +329,8 @@ export class ContentRepository
           processingCompletedAt: reel.processingCompletedAt,
           processingErrorCode: reel.processingErrorCode,
           processingErrorDetail: reel.processingErrorDetail,
+          mediaAttemptId: reel.mediaAttemptId,
+          indexAttemptId: reel.indexAttemptId,
           sourceDurationMs: reel.sourceDurationMs,
           sourceWidth: reel.sourceWidth,
           sourceHeight: reel.sourceHeight,
@@ -262,6 +338,11 @@ export class ContentRepository
           sourceBitrateKbps: reel.sourceBitrateKbps,
           sourceHasAudio: reel.sourceHasAudio,
           sourceRotation: reel.sourceRotation,
+          sourceOrientation: reel.sourceOrientation,
+          sourceLengthClass: reel.sourceLengthClass,
+          sourceAspectRatio: reel.sourceAspectRatio,
+          sourceEffectiveWidth: reel.sourceEffectiveWidth,
+          sourceEffectiveHeight: reel.sourceEffectiveHeight,
           encodedVariantCount: reel.encodedVariantCount,
           encodedMaxHeight: reel.encodedMaxHeight,
           encodedFps: reel.encodedFps,
@@ -288,7 +369,8 @@ export class ContentRepository
 
   async queueReelProcessingAttemptWithMediaJob(
     reelId: string,
-    processingAttemptId: string,
+    mediaAttemptId: string,
+    indexAttemptId: string,
     outboxEvent: ReelMediaOutboxEventInput,
   ): Promise<Reel> {
     const record = await this.$transaction(async (transaction) => {
@@ -296,10 +378,14 @@ export class ContentRepository
         where: { id: reelId },
         data: {
           status: 'PENDING',
+          mediaStatus: 'PENDING',
+          indexStatus: 'NOT_REQUESTED',
           processingStage: 'QUEUED',
           processingMessage: 'Queued for processing',
           processingProgress: 0,
-          processingAttemptId,
+          processingAttemptId: mediaAttemptId,
+          mediaAttemptId,
+          indexAttemptId,
           processingStartedAt: null,
           processingFailedAt: null,
           processingCompletedAt: null,
@@ -334,13 +420,14 @@ export class ContentRepository
     const result = await this.reel.updateMany({
       where: {
         id: input.reelId,
-        processingAttemptId: input.processingAttemptId,
-        status: input.allowReclaim
+        mediaAttemptId: input.processingAttemptId,
+        mediaStatus: input.allowReclaim
           ? { in: ['PENDING', 'PROCESSING'] }
           : 'PENDING',
       },
       data: {
         status: 'PROCESSING',
+        mediaStatus: 'PROCESSING',
         processingStage: 'PROCESSING',
         processingMessage: 'Video is being processed',
         processingProgress: 10,
@@ -350,6 +437,88 @@ export class ContentRepository
         processingErrorCode: null,
         processingErrorDetail: null,
       },
+    });
+
+    return result.count > 0;
+  }
+
+  async completeMediaProcessing(input: {
+    reelId: string;
+    mediaAttemptId: string;
+    thumbnailKey: string;
+    mediaMetadata: ReelProcessingMediaMetadata;
+  }): Promise<boolean> {
+    const result = await this.reel.updateMany({
+      where: {
+        id: input.reelId,
+        mediaAttemptId: input.mediaAttemptId,
+        mediaStatus: { in: ['PROBING', 'PROCESSING'] },
+      },
+      data: {
+        status: 'COMPLETED',
+        mediaStatus: 'COMPLETED',
+        indexStatus: 'PENDING',
+        thumbnailKey: input.thumbnailKey,
+        processingStage: 'MEDIA_READY',
+        processingMessage: 'Video is ready; indexing in progress',
+        processingProgress: 90,
+        processingCompletedAt: new Date(),
+        processingFailedAt: null,
+        processingErrorCode: null,
+        processingErrorDetail: null,
+        ...this.toMediaMetadataData(input.mediaMetadata),
+      },
+    });
+
+    return result.count > 0;
+  }
+
+  async updateMediaStatus(input: {
+    reelId: string;
+    mediaAttemptId: string;
+    mediaStatus: Reel['mediaStatus'];
+  }): Promise<boolean> {
+    const current = await this.reel.findFirst({
+      where: {
+        id: input.reelId,
+        mediaAttemptId: input.mediaAttemptId,
+      },
+      select: { indexStatus: true },
+    });
+
+    if (!current) {
+      return false;
+    }
+
+    const result = await this.reel.updateMany({
+      where: {
+        id: input.reelId,
+        mediaAttemptId: input.mediaAttemptId,
+      },
+      data: {
+        mediaStatus: input.mediaStatus,
+        status: mapReelLegacyStatus({
+          mediaStatus: input.mediaStatus,
+          indexStatus: current.indexStatus,
+        }),
+      },
+    });
+
+    return result.count > 0;
+  }
+
+  async updateIndexStatus(input: {
+    reelId: string;
+    indexAttemptId: string;
+    indexStatus: Reel['indexStatus'];
+  }): Promise<boolean> {
+    const result = await this.reel.updateMany({
+      where: {
+        id: input.reelId,
+        indexAttemptId: input.indexAttemptId,
+        mediaStatus: 'COMPLETED',
+      },
+      data: { indexStatus: input.indexStatus },
     });
 
     return result.count > 0;
@@ -474,7 +643,21 @@ export class ContentRepository
   ): Promise<Reel> {
     const updatedRecord = await this.$transaction(async (tx) => {
       const now = new Date();
-      const data: Record<string, unknown> = { status };
+      const currentRecord = await tx.reel.findUnique({ where: { id } });
+
+      if (!currentRecord) {
+        throw new Error(`Reel ${id} not found`);
+      }
+
+      if (
+        expectedProcessingAttemptId?.trim() &&
+        currentRecord.mediaAttemptId !== expectedProcessingAttemptId
+      ) {
+        return currentRecord;
+      }
+
+      const data: Record<string, unknown> = {};
+      const isPostMediaUpdate = currentRecord.mediaStatus === 'COMPLETED';
 
       if (title !== undefined) data['title'] = title;
       if (description !== undefined) data['description'] = description;
@@ -501,14 +684,31 @@ export class ContentRepository
       }
 
       if (status === 'PROCESSING') {
-        data['processingStartedAt'] = now;
-        data['processingFailedAt'] = null;
-        data['processingCompletedAt'] = null;
-        data['processingErrorCode'] = null;
-        data['processingErrorDetail'] = null;
+        if (isPostMediaUpdate && processingStage === 'AI_ENRICHMENT') {
+          data['status'] = 'COMPLETED';
+          data['indexStatus'] = 'PROCESSING';
+        } else {
+          data['status'] = 'PROCESSING';
+          data['mediaStatus'] =
+            processingStage === 'PROBING_SOURCE' ? 'PROBING' : 'PROCESSING';
+          data['processingStartedAt'] = now;
+          data['processingFailedAt'] = null;
+          data['processingCompletedAt'] = null;
+          data['processingErrorCode'] = null;
+          data['processingErrorDetail'] = null;
+        }
+      }
+
+      if (status === 'PENDING') {
+        data['status'] = 'PENDING';
+        data['mediaStatus'] = 'PENDING';
       }
 
       if (status === 'COMPLETED') {
+        data['status'] = 'COMPLETED';
+        data['mediaStatus'] = 'COMPLETED';
+        data['indexStatus'] =
+          chunks && chunks.length > 0 ? 'COMPLETED' : 'DEGRADED';
         data['processingCompletedAt'] = now;
         data['processingFailedAt'] = null;
         data['processingErrorCode'] = null;
@@ -517,52 +717,28 @@ export class ContentRepository
       }
 
       if (status === 'FAILED') {
-        data['processingFailedAt'] = now;
-        data['processingErrorCode'] =
-          processingErrorCode ?? processingStage ?? 'FAILED';
-        data['processingErrorDetail'] = processingErrorDetail;
+        if (isPostMediaUpdate) {
+          data['status'] = 'COMPLETED';
+          data['indexStatus'] = 'FAILED';
+          data['processingStage'] = 'READY';
+          data['processingMessage'] = 'Video is ready to watch';
+          data['processingProgress'] = 100;
+          data['processingFailedAt'] = now;
+          data['processingErrorCode'] =
+            processingErrorCode ?? processingStage ?? 'INDEXING_FAILED';
+          data['processingErrorDetail'] = processingErrorDetail;
+        } else {
+          data['status'] = 'FAILED';
+          data['mediaStatus'] = 'FAILED';
+          data['processingFailedAt'] = now;
+          data['processingErrorCode'] =
+            processingErrorCode ?? processingStage ?? 'FAILED';
+          data['processingErrorDetail'] = processingErrorDetail;
+        }
       }
 
       if (mediaMetadata) {
-        if (mediaMetadata.sourceDurationMs !== undefined) {
-          data['sourceDurationMs'] = mediaMetadata.sourceDurationMs;
-        }
-
-        if (mediaMetadata.sourceWidth !== undefined) {
-          data['sourceWidth'] = mediaMetadata.sourceWidth;
-        }
-
-        if (mediaMetadata.sourceHeight !== undefined) {
-          data['sourceHeight'] = mediaMetadata.sourceHeight;
-        }
-
-        if (mediaMetadata.sourceFps !== undefined) {
-          data['sourceFps'] = mediaMetadata.sourceFps;
-        }
-
-        if (mediaMetadata.sourceBitrateKbps !== undefined) {
-          data['sourceBitrateKbps'] = mediaMetadata.sourceBitrateKbps;
-        }
-
-        if (mediaMetadata.sourceHasAudio !== undefined) {
-          data['sourceHasAudio'] = mediaMetadata.sourceHasAudio;
-        }
-
-        if (mediaMetadata.sourceRotation !== undefined) {
-          data['sourceRotation'] = mediaMetadata.sourceRotation;
-        }
-
-        if (mediaMetadata.encodedVariantCount !== undefined) {
-          data['encodedVariantCount'] = mediaMetadata.encodedVariantCount;
-        }
-
-        if (mediaMetadata.encodedMaxHeight !== undefined) {
-          data['encodedMaxHeight'] = mediaMetadata.encodedMaxHeight;
-        }
-
-        if (mediaMetadata.encodedFps !== undefined) {
-          data['encodedFps'] = mediaMetadata.encodedFps;
-        }
+        Object.assign(data, this.toMediaMetadataData(mediaMetadata));
       }
 
       const where =
@@ -570,7 +746,7 @@ export class ContentRepository
         expectedProcessingAttemptId.trim().length > 0
           ? {
               id,
-              processingAttemptId: expectedProcessingAttemptId,
+              mediaAttemptId: expectedProcessingAttemptId,
             }
           : {
               id,
@@ -581,16 +757,8 @@ export class ContentRepository
         data,
       });
 
-      const record = await tx.reel.findUnique({
-        where: { id },
-      });
-
-      if (!record) {
-        throw new Error(`Reel ${id} not found`);
-      }
-
       if (updateResult.count === 0) {
-        return record;
+        return currentRecord;
       }
 
       if (chunks && status === 'COMPLETED') {
@@ -618,7 +786,7 @@ export class ContentRepository
             return Prisma.sql`(
         ${chunkId},
         ${id},
-        ${record.userId},
+        ${currentRecord.userId},
         ${chunk.chunkIndex},
         ${chunk.text},
         ${chunk.startTime ?? null},
@@ -732,7 +900,8 @@ export class ContentRepository
         0.0::float AS "keywordScore"
       FROM "ReelChunk" rc
       INNER JOIN "Reel" r ON r.id = rc."reelId"
-      WHERE r.status = 'COMPLETED'
+      WHERE r."mediaStatus" = 'COMPLETED'
+        AND r."indexStatus" = 'COMPLETED'
         AND rc.embedding IS NOT NULL
         AND (
           ${sharedOnly} = false
@@ -796,7 +965,8 @@ export class ContentRepository
         )::float AS "keywordScore"
       FROM "ReelChunk" rc
       INNER JOIN "Reel" r ON r.id = rc."reelId"
-      WHERE r.status = 'COMPLETED'
+      WHERE r."mediaStatus" = 'COMPLETED'
+        AND r."indexStatus" = 'COMPLETED'
         AND (
           ${sharedOnly} = false
           OR (
@@ -955,6 +1125,9 @@ export class ContentRepository
           END
         )::float AS "chunkPhraseScore"
       FROM "ReelChunk" rc
+      INNER JOIN "Reel" indexed_reel
+        ON indexed_reel.id = rc."reelId"
+        AND indexed_reel."indexStatus" = 'COMPLETED'
       GROUP BY rc."reelId"
     ),
 
@@ -1035,7 +1208,7 @@ export class ContentRepository
         )::float AS score
       FROM "Reel" r
       LEFT JOIN chunk_scores cs ON cs.id = r.id
-      WHERE r.status = 'COMPLETED'
+      WHERE r."mediaStatus" = 'COMPLETED'
         AND r.visibility = 'public'
         AND (
           to_tsvector(
@@ -1071,7 +1244,7 @@ export class ContentRepository
     const records = await this.reel.findMany({
       where: {
         id: { in: ids },
-        status: 'COMPLETED',
+        mediaStatus: 'COMPLETED',
         visibility: 'public',
       },
       select: this.reelListSelect,
@@ -1205,7 +1378,7 @@ export class ContentRepository
     const records = await this.reel.findMany({
       where: {
         visibility: 'public',
-        status: 'COMPLETED',
+        mediaStatus: 'COMPLETED',
         tags: {
           isEmpty: false,
         },
@@ -1318,7 +1491,7 @@ export class ContentRepository
 
     const where: Record<string, unknown> = {
       visibility: 'public',
-      status: 'COMPLETED',
+      mediaStatus: 'COMPLETED',
 
       ...(excludedUserIds.length > 0
         ? {
@@ -1669,7 +1842,7 @@ export class ContentRepository
     }
 
     if (query.onlyPublished) {
-      where['status'] = 'COMPLETED';
+      where['mediaStatus'] = 'COMPLETED';
     }
 
     if (query.cursor) {
@@ -1716,7 +1889,7 @@ export class ContentRepository
   }> {
     const where: Record<string, unknown> = {
       visibility: 'public',
-      status: 'COMPLETED',
+      mediaStatus: 'COMPLETED',
     };
 
     if (input.cursor) {
@@ -1895,7 +2068,7 @@ export class ContentRepository
     };
 
     if (query.anchor.visibility === 'public') {
-      scopeWhere['status'] = 'COMPLETED';
+      scopeWhere['mediaStatus'] = 'COMPLETED';
     }
 
     const [beforeRecords, afterRecords] = await Promise.all([
@@ -2004,7 +2177,7 @@ export class ContentRepository
     const safeLimit = Math.min(Math.max(limit, 1), 50);
 
     const where: Record<string, unknown> = {
-      status: 'COMPLETED',
+      mediaStatus: 'COMPLETED',
       transcript: { not: null },
       chunks: {
         none: {},
@@ -2107,6 +2280,16 @@ export class ContentRepository
         WHERE id = ${created.id}
       `;
       }
+
+      await tx.reel.updateMany({
+        where: {
+          id: reelId,
+          mediaStatus: 'COMPLETED',
+        },
+        data: {
+          indexStatus: chunks.length > 0 ? 'COMPLETED' : 'DEGRADED',
+        },
+      });
     });
   }
 
@@ -2243,7 +2426,7 @@ export class ContentRepository
         id: {
           in: reelIds,
         },
-        status: 'COMPLETED',
+        mediaStatus: 'COMPLETED',
         OR: [
           {
             visibility: 'public',
@@ -2449,7 +2632,7 @@ export class ContentRepository
         userId: {
           in: eligibleFriendIds,
         },
-        status: 'COMPLETED',
+        mediaStatus: 'COMPLETED',
         visibility: {
           in: ['public', 'friends'],
         },

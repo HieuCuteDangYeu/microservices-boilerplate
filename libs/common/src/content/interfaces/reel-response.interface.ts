@@ -1,4 +1,11 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import type {
+  LegacyReelStatus,
+  ReelIndexStatus,
+  ReelMediaStatus,
+  ReelSourceLengthClass,
+  ReelSourceOrientation,
+} from '@common/content/interfaces/reel-state.interface';
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
 export type ReelVisibility = 'public' | 'friends' | 'private';
@@ -18,7 +25,9 @@ export interface ReelListItem {
   title?: string;
   description?: string;
   tags: string[];
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  status: LegacyReelStatus;
+  mediaStatus: ReelMediaStatus;
+  indexStatus: ReelIndexStatus;
   visibility: ReelVisibility;
   viewCount: number;
   thumbnailKey?: string;
@@ -26,6 +35,11 @@ export interface ReelListItem {
   processingStage?: string;
   processingMessage?: string;
   processingProgress?: number;
+  sourceOrientation?: ReelSourceOrientation;
+  sourceLengthClass?: ReelSourceLengthClass;
+  sourceAspectRatio?: number;
+  sourceEffectiveWidth?: number;
+  sourceEffectiveHeight?: number;
   streamUrl: string;
   createdAt: string;
   recommendation?: RecommendationMetadata;

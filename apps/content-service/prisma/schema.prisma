@@ -16,6 +16,34 @@ enum ProcessingStatus {
   FAILED
 }
 
+enum ReelMediaStatus {
+  PENDING
+  PROBING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ReelIndexStatus {
+  NOT_REQUESTED
+  PENDING
+  PROCESSING
+  COMPLETED
+  DEGRADED
+  FAILED
+}
+
+enum ReelSourceOrientation {
+  PORTRAIT
+  LANDSCAPE
+  SQUARE
+}
+
+enum ReelSourceLengthClass {
+  SHORT
+  LONG
+}
+
 enum ReelViewEventType {
   IMPRESSION
   WATCH_START
@@ -49,6 +77,8 @@ model Reel {
   description           String?
   tags                  String[]
   status                ProcessingStatus @default(PENDING)
+  mediaStatus           ReelMediaStatus  @default(PENDING)
+  indexStatus           ReelIndexStatus  @default(NOT_REQUESTED)
   visibility            String           @default("public")
   viewCount             BigInt           @default(0)
   transcript            String?          @db.Text
@@ -64,17 +94,24 @@ model Reel {
   processingCompletedAt DateTime?
   processingErrorCode   String?
   processingErrorDetail String?          @db.Text
+  mediaAttemptId        String?
+  indexAttemptId        String?
 
-  sourceDurationMs    Int?
-  sourceWidth         Int?
-  sourceHeight        Int?
-  sourceFps           Float?
-  sourceBitrateKbps   Int?
-  sourceHasAudio      Boolean?
-  sourceRotation      Int?
-  encodedVariantCount Int?
-  encodedMaxHeight    Int?
-  encodedFps          Int?
+  sourceDurationMs      Int?
+  sourceWidth           Int?
+  sourceHeight          Int?
+  sourceFps             Float?
+  sourceBitrateKbps     Int?
+  sourceHasAudio        Boolean?
+  sourceRotation        Int?
+  sourceOrientation     ReelSourceOrientation?
+  sourceLengthClass     ReelSourceLengthClass?
+  sourceAspectRatio     Float?
+  sourceEffectiveWidth  Int?
+  sourceEffectiveHeight Int?
+  encodedVariantCount   Int?
+  encodedMaxHeight      Int?
+  encodedFps            Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -89,7 +126,12 @@ model Reel {
   @@index([visibility, createdAt(sort: Desc)])
   @@index([userId, visibility, createdAt(sort: Desc)])
   @@index([status])
+  @@index([mediaStatus])
+  @@index([indexStatus])
+  @@index([mediaStatus, visibility, createdAt(sort: Desc)])
   @@index([processingAttemptId])
+  @@index([mediaAttemptId])
+  @@index([indexAttemptId])
   @@index([status, processingStartedAt])
   @@index([status, visibility, createdAt(sort: Desc)])
 }

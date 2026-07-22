@@ -24,6 +24,8 @@ export class GetReelStatusUseCase {
       userId: reel.userId,
       visibility: reel.visibility,
       status: reel.status,
+      mediaStatus: reel.mediaStatus,
+      indexStatus: reel.indexStatus,
       stage: reel.processingStage,
       message: reel.processingMessage,
       progress: reel.processingProgress,

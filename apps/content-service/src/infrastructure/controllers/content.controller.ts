@@ -6,6 +6,7 @@ import type { ReelPipelineMetricContext } from '@common/processing/interfaces/re
 import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
+import { CompleteReelMediaProcessingUseCase } from '@content/application/use-cases/complete-reel-media-processing.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
 import { GetFriendsReelsUseCase } from '@content/application/use-cases/get-friends-reels.use-case';
@@ -22,6 +23,8 @@ import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { TrackReelEventsUseCase } from '@content/application/use-cases/track-reel-events.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
+import { UpdateReelIndexStatusUseCase } from '@content/application/use-cases/update-reel-index-status.use-case';
+import { UpdateReelMediaStatusUseCase } from '@content/application/use-cases/update-reel-media-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { Reel } from '@content/domain/entities/reel.entity';
@@ -69,6 +72,9 @@ export class ContentController {
     private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
     private readonly reprocessReelUseCase: ReprocessReelUseCase,
     private readonly claimReelProcessingAttemptUseCase: ClaimReelProcessingAttemptUseCase,
+    private readonly completeReelMediaProcessingUseCase: CompleteReelMediaProcessingUseCase,
+    private readonly updateReelMediaStatusUseCase: UpdateReelMediaStatusUseCase,
+    private readonly updateReelIndexStatusUseCase: UpdateReelIndexStatusUseCase,
     private readonly searchPublicReelsUseCase: SearchPublicReelsUseCase,
     private readonly getSearchSuggestionsUseCase: GetSearchSuggestionsUseCase,
     private readonly getFriendsReelsUseCase: GetFriendsReelsUseCase,
@@ -83,6 +89,8 @@ export class ContentController {
       description: reel.description,
       tags: reel.tags,
       status: reel.status,
+      mediaStatus: reel.mediaStatus,
+      indexStatus: reel.indexStatus,
       visibility: reel.visibility,
       viewCount: Number(reel.viewCount),
       thumbnailKey: reel.thumbnailKey,
@@ -99,6 +107,8 @@ export class ContentController {
       processingFailedAt: reel.processingFailedAt,
       processingCompletedAt: reel.processingCompletedAt,
       processingErrorCode: reel.processingErrorCode,
+      mediaAttemptId: reel.mediaAttemptId,
+      indexAttemptId: reel.indexAttemptId,
       sourceDurationMs: reel.sourceDurationMs,
       sourceWidth: reel.sourceWidth,
       sourceHeight: reel.sourceHeight,
@@ -106,6 +116,11 @@ export class ContentController {
       sourceBitrateKbps: reel.sourceBitrateKbps,
       sourceHasAudio: reel.sourceHasAudio,
       sourceRotation: reel.sourceRotation,
+      sourceOrientation: reel.sourceOrientation,
+      sourceLengthClass: reel.sourceLengthClass,
+      sourceAspectRatio: reel.sourceAspectRatio,
+      sourceEffectiveWidth: reel.sourceEffectiveWidth,
+      sourceEffectiveHeight: reel.sourceEffectiveHeight,
       encodedVariantCount: reel.encodedVariantCount,
       encodedMaxHeight: reel.encodedMaxHeight,
       encodedFps: reel.encodedFps,
@@ -146,6 +161,8 @@ export class ContentController {
       description: reel.description,
       tags: reel.tags,
       status: reel.status,
+      mediaStatus: reel.mediaStatus,
+      indexStatus: reel.indexStatus,
       visibility: reel.visibility,
       thumbnailKey: reel.thumbnailKey,
       createdAt: reel.createdAt,
@@ -336,6 +353,46 @@ export class ContentController {
       );
       throw error;
     }
+  }
+
+  @MessagePattern('content.persist_reel_media_completed')
+  async persistMediaCompleted(
+    @Payload()
+    data: {
+      reelId: string;
+      processingAttemptId: string;
+      thumbnailKey: string;
+      mediaMetadata: ReelProcessingMediaMetadata;
+    },
+  ) {
+    const applied = await this.completeReelMediaProcessingUseCase.execute({
+      reelId: data.reelId,
+      mediaAttemptId: data.processingAttemptId,
+      thumbnailKey: data.thumbnailKey,
+      mediaMetadata: data.mediaMetadata,
+    });
+
+    return { persisted: true, applied };
+  }
+
+  @MessagePattern('content.update_reel_media_status')
+  async updateMediaStatus(
+    @Payload()
+    data: Parameters<UpdateReelMediaStatusUseCase['execute']>[0],
+  ) {
+    return {
+      applied: await this.updateReelMediaStatusUseCase.execute(data),
+    };
+  }
+
+  @MessagePattern('content.update_reel_index_status')
+  async updateIndexStatus(
+    @Payload()
+    data: Parameters<UpdateReelIndexStatusUseCase['execute']>[0],
+  ) {
+    return {
+      applied: await this.updateReelIndexStatusUseCase.execute(data),
+    };
   }
 
   @EventPattern('reel.processing_failed')

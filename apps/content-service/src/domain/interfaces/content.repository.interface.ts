@@ -2,6 +2,12 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import type {
+  ReelIndexStatus,
+  ReelMediaStatus,
+  ReelSourceLengthClass,
+  ReelSourceOrientation,
+} from '@common/content/interfaces/reel-state.interface';
 import type { ReelMediaJob } from '@common/processing/interfaces/reel-media-job.interface';
 import {
   SearchSuggestionItem,
@@ -19,6 +25,11 @@ export interface ReelProcessingMediaMetadata {
   sourceBitrateKbps?: number;
   sourceHasAudio?: boolean;
   sourceRotation?: number;
+  sourceOrientation?: ReelSourceOrientation;
+  sourceLengthClass?: ReelSourceLengthClass;
+  sourceAspectRatio?: number;
+  sourceEffectiveWidth?: number;
+  sourceEffectiveHeight?: number;
   encodedVariantCount?: number;
   encodedMaxHeight?: number;
   encodedFps?: number;
@@ -176,7 +187,8 @@ export interface IContentRepository {
 
   queueReelProcessingAttemptWithMediaJob(
     reelId: string,
-    processingAttemptId: string,
+    mediaAttemptId: string,
+    indexAttemptId: string,
     outboxEvent: ReelMediaOutboxEventInput,
   ): Promise<Reel>;
 
@@ -184,6 +196,25 @@ export interface IContentRepository {
     reelId: string;
     processingAttemptId: string;
     allowReclaim?: boolean;
+  }): Promise<boolean>;
+
+  completeMediaProcessing(input: {
+    reelId: string;
+    mediaAttemptId: string;
+    thumbnailKey: string;
+    mediaMetadata: ReelProcessingMediaMetadata;
+  }): Promise<boolean>;
+
+  updateMediaStatus(input: {
+    reelId: string;
+    mediaAttemptId: string;
+    mediaStatus: ReelMediaStatus;
+  }): Promise<boolean>;
+
+  updateIndexStatus(input: {
+    reelId: string;
+    indexAttemptId: string;
+    indexStatus: ReelIndexStatus;
   }): Promise<boolean>;
 
   updateReelStatus(

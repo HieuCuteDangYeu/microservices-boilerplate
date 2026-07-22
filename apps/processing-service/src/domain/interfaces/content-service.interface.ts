@@ -1,5 +1,9 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type {
+  ReelSourceLengthClass,
+  ReelSourceOrientation,
+} from '@common/content/interfaces/reel-state.interface';
 import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 
 export interface ReelProcessingMediaMetadata {
@@ -10,6 +14,11 @@ export interface ReelProcessingMediaMetadata {
   sourceBitrateKbps?: number;
   sourceHasAudio?: boolean;
   sourceRotation?: number;
+  sourceOrientation?: ReelSourceOrientation;
+  sourceLengthClass?: ReelSourceLengthClass;
+  sourceAspectRatio?: number;
+  sourceEffectiveWidth?: number;
+  sourceEffectiveHeight?: number;
   encodedVariantCount?: number;
   encodedMaxHeight?: number;
   encodedFps?: number;
@@ -48,6 +57,13 @@ export interface IContentService {
     message: string;
     progress: number;
   }): Promise<void>;
+
+  persistMediaCompleted(data: {
+    reelId: string;
+    processingAttemptId: string;
+    thumbnailKey: string;
+    mediaMetadata: ReelProcessingMediaMetadata;
+  }): Promise<boolean>;
 
   emitProcessingCompleted(data: {
     reelId: string;

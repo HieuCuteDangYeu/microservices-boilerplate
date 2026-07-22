@@ -27,12 +27,13 @@ export class CreateReelUseCase {
     }
 
     const reelId = randomUUID();
-    const processingAttemptId = randomUUID();
+    const mediaAttemptId = randomUUID();
+    const indexAttemptId = randomUUID();
     const mediaJob = this.buildReelMediaJobUseCase.execute({
       reelId,
       userId,
       mediaKey: payload.mediaKey,
-      mediaAttemptId: processingAttemptId,
+      mediaAttemptId,
       clientObservedDurationMs: payload.clientObservedDurationMs,
       title: payload.title,
       description: payload.description,
@@ -49,10 +50,14 @@ export class CreateReelUseCase {
         tags: payload.tags,
         visibility: payload.visibility,
         status: 'PENDING',
+        mediaStatus: 'PENDING',
+        indexStatus: 'NOT_REQUESTED',
         processingStage: 'QUEUED',
         processingMessage: 'Queued for processing',
         processingProgress: 0,
-        processingAttemptId,
+        processingAttemptId: mediaAttemptId,
+        mediaAttemptId,
+        indexAttemptId,
       },
       {
         id: mediaJob.jobId,

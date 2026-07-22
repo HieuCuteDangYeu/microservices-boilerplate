@@ -2,6 +2,7 @@ import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfi
 import { BuildReelMediaJobUseCase } from '@content/application/use-cases/build-reel-media-job.use-case';
 import { ClassifyReelJobLengthUseCase } from '@content/application/use-cases/classify-reel-job-length.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
+import { CompleteReelMediaProcessingUseCase } from '@content/application/use-cases/complete-reel-media-processing.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { CreateReelUseCase } from '@content/application/use-cases/create-reel.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
@@ -21,6 +22,8 @@ import { SearchReelContextUseCase } from '@content/application/use-cases/search-
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { TrackReelEventsUseCase } from '@content/application/use-cases/track-reel-events.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
+import { UpdateReelIndexStatusUseCase } from '@content/application/use-cases/update-reel-index-status.use-case';
+import { UpdateReelMediaStatusUseCase } from '@content/application/use-cases/update-reel-media-status.use-case';
 import { UpdateReelUseCase } from '@content/application/use-cases/update-reel.use-case';
 import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-embedding-service.adapter';
 import { ConversationMessageAdapter } from '@content/infrastructure/adapters/conversation-message.adapter';
@@ -117,6 +120,9 @@ function createRmqClientRegistration(name: string, queue: string) {
     TrackReelEventsUseCase,
     ReprocessReelUseCase,
     ClaimReelProcessingAttemptUseCase,
+    CompleteReelMediaProcessingUseCase,
+    UpdateReelMediaStatusUseCase,
+    UpdateReelIndexStatusUseCase,
     SearchPublicReelsUseCase,
     GetRecommendedReelsUseCase,
     GetSearchSuggestionsUseCase,

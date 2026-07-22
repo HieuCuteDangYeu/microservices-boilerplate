@@ -134,6 +134,7 @@ export class ProcessReelUseCase {
       let failedMessage = 'Video processing failed';
       let failureDetail = '';
       let failureMediaMetadata: ReelProcessingMediaMetadata | undefined;
+      let mediaCompleted = false;
 
       try {
         const mediaResult = await this.prepareReelMediaUseCase.execute({
@@ -145,6 +146,21 @@ export class ProcessReelUseCase {
           thumbnailPath: workspace.thumbnailPath,
           metricsContext,
         });
+
+        const mediaCompletionApplied =
+          await this.contentService.persistMediaCompleted({
+            reelId,
+            processingAttemptId,
+            thumbnailKey: mediaResult.thumbnailKey,
+            mediaMetadata: mediaResult.mediaMetadata,
+          });
+
+        if (!mediaCompletionApplied) {
+          totalPipelineTimer.succeed({ staleMediaAttempt: true });
+          return { status: 'DUPLICATE_OR_STALE' };
+        }
+
+        mediaCompleted = true;
 
         currentProgress = 90;
 
@@ -224,6 +240,26 @@ export class ProcessReelUseCase {
         }
 
         totalPipelineTimer.fail(failedStage);
+
+        if (mediaCompleted) {
+          await this.emitFailed({
+            reelId,
+            processingAttemptId,
+            progress: 100,
+            stage: 'INDEXING_FAILED',
+            message: 'Video is ready to watch',
+            errorCode: 'INDEXING_FAILED',
+            errorDetail: failureDetail,
+            mediaMetadata: failureMediaMetadata,
+            metricsContext,
+          });
+
+          this.logger.warn(
+            `[Reel ${reelId}] Media remains playable after indexing failure`,
+          );
+
+          return { status: 'COMPLETED' };
+        }
 
         if (data.allowRetry && this.isTransientFailure(error)) {
           await this.contentService.persistProcessingRetryScheduled({

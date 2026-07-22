@@ -1,4 +1,11 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
+import type {
+  LegacyReelStatus,
+  ReelIndexStatus,
+  ReelMediaStatus,
+  ReelSourceLengthClass,
+  ReelSourceOrientation,
+} from '@common/content/interfaces/reel-state.interface';
 import { ReelVisibility } from '@common/content/schemas/reel-visibility.schema';
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
@@ -9,7 +16,9 @@ export class Reel {
   title?: string;
   description?: string;
   tags: string[];
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  status: LegacyReelStatus;
+  mediaStatus: ReelMediaStatus;
+  indexStatus: ReelIndexStatus;
   visibility: ReelVisibility;
   viewCount: bigint;
   transcript?: string;
@@ -25,6 +34,8 @@ export class Reel {
   processingCompletedAt?: Date;
   processingErrorCode?: string;
   processingErrorDetail?: string;
+  mediaAttemptId?: string;
+  indexAttemptId?: string;
   sourceDurationMs?: number;
   sourceWidth?: number;
   sourceHeight?: number;
@@ -32,6 +43,11 @@ export class Reel {
   sourceBitrateKbps?: number;
   sourceHasAudio?: boolean;
   sourceRotation?: number;
+  sourceOrientation?: ReelSourceOrientation;
+  sourceLengthClass?: ReelSourceLengthClass;
+  sourceAspectRatio?: number;
+  sourceEffectiveWidth?: number;
+  sourceEffectiveHeight?: number;
   encodedVariantCount?: number;
   encodedMaxHeight?: number;
   encodedFps?: number;

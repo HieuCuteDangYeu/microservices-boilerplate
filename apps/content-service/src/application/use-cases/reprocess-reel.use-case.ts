@@ -49,12 +49,13 @@ export class ReprocessReelUseCase {
       throw new InvalidMediaFileError();
     }
 
-    const processingAttemptId = randomUUID();
+    const mediaAttemptId = randomUUID();
+    const indexAttemptId = randomUUID();
     const mediaJob = this.buildReelMediaJobUseCase.execute({
       reelId: reel.id,
       userId: reel.userId,
       mediaKey: reel.mediaKey,
-      mediaAttemptId: processingAttemptId,
+      mediaAttemptId,
       clientObservedDurationMs: reel.sourceDurationMs,
       title: reel.title,
       description: reel.description,
@@ -63,7 +64,8 @@ export class ReprocessReelUseCase {
 
     return await this.contentRepository.queueReelProcessingAttemptWithMediaJob(
       reel.id,
-      processingAttemptId,
+      mediaAttemptId,
+      indexAttemptId,
       {
         id: mediaJob.jobId,
         eventType: REEL_MEDIA_JOB_EVENT_TYPE,
