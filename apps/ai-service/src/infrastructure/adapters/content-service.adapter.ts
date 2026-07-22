@@ -5,7 +5,11 @@ import {
   TranscriptMatch,
 } from '@ai/domain/interfaces/content-service.interface';
 import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
-import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
+import {
+  ReelContextAccessRequest,
+  ReelContextAccessResult,
+  ReelContextSearchRequest,
+} from '@common/content/interfaces/reel-context-search-request.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
@@ -32,6 +36,11 @@ interface RawContentReel {
   thumbnailKey?: string;
   thumbnailUrl?: string;
   streamUrl?: string;
+  durationMs?: number;
+  sourceDurationMs?: number;
+  sourceOrientation?: 'PORTRAIT' | 'LANDSCAPE' | 'SQUARE';
+  sourceLengthClass?: 'SHORT' | 'LONG';
+  playbackPresentation?: 'PORTRAIT_COVER' | 'FIT_WITH_LETTERBOX';
   createdAt: string | Date;
   author?: RawReelAuthor;
 }
@@ -54,6 +63,27 @@ export class ContentServiceAdapter implements IContentService {
     this.cdnDomain = (
       this.configService.get<string>('R2_PUBLIC_DOMAIN') ?? ''
     ).replace(/\/$/, '');
+  }
+
+  async resolveReelContextAccess(
+    input: ReelContextAccessRequest,
+  ): Promise<string[]> {
+    try {
+      const result = await firstValueFrom(
+        this.contentClient.send<ReelContextAccessResult>(
+          'content.resolve_reel_context_access',
+          input,
+        ),
+      );
+
+      return Array.isArray(result?.reelIds) ? result.reelIds : [];
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `ContentServiceAdapter.resolveReelContextAccess failed: ${message}. Returning no accessible reels.`,
+      );
+      return [];
+    }
   }
 
   async searchReelContext(
@@ -171,6 +201,15 @@ export class ContentServiceAdapter implements IContentService {
       thumbnailKey: reel.thumbnailKey,
       thumbnailUrl,
       streamUrl,
+      durationMs: reel.durationMs ?? reel.sourceDurationMs,
+      sourceOrientation: reel.sourceOrientation,
+      sourceLengthClass: reel.sourceLengthClass,
+      playbackPresentation:
+        reel.playbackPresentation ??
+        (reel.sourceOrientation === 'LANDSCAPE' &&
+        reel.sourceLengthClass === 'LONG'
+          ? 'FIT_WITH_LETTERBOX'
+          : 'PORTRAIT_COVER'),
       createdAt: this.toIsoDate(reel.createdAt),
       author: reel.author,
     };

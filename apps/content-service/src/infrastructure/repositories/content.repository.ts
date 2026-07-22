@@ -1396,6 +1396,27 @@ export class ContentRepository
   `;
   }
 
+  async findAccessibleSharedReelIds(input: {
+    userId: string;
+    conversationId: string;
+  }): Promise<string[]> {
+    const shares = await this.reelShare.findMany({
+      where: {
+        conversationId: input.conversationId,
+        reel: {
+          mediaStatus: 'COMPLETED',
+          indexStatus: 'COMPLETED',
+        },
+      },
+      distinct: ['reelId'],
+      select: {
+        reelId: true,
+      },
+    });
+
+    return shares.map((share) => share.reelId);
+  }
+
   async searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]> {
     const searchText = query.query.trim();
 

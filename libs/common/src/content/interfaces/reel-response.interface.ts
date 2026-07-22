@@ -9,6 +9,7 @@ import type {
 import type { RecommendationMetadata } from '@common/recommendation/interfaces/recommendation-metadata.interface';
 
 export type ReelVisibility = 'public' | 'friends' | 'private';
+export type ReelPlaybackPresentation = 'PORTRAIT_COVER' | 'FIT_WITH_LETTERBOX';
 
 export interface ReelAuthorSummary {
   id: string;
@@ -36,8 +37,10 @@ export interface ReelListItem {
   processingStage?: string;
   processingMessage?: string;
   processingProgress?: number;
+  durationMs?: number;
   sourceOrientation?: ReelSourceOrientation;
   sourceLengthClass?: ReelSourceLengthClass;
+  playbackPresentation?: ReelPlaybackPresentation;
   sourceAspectRatio?: number;
   sourceEffectiveWidth?: number;
   sourceEffectiveHeight?: number;

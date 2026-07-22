@@ -6,3 +6,12 @@ export interface ReelContextSearchRequest {
   sharedOnly?: boolean;
   limit?: number;
 }
+
+export interface ReelContextAccessRequest {
+  userId: string;
+  conversationId: string;
+}
+
+export interface ReelContextAccessResult {
+  reelIds: string[];
+}

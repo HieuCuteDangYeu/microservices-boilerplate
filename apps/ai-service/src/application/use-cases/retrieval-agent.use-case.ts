@@ -8,11 +8,16 @@ import type {
   RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
+import type { IReelSemanticIndexService } from '@ai/domain/interfaces/reel-semantic-index.service.interface';
 import type {
   IStructuredLlmService,
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type {
+  SemanticIndexSearchResult,
+  SemanticReelDocument,
+} from '@common/processing/interfaces/semantic-index.interface';
 
 interface RawRetrievalPlan {
   mode?: unknown;
@@ -38,6 +43,9 @@ export class RetrievalAgentUseCase {
 
     @Inject('IContentService')
     private readonly contentService: IContentService,
+
+    @Inject('IReelSemanticIndexService')
+    private readonly semanticIndexService: IReelSemanticIndexService,
 
     @Inject('IRerankerService')
     private readonly rerankerService: IRerankerService,
@@ -65,6 +73,19 @@ export class RetrievalAgentUseCase {
 
     const queries = this.getQueries(plan);
     const allCandidates: TranscriptMatch[] = [];
+    const accessibleReelIds =
+      await this.contentService.resolveReelContextAccess({
+        userId: input.userId,
+        conversationId: input.conversationId,
+      });
+
+    if (accessibleReelIds.length === 0) {
+      return {
+        plan,
+        retrievedChunks: [],
+        rerankedChunks: [],
+      };
+    }
 
     for (const queryText of queries) {
       const queryEmbedding = await this.embeddingService.generateVector({
@@ -72,12 +93,10 @@ export class RetrievalAgentUseCase {
         taskType: 'RETRIEVAL_QUERY',
       });
 
-      const retrievedChunks = await this.contentService.searchReelContext({
-        queryVector: queryEmbedding.values,
+      const retrievedChunks = await this.retrieveHierarchically({
         queryText,
-        userId: input.userId,
-        conversationId: input.conversationId,
-        sharedOnly: true,
+        queryEmbedding: queryEmbedding.values,
+        accessibleReelIds,
         limit: plan.searchLimit,
       });
 
@@ -98,6 +117,119 @@ export class RetrievalAgentUseCase {
       plan,
       retrievedChunks,
       rerankedChunks,
+    };
+  }
+
+  private async retrieveHierarchically(input: {
+    queryText: string;
+    queryEmbedding: number[];
+    accessibleReelIds: string[];
+    limit: number;
+  }): Promise<TranscriptMatch[]> {
+    const reelCandidates = await this.semanticIndexService.searchReels({
+      queryText: input.queryText,
+      queryEmbedding: input.queryEmbedding,
+      filters: { reelIds: input.accessibleReelIds },
+      limit: Math.min(Math.max(input.limit * 2, 8), 40),
+    });
+
+    if (reelCandidates.length === 0) {
+      return [];
+    }
+
+    const longReelIds = reelCandidates
+      .filter((candidate) => candidate.sourceLengthClass === 'LONG')
+      .map((candidate) => candidate.reelId);
+
+    const sectionCandidates =
+      longReelIds.length > 0
+        ? await this.semanticIndexService.searchSections({
+            queryText: input.queryText,
+            queryEmbedding: input.queryEmbedding,
+            filters: {
+              reelIds: longReelIds,
+              sourceLengthClasses: ['LONG'],
+            },
+            limit: Math.min(Math.max(input.limit * 2, 8), 40),
+          })
+        : [];
+
+    const parentIds = [
+      ...reelCandidates
+        .filter((candidate) => candidate.sourceLengthClass === 'SHORT')
+        .map((candidate) => candidate.id),
+      ...sectionCandidates.map((candidate) => candidate.id),
+    ];
+
+    if (parentIds.length === 0) {
+      return [];
+    }
+
+    const chunkCandidates = await this.semanticIndexService.searchChunks({
+      queryText: input.queryText,
+      queryEmbedding: input.queryEmbedding,
+      filters: {
+        reelIds: reelCandidates.map((candidate) => candidate.reelId),
+        parentIds,
+      },
+      limit: input.limit,
+      candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
+    });
+
+    const documents = await Promise.all(
+      [...new Set(chunkCandidates.map((candidate) => candidate.reelId))].map(
+        async (reelId) =>
+          [
+            reelId,
+            await this.semanticIndexService.getReelDocument(reelId),
+          ] as const,
+      ),
+    );
+    const documentByReelId = new Map<string, SemanticReelDocument | null>(
+      documents,
+    );
+
+    return chunkCandidates.map((candidate) =>
+      this.toTranscriptMatch(
+        candidate,
+        documentByReelId.get(candidate.reelId) ?? null,
+      ),
+    );
+  }
+
+  private toTranscriptMatch(
+    candidate: SemanticIndexSearchResult,
+    document: SemanticReelDocument | null,
+  ): TranscriptMatch {
+    const vectorScore =
+      candidate.vectorDistance === undefined
+        ? 0
+        : Math.min(Math.max(1 - candidate.vectorDistance, 0), 1);
+    const keywordScore = candidate.keywordRank ? 1 / candidate.keywordRank : 0;
+    const metadataScore = candidate.metadataRank
+      ? 1 / candidate.metadataRank
+      : 0;
+    const hasVector = candidate.vectorRank !== undefined;
+    const hasLexical =
+      candidate.keywordRank !== undefined ||
+      candidate.metadataRank !== undefined;
+
+    return {
+      chunkId: candidate.id,
+      reelId: candidate.reelId,
+      title: document?.title,
+      description: document?.description,
+      tags: candidate.tags,
+      chunkText: candidate.text,
+      startTime: candidate.startTime,
+      endTime: candidate.endTime,
+      distance: candidate.vectorDistance ?? null,
+      score: candidate.rrfScore,
+      vectorScore,
+      keywordScore,
+      metadataScore,
+      matchedBy:
+        hasVector && hasLexical ? 'HYBRID' : hasVector ? 'VECTOR' : 'KEYWORD',
     };
   }
 

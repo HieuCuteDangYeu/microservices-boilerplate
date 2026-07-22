@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
+import type { ReelContextAccessRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import type {
   ReelIndexStatus,
@@ -305,6 +306,10 @@ export interface IContentRepository {
   searchReelContext(
     input: ReelContextSearchRequest,
   ): Promise<ReelContextSearchResult[]>;
+
+  findAccessibleSharedReelIds(
+    input: ReelContextAccessRequest,
+  ): Promise<string[]>;
 
   findReelsForChunkBackfill(
     limit: number,

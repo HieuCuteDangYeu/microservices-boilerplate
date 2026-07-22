@@ -1,5 +1,8 @@
 import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
-import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
+import {
+  ReelContextAccessRequest,
+  ReelContextSearchRequest,
+} from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 
 export type TranscriptMatch = ReelContextSearchResult;
@@ -16,6 +19,8 @@ export interface RecommendedReelsInput {
 }
 
 export interface IContentService {
+  resolveReelContextAccess(input: ReelContextAccessRequest): Promise<string[]>;
+
   searchReelContext(
     input: ReelContextSearchRequest,
   ): Promise<TranscriptMatch[]>;

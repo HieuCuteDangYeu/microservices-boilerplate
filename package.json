@@ -98,6 +98,7 @@
     "tmp:verify:semantic-index": "node scripts/tmp/verify-semantic-index.cjs",
     "tmp:explain:semantic-index": "node scripts/tmp/explain-semantic-index.cjs",
     "tmp:benchmark:semantic-index": "node scripts/tmp/benchmark-semantic-index.cjs",
+    "tmp:test:semantic-connections": "jest --runInBand apps/ai-service/src/application/use-cases/retrieval-agent.use-case.spec.ts apps/content-service/src/infrastructure/adapters/semantic-recommendation-service.adapter.spec.ts",
     "ops:reindex:reel": "node scripts/ops/reindex-reel.cjs",
     "ops:reindex:status": "node scripts/ops/reindex-status.cjs"
   },

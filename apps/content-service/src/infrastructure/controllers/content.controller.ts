@@ -4,7 +4,10 @@ import { TrackReelEventPayload } from '@common/content/dtos/track-reel-events.dt
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
-import type { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
+import type {
+  ReelContextAccessRequest,
+  ReelContextSearchRequest,
+} from '@common/content/interfaces/reel-context-search-request.interface';
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { ClaimReelIndexingAttemptUseCase } from '@content/application/use-cases/claim-reel-indexing-attempt.use-case';
@@ -24,6 +27,7 @@ import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-r
 import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
 import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
+import { ResolveReelContextAccessUseCase } from '@content/application/use-cases/resolve-reel-context-access.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
@@ -70,6 +74,7 @@ export class ContentController {
     private readonly updateReelStatusUseCase: UpdateReelStatusUseCase,
     private readonly getReelStatusUseCase: GetReelStatusUseCase,
     private readonly searchReelContextUseCase: SearchReelContextUseCase,
+    private readonly resolveReelContextAccessUseCase: ResolveReelContextAccessUseCase,
     private readonly shareReelUseCase: ShareReelUseCase,
     private readonly createReelShareLinkUseCase: CreateReelShareLinkUseCase,
     private readonly resolveReelShareLinkUseCase: ResolveReelShareLinkUseCase,
@@ -110,6 +115,7 @@ export class ContentController {
       processingStage: reel.processingStage,
       processingMessage: reel.processingMessage,
       processingProgress: reel.processingProgress,
+      durationMs: reel.sourceDurationMs,
       transcript: reel.transcript,
       transcriptVtt: reel.transcriptVtt,
       transcriptSegments: reel.transcriptSegments,
@@ -131,6 +137,11 @@ export class ContentController {
       sourceRotation: reel.sourceRotation,
       sourceOrientation: reel.sourceOrientation,
       sourceLengthClass: reel.sourceLengthClass,
+      playbackPresentation:
+        reel.sourceOrientation === 'LANDSCAPE' &&
+        reel.sourceLengthClass === 'LONG'
+          ? 'FIT_WITH_LETTERBOX'
+          : 'PORTRAIT_COVER',
       sourceAspectRatio: reel.sourceAspectRatio,
       sourceEffectiveWidth: reel.sourceEffectiveWidth,
       sourceEffectiveHeight: reel.sourceEffectiveHeight,
@@ -856,6 +867,24 @@ export class ContentController {
         message: `Reel Context Search Error: ${err.message}`,
       });
     }
+  }
+
+  @MessagePattern('content.resolve_reel_context_access')
+  async resolveReelContextAccess(@Payload() payload: ReelContextAccessRequest) {
+    if (
+      !payload ||
+      typeof payload.userId !== 'string' ||
+      payload.userId.trim().length === 0 ||
+      typeof payload.conversationId !== 'string' ||
+      payload.conversationId.trim().length === 0
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid payload for reel context access',
+      });
+    }
+
+    return await this.resolveReelContextAccessUseCase.execute(payload);
   }
 
   @MessagePattern('content.get_profile_reel_context')

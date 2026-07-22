@@ -188,8 +188,14 @@ export class SearchController {
       processingStage: reel.processingStage,
       processingMessage: reel.processingMessage,
       processingProgress: reel.processingProgress,
+      durationMs: reel.sourceDurationMs,
       sourceOrientation: reel.sourceOrientation,
       sourceLengthClass: reel.sourceLengthClass,
+      playbackPresentation:
+        reel.sourceOrientation === 'LANDSCAPE' &&
+        reel.sourceLengthClass === 'LONG'
+          ? 'FIT_WITH_LETTERBOX'
+          : 'PORTRAIT_COVER',
       sourceAspectRatio: reel.sourceAspectRatio,
       sourceEffectiveWidth: reel.sourceEffectiveWidth,
       sourceEffectiveHeight: reel.sourceEffectiveHeight,

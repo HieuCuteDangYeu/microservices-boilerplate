@@ -271,6 +271,17 @@ export class RecommendationRepository implements IRecommendationRepository {
       .slice(0, query.limit);
   }
 
+  async findViewerInterestTags(
+    viewerId: string,
+    limit: number,
+  ): Promise<string[]> {
+    const profile = await this.loadPositiveProfile(viewerId, 60);
+
+    return this.topWeightedKeys(profile.tagWeights, limit)
+      .map((tag) => profile.rawTagByNormalizedTag.get(tag))
+      .filter((tag): tag is string => Boolean(tag));
+  }
+
   async findCreatorAffinityCandidates(
     query: RecommendationCandidateQuery,
   ): Promise<RecommendationCandidateEvidence[]> {

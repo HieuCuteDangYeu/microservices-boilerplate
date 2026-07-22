@@ -35,6 +35,8 @@ import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embed
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
 import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/langgraph-rag-chat-workflow.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
+import { ReelSemanticIndexAdapter } from '@ai/infrastructure/adapters/reel-semantic-index.adapter';
+import { REEL_INDEX_QUERY_QUEUE } from '@common/processing/interfaces/semantic-index.interface';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
 import { PrismaConversationMemoryRepository } from '@ai/infrastructure/repositories/prisma-conversation-memory.repository';
@@ -91,6 +93,20 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
             },
           };
         },
+        inject: [ConfigService],
+      },
+      {
+        name: 'INDEX_RMQ',
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.getOrThrow<string>('RABBITMQ_URL')],
+            queue: REEL_INDEX_QUERY_QUEUE,
+            queueOptions: { durable: true },
+            retryAttempts: 3,
+            retryDelay: 1_000,
+          },
+        }),
         inject: [ConfigService],
       },
     ]),
@@ -152,6 +168,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IRerankerService',
       useClass: SimpleRerankerAdapter,
+    },
+    {
+      provide: 'IReelSemanticIndexService',
+      useClass: ReelSemanticIndexAdapter,
     },
     {
       provide: 'IChatTokenPublisher',

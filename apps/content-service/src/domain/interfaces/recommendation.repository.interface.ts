@@ -35,6 +35,8 @@ export interface IRecommendationRepository {
     query: RecommendationCandidateQuery,
   ): Promise<RecommendationCandidateEvidence[]>;
 
+  findViewerInterestTags(viewerId: string, limit: number): Promise<string[]>;
+
   findEligibleReelsByIds(
     reelIds: string[],
     excludedUserIds: string[],

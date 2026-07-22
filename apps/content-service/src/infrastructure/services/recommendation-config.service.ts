@@ -10,6 +10,7 @@ export class RecommendationConfigService implements IRecommendationConfig {
   private readonly algorithmVersion: string;
   private readonly telemetryEnabled: boolean;
   private readonly socialPoolEnabled: boolean;
+  private readonly semanticPoolEnabled: boolean;
 
   constructor(private readonly configService: ConfigService) {
     this.algorithmVersion = this.readVersion(
@@ -23,6 +24,10 @@ export class RecommendationConfigService implements IRecommendationConfig {
     );
 
     this.socialPoolEnabled = this.readBoolean('REEL_SOCIAL_POOL_ENABLED', true);
+    this.semanticPoolEnabled = this.readBoolean(
+      'REEL_SEMANTIC_POOL_ENABLED',
+      true,
+    );
   }
 
   getAlgorithmVersion(): string {
@@ -30,7 +35,7 @@ export class RecommendationConfigService implements IRecommendationConfig {
   }
 
   getCandidateSource(): string {
-    return 'PERSONALIZED_MULTI_SOURCE_PHASE5';
+    return 'PERSONALIZED_MULTI_SOURCE_PHASE7';
   }
 
   getFeatureFlags(): RecommendationFeatureFlags {
@@ -40,6 +45,7 @@ export class RecommendationConfigService implements IRecommendationConfig {
       tagAffinityPool: true,
       creatorAffinityPool: true,
       metadataSimilarityPool: true,
+      semanticPool: this.semanticPoolEnabled,
       explorationPool: true,
       socialPool: this.socialPoolEnabled,
       personalizedRanking: true,

@@ -21,6 +21,12 @@ export const AiRecommendedReelSchema = z.object({
   thumbnailKey: z.string().optional(),
   thumbnailUrl: z.string().optional(),
   streamUrl: z.string().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  sourceOrientation: z.enum(['PORTRAIT', 'LANDSCAPE', 'SQUARE']).optional(),
+  sourceLengthClass: z.enum(['SHORT', 'LONG']).optional(),
+  playbackPresentation: z
+    .enum(['PORTRAIT_COVER', 'FIT_WITH_LETTERBOX'])
+    .optional(),
   createdAt: z.string(),
   author: AiRecommendedReelAuthorSchema.optional(),
 });

@@ -16,6 +16,7 @@ import type {
   RecommendationScoreComponents,
 } from '@content/domain/interfaces/recommendation.interface';
 import type { IRecommendationRepository } from '@content/domain/interfaces/recommendation.repository.interface';
+import type { ISemanticRecommendationService } from '@content/domain/interfaces/semantic-recommendation.service.interface';
 import type {
   GetRecommendedReelsInput,
   RecommendedReelsResult,
@@ -41,6 +42,9 @@ export class GetRecommendedReelsUseCase {
 
     @Inject('IFriendContentAccessService')
     private readonly friendContentAccessService: IFriendContentAccessService,
+
+    @Inject('ISemanticRecommendationService')
+    private readonly semanticRecommendationService: ISemanticRecommendationService,
   ) {}
 
   async execute(
@@ -209,6 +213,23 @@ export class GetRecommendedReelsUseCase {
             candidateQuery,
           ),
         enabled: featureFlags['metadataSimilarityPool'] !== false,
+      },
+      {
+        source: 'SEMANTIC',
+        execute: async () => {
+          const interestTags =
+            await this.recommendationRepository.findViewerInterestTags(
+              candidateQuery.viewerId,
+              20,
+            );
+
+          return await this.semanticRecommendationService.findCandidates({
+            viewerId: candidateQuery.viewerId,
+            interestTags,
+            limit: candidateQuery.limit,
+          });
+        },
+        enabled: featureFlags['semanticPool'] !== false,
       },
       {
         source: 'SOCIAL',
@@ -504,7 +525,10 @@ export class GetRecommendedReelsUseCase {
       tagAffinityScore,
       creatorAffinityScore,
       contentSimilarityScore: this.clamp(
-        candidate.sourceScores.CONTENT_SIMILARITY ?? 0,
+        Math.max(
+          candidate.sourceScores.CONTENT_SIMILARITY ?? 0,
+          candidate.sourceScores.SEMANTIC ?? 0,
+        ),
       ),
       trendingScore: Math.max(
         this.clamp(candidate.sourceScores.TRENDING ?? 0),

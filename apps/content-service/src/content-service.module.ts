@@ -21,6 +21,7 @@ import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-r
 import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
 import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
+import { ResolveReelContextAccessUseCase } from '@content/application/use-cases/resolve-reel-context-access.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
 import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
@@ -37,6 +38,8 @@ import { FriendSharePolicyAdapter } from '@content/infrastructure/adapters/frien
 import { ReelMediaJobPublisherAdapter } from '@content/infrastructure/adapters/reel-media-job-publisher.adapter';
 import { ReelIndexJobPublisherAdapter } from '@content/infrastructure/adapters/reel-index-job-publisher.adapter';
 import { RecommendationTelemetryServiceAdapter } from '@content/infrastructure/adapters/recommendation-telemetry-service.adapter';
+import { SemanticRecommendationServiceAdapter } from '@content/infrastructure/adapters/semantic-recommendation-service.adapter';
+import { REEL_INDEX_QUERY_QUEUE } from '@common/processing/interfaces/semantic-index.interface';
 import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
 import { ContentController } from '@content/infrastructure/controllers/content.controller';
 import { OutboxDispatcherService } from '@content/infrastructure/jobs/outbox-dispatcher.service';
@@ -97,6 +100,7 @@ function createRmqClientRegistration(name: string, queue: string) {
         'conversation_queue',
       ),
       createRmqClientRegistration('MONITORING_SERVICE_RMQ', 'monitoring_queue'),
+      createRmqClientRegistration('INDEX_SERVICE_RMQ', REEL_INDEX_QUERY_QUEUE),
     ]),
   ],
   controllers: [ContentController],
@@ -119,6 +123,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     UpdateReelStatusUseCase,
     GetReelStatusUseCase,
     SearchReelContextUseCase,
+    ResolveReelContextAccessUseCase,
     ShareReelUseCase,
     CreateReelShareLinkUseCase,
     ResolveReelShareLinkUseCase,
@@ -199,6 +204,10 @@ function createRmqClientRegistration(name: string, queue: string) {
     {
       provide: 'IRecommendationTelemetryService',
       useClass: RecommendationTelemetryServiceAdapter,
+    },
+    {
+      provide: 'ISemanticRecommendationService',
+      useClass: SemanticRecommendationServiceAdapter,
     },
   ],
 })
