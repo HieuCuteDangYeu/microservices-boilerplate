@@ -1,4 +1,5 @@
 import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
+import type { ReelMediaLengthClass } from '@common/processing/interfaces/reel-media-job.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IProcessingMetrics } from '@processing/domain/interfaces/processing-metrics.interface';
@@ -14,6 +15,16 @@ import {
   PrepareReelMediaError,
   PrepareReelMediaUseCase,
 } from './prepare-reel-media.use-case';
+
+export type ProcessReelResult =
+  | { status: 'COMPLETED' }
+  | { status: 'DUPLICATE_OR_STALE' }
+  | { status: 'RETRY'; failureStage: string; errorDetail: string }
+  | {
+      status: 'PERMANENT_FAILURE';
+      failureStage: string;
+      errorDetail: string;
+    };
 
 @Injectable()
 export class ProcessReelUseCase {
@@ -39,28 +50,33 @@ export class ProcessReelUseCase {
     userId: string;
     processingAttemptId?: string;
     queuedAt?: string;
+    expectedLengthClass?: ReelMediaLengthClass;
+    queueName?: string;
+    retryNumber?: number;
+    allowReclaim?: boolean;
+    allowRetry?: boolean;
     title?: string;
     description?: string;
     tags?: string[];
-  }): Promise<void> {
+  }): Promise<ProcessReelResult> {
     const concurrency = this.getConcurrencyLimit();
 
-    await this.jobConcurrencyLimiter.runExclusive(async () => {
+    return await this.jobConcurrencyLimiter.runExclusive(async () => {
       const { reelId, mediaKey, processingAttemptId } = data;
 
       if (!processingAttemptId) {
         this.logger.warn(
           `[Reel ${reelId}] Ignoring processing job without processingAttemptId`,
         );
-        return;
+        return { status: 'DUPLICATE_OR_STALE' };
       }
 
       const metricsContext: ReelPipelineMetricContext = {
         reelId,
         processingAttemptId,
-        mediaClass: 'UNKNOWN',
+        mediaClass: data.expectedLengthClass ?? 'UNKNOWN',
         orientation: 'UNKNOWN',
-        retryNumber: 0,
+        retryNumber: data.retryNumber ?? 0,
       };
       const queuedAtMs = data.queuedAt ? Date.parse(data.queuedAt) : Number.NaN;
 
@@ -71,7 +87,7 @@ export class ProcessReelUseCase {
           ? Math.max(0, Date.now() - queuedAtMs)
           : 0,
         details: {
-          queueName: 'processing_queue',
+          queueName: data.queueName ?? 'processing_queue',
           measurementAvailable: Number.isFinite(queuedAtMs),
         },
       });
@@ -87,6 +103,7 @@ export class ProcessReelUseCase {
         claimed = await this.contentService.claimReelProcessingAttempt({
           reelId,
           processingAttemptId,
+          allowReclaim: data.allowReclaim,
         });
         claimTimer.succeed({ claimed });
       } catch (error: unknown) {
@@ -98,7 +115,7 @@ export class ProcessReelUseCase {
         this.logger.warn(
           `[Reel ${reelId}] Ignoring duplicate or stale processing attempt ${processingAttemptId}`,
         );
-        return;
+        return { status: 'DUPLICATE_OR_STALE' };
       }
 
       this.logger.log(
@@ -186,6 +203,8 @@ export class ProcessReelUseCase {
         this.logger.log(
           `[Reel ${reelId}] Processing attempt ${processingAttemptId} completed successfully`,
         );
+
+        return { status: 'COMPLETED' };
       } catch (error: unknown) {
         const { message, stack } = formatProcessingError(error);
 
@@ -206,6 +225,23 @@ export class ProcessReelUseCase {
 
         totalPipelineTimer.fail(failedStage);
 
+        if (data.allowRetry && this.isTransientFailure(error)) {
+          await this.contentService.persistProcessingRetryScheduled({
+            reelId,
+            status: 'PENDING',
+            processingAttemptId,
+            stage: 'RETRY_SCHEDULED',
+            message: 'Temporary processing failure; retry scheduled',
+            progress: currentProgress,
+          });
+
+          return {
+            status: 'RETRY',
+            failureStage: failedStage,
+            errorDetail: failureDetail,
+          };
+        }
+
         await this.emitFailed({
           reelId,
           processingAttemptId,
@@ -217,6 +253,12 @@ export class ProcessReelUseCase {
           mediaMetadata: failureMediaMetadata,
           metricsContext,
         });
+
+        return {
+          status: 'PERMANENT_FAILURE',
+          failureStage: failedStage,
+          errorDetail: failureDetail,
+        };
       } finally {
         this.tempFileService.removeDirIfExists(workspace.workDir);
       }
@@ -231,6 +273,20 @@ export class ProcessReelUseCase {
     const parsed = Number(rawValue);
 
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  }
+
+  private isTransientFailure(error: unknown): boolean {
+    if (!(error instanceof PrepareReelMediaError)) {
+      return true;
+    }
+
+    return [
+      'DOWNLOADING',
+      'UPLOADING_STREAM',
+      'GENERATING_THUMBNAIL',
+      'VALIDATING_STREAM',
+      'STREAM_VALIDATION_FAILED',
+    ].includes(error.stage);
   }
 
   private async emitProgress(data: {
@@ -270,26 +326,17 @@ export class ProcessReelUseCase {
     mediaMetadata?: ReelProcessingMediaMetadata;
     metricsContext: ReelPipelineMetricContext;
   }): Promise<void> {
-    try {
-      await this.contentService.emitProcessingFailed({
-        reelId: data.reelId,
-        status: 'FAILED',
-        processingAttemptId: data.processingAttemptId,
-        stage: data.stage,
-        message: data.message,
-        progress: data.progress,
-        errorCode: data.errorCode,
-        errorDetail: data.errorDetail,
-        mediaMetadata: data.mediaMetadata,
-        metricsContext: data.metricsContext,
-      });
-    } catch (error: unknown) {
-      const { message, stack } = formatProcessingError(error);
-
-      this.logger.error(
-        `[Reel ${data.reelId}] Failed to emit reel.processing_failed: ${message}`,
-        stack,
-      );
-    }
+    await this.contentService.emitProcessingFailed({
+      reelId: data.reelId,
+      status: 'FAILED',
+      processingAttemptId: data.processingAttemptId,
+      stage: data.stage,
+      message: data.message,
+      progress: data.progress,
+      errorCode: data.errorCode,
+      errorDetail: data.errorDetail,
+      mediaMetadata: data.mediaMetadata,
+      metricsContext: data.metricsContext,
+    });
   }
 }

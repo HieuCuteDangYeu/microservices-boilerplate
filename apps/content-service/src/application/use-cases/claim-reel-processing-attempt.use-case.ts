@@ -13,6 +13,7 @@ export class ClaimReelProcessingAttemptUseCase {
   async execute(data: {
     reelId: string;
     processingAttemptId: string;
+    allowReclaim?: boolean;
   }): Promise<boolean> {
     const reelId = data.reelId.trim();
     const processingAttemptId = data.processingAttemptId.trim();
@@ -24,6 +25,7 @@ export class ClaimReelProcessingAttemptUseCase {
     const claimed = await this.contentRepository.claimProcessingAttempt({
       reelId,
       processingAttemptId,
+      allowReclaim: data.allowReclaim,
     });
 
     if (!claimed) {

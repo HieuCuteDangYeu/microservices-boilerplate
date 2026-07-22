@@ -4,26 +4,24 @@ import {
   ReelNotFoundError,
   ReelReprocessForbiddenError,
 } from '@content/domain/errors/content.error';
-import type { IProcessingService } from '@content/domain/interfaces/processing-service.interface';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { REEL_MEDIA_JOB_EVENT_TYPE } from '@common/processing/interfaces/reel-media-job.interface';
+import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Reel } from '../../domain/entities/reel.entity';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
 import type { IStorageService } from '../../domain/interfaces/storage.service.interface';
+import { BuildReelMediaJobUseCase } from './build-reel-media-job.use-case';
 
 const DEFAULT_STALE_PROCESSING_MS = 30 * 60 * 1000;
 
 @Injectable()
 export class ReprocessReelUseCase {
-  private readonly logger = new Logger(ReprocessReelUseCase.name);
-
   constructor(
     @Inject('IContentRepository')
     private readonly contentRepository: IContentRepository,
     @Inject('IStorageService')
     private readonly storageService: IStorageService,
-    @Inject('IProcessingService')
-    private readonly processingService: IProcessingService,
+    private readonly buildReelMediaJobUseCase: BuildReelMediaJobUseCase,
   ) {}
 
   async execute(reelId: string, userId: string, isAdmin = false) {
@@ -52,51 +50,27 @@ export class ReprocessReelUseCase {
     }
 
     const processingAttemptId = randomUUID();
+    const mediaJob = this.buildReelMediaJobUseCase.execute({
+      reelId: reel.id,
+      userId: reel.userId,
+      mediaKey: reel.mediaKey,
+      mediaAttemptId: processingAttemptId,
+      clientObservedDurationMs: reel.sourceDurationMs,
+      title: reel.title,
+      description: reel.description,
+      tags: reel.tags,
+    });
 
-    const queuedReel = await this.contentRepository.queueReelProcessingAttempt(
+    return await this.contentRepository.queueReelProcessingAttemptWithMediaJob(
       reel.id,
       processingAttemptId,
+      {
+        id: mediaJob.jobId,
+        eventType: REEL_MEDIA_JOB_EVENT_TYPE,
+        payload: mediaJob,
+        createdAt: new Date(mediaJob.createdAt),
+      },
     );
-
-    try {
-      await this.processingService.emitReelCreated({
-        reelId: reel.id,
-        mediaKey: reel.mediaKey,
-        userId: reel.userId,
-        processingAttemptId,
-        queuedAt: new Date().toISOString(),
-        title: reel.title,
-        description: reel.description,
-        tags: reel.tags,
-      });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      this.logger.error(
-        `Failed to enqueue reel ${reel.id} for reprocessing: ${message}`,
-      );
-
-      return await this.contentRepository.updateReelStatus(
-        reel.id,
-        'FAILED',
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        'QUEUE_PUBLISH_FAILED',
-        'Video processing failed',
-        0,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        processingAttemptId,
-        'QUEUE_PUBLISH_FAILED',
-        message,
-      );
-    }
-
-    return queuedReel;
   }
 
   private isActiveAndNotStale(reel: Reel): boolean {

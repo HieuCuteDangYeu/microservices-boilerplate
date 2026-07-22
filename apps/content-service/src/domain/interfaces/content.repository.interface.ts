@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import type { ReelMediaJob } from '@common/processing/interfaces/reel-media-job.interface';
 import {
   SearchSuggestionItem,
   SearchSuggestionType,
@@ -148,6 +149,13 @@ export interface SearchSuggestionsQuery {
 
 export type SearchSuggestion = SearchSuggestionItem;
 
+export interface ReelMediaOutboxEventInput {
+  id: string;
+  eventType: string;
+  payload: ReelMediaJob;
+  createdAt: Date;
+}
+
 export interface ReelSearchResult {
   reel: Reel;
   score: number;
@@ -161,16 +169,21 @@ export interface FriendsReelsQuery {
 }
 
 export interface IContentRepository {
-  createReel(reel: Partial<Reel>): Promise<Reel>;
+  createReelWithMediaJob(
+    reel: Partial<Reel>,
+    outboxEvent: ReelMediaOutboxEventInput,
+  ): Promise<Reel>;
 
-  queueReelProcessingAttempt(
+  queueReelProcessingAttemptWithMediaJob(
     reelId: string,
     processingAttemptId: string,
+    outboxEvent: ReelMediaOutboxEventInput,
   ): Promise<Reel>;
 
   claimProcessingAttempt(input: {
     reelId: string;
     processingAttemptId: string;
+    allowReclaim?: boolean;
   }): Promise<boolean>;
 
   updateReelStatus(

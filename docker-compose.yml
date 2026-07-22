@@ -80,6 +80,23 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      MEDIA_WORKER_LANE: SHORT
+      MEDIA_WORKER_PREFETCH: ${MEDIA_WORKER_PREFETCH:-1}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  processing-long-service:
+    image: ${DOCKERHUB_USERNAME}/processing-service:latest
+    restart: always
+    env_file:
+      - .env
+    environment:
+      MEDIA_WORKER_LANE: LONG
+      MEDIA_WORKER_PREFETCH: ${MEDIA_WORKER_PREFETCH:-1}
     depends_on:
       rabbitmq:
         condition: service_healthy

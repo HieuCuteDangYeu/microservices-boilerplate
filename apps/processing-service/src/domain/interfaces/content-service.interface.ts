@@ -19,6 +19,7 @@ export interface IContentService {
   claimReelProcessingAttempt(data: {
     reelId: string;
     processingAttemptId: string;
+    allowReclaim?: boolean;
   }): Promise<boolean>;
 
   emitProcessingStarted(data: {
@@ -37,6 +38,15 @@ export interface IContentService {
     stage?: string;
     message?: string;
     progress?: number;
+  }): Promise<void>;
+
+  persistProcessingRetryScheduled(data: {
+    reelId: string;
+    status: 'PENDING';
+    processingAttemptId: string;
+    stage: 'RETRY_SCHEDULED';
+    message: string;
+    progress: number;
   }): Promise<void>;
 
   emitProcessingCompleted(data: {

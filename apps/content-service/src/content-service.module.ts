@@ -1,8 +1,11 @@
 import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
+import { BuildReelMediaJobUseCase } from '@content/application/use-cases/build-reel-media-job.use-case';
+import { ClassifyReelJobLengthUseCase } from '@content/application/use-cases/classify-reel-job-length.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { CreateReelShareLinkUseCase } from '@content/application/use-cases/create-reel-share-link.use-case';
 import { CreateReelUseCase } from '@content/application/use-cases/create-reel.use-case';
 import { DeleteReelUseCase } from '@content/application/use-cases/delete-reel.use-case';
+import { DispatchOutboxEventsUseCase } from '@content/application/use-cases/dispatch-outbox-events.use-case';
 import { GetFriendsReelsUseCase } from '@content/application/use-cases/get-friends-reels.use-case';
 import { GetProfileReelContextUseCase } from '@content/application/use-cases/get-profile-reel-context.use-case';
 import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-recommended-reels.use-case';
@@ -23,10 +26,11 @@ import { AiEmbeddingServiceAdapter } from '@content/infrastructure/adapters/ai-e
 import { ConversationMessageAdapter } from '@content/infrastructure/adapters/conversation-message.adapter';
 import { FriendContentAccessAdapter } from '@content/infrastructure/adapters/friend-content-access.adapter';
 import { FriendSharePolicyAdapter } from '@content/infrastructure/adapters/friend-share-policy.adapter';
-import { ProcessingServiceAdapter } from '@content/infrastructure/adapters/processing-service.adapter';
+import { ReelMediaJobPublisherAdapter } from '@content/infrastructure/adapters/reel-media-job-publisher.adapter';
 import { RecommendationTelemetryServiceAdapter } from '@content/infrastructure/adapters/recommendation-telemetry-service.adapter';
 import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
 import { ContentController } from '@content/infrastructure/controllers/content.controller';
+import { OutboxDispatcherService } from '@content/infrastructure/jobs/outbox-dispatcher.service';
 import { PrismaService } from '@content/infrastructure/prisma/prisma.service';
 import { ContentRepository } from '@content/infrastructure/repositories/content.repository';
 import { RecommendationRepository } from '@content/infrastructure/repositories/recommendation.repository';
@@ -36,6 +40,7 @@ import { RecommendationRankingConfigService } from '@content/infrastructure/serv
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { ScheduleModule } from '@nestjs/schedule';
 
 function createRmqClientRegistration(name: string, queue: string) {
   return {
@@ -73,8 +78,8 @@ function createRmqClientRegistration(name: string, queue: string) {
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     ClientsModule.registerAsync([
-      createRmqClientRegistration('PROCESSING_SERVICE', 'processing_queue'),
       createRmqClientRegistration('AI_SERVICE_RMQ', 'ai_queue'),
       createRmqClientRegistration('FRIEND_SERVICE_RMQ', 'friend_queue'),
       createRmqClientRegistration('USER_SERVICE_RMQ', 'user_queue'),
@@ -89,8 +94,13 @@ function createRmqClientRegistration(name: string, queue: string) {
   providers: [
     PrismaService,
     ContentRepository,
+    ReelMediaJobPublisherAdapter,
+    OutboxDispatcherService,
 
     CreateReelUseCase,
+    BuildReelMediaJobUseCase,
+    ClassifyReelJobLengthUseCase,
+    DispatchOutboxEventsUseCase,
     ListReelsUseCase,
     GetReelUseCase,
     GetProfileReelContextUseCase,
@@ -133,12 +143,16 @@ function createRmqClientRegistration(name: string, queue: string) {
       useExisting: ContentRepository,
     },
     {
+      provide: 'IOutboxRepository',
+      useExisting: ContentRepository,
+    },
+    {
       provide: 'IStorageService',
       useClass: R2StorageService,
     },
     {
-      provide: 'IProcessingService',
-      useClass: ProcessingServiceAdapter,
+      provide: 'IReelMediaJobPublisher',
+      useExisting: ReelMediaJobPublisherAdapter,
     },
     {
       provide: 'IAiEmbeddingService',

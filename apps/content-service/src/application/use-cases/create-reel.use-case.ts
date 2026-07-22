@@ -1,22 +1,20 @@
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
+import { REEL_MEDIA_JOB_EVENT_TYPE } from '@common/processing/interfaces/reel-media-job.interface';
 import { InvalidMediaFileError } from '@content/domain/errors/content.error';
-import type { IProcessingService } from '@content/domain/interfaces/processing-service.interface';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
 import type { IStorageService } from '../../domain/interfaces/storage.service.interface';
+import { BuildReelMediaJobUseCase } from './build-reel-media-job.use-case';
 
 @Injectable()
 export class CreateReelUseCase {
-  private readonly logger = new Logger(CreateReelUseCase.name);
-
   constructor(
     @Inject('IContentRepository')
     private readonly contentRepository: IContentRepository,
     @Inject('IStorageService')
     private readonly storageService: IStorageService,
-    @Inject('IProcessingService')
-    private readonly processingService: IProcessingService,
+    private readonly buildReelMediaJobUseCase: BuildReelMediaJobUseCase,
   ) {}
 
   async execute(userId: string, payload: CreateReelDto) {
@@ -28,63 +26,40 @@ export class CreateReelUseCase {
       throw new InvalidMediaFileError();
     }
 
+    const reelId = randomUUID();
     const processingAttemptId = randomUUID();
-
-    const savedReel = await this.contentRepository.createReel({
-      ...payload,
+    const mediaJob = this.buildReelMediaJobUseCase.execute({
+      reelId,
       userId,
-      status: 'PENDING',
-      processingStage: 'QUEUED',
-      processingMessage: 'Queued for processing',
-      processingProgress: 0,
-      processingAttemptId,
-      processingStartedAt: undefined,
-      processingFailedAt: undefined,
-      processingCompletedAt: undefined,
-      processingErrorCode: undefined,
-      processingErrorDetail: undefined,
+      mediaKey: payload.mediaKey,
+      mediaAttemptId: processingAttemptId,
+      clientObservedDurationMs: payload.clientObservedDurationMs,
+      title: payload.title,
+      description: payload.description,
+      tags: payload.tags,
     });
 
-    try {
-      await this.processingService.emitReelCreated({
-        reelId: savedReel.id,
-        mediaKey: savedReel.mediaKey,
+    return await this.contentRepository.createReelWithMediaJob(
+      {
+        id: reelId,
         userId,
+        mediaKey: payload.mediaKey,
+        title: payload.title,
+        description: payload.description,
+        tags: payload.tags,
+        visibility: payload.visibility,
+        status: 'PENDING',
+        processingStage: 'QUEUED',
+        processingMessage: 'Queued for processing',
+        processingProgress: 0,
         processingAttemptId,
-        queuedAt: new Date().toISOString(),
-        title: savedReel.title,
-        description: savedReel.description,
-        tags: savedReel.tags,
-      });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      const failedReel = await this.contentRepository.updateReelStatus(
-        savedReel.id,
-        'FAILED',
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        'QUEUE_PUBLISH_FAILED',
-        'Video processing failed',
-        0,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        processingAttemptId,
-        'QUEUE_PUBLISH_FAILED',
-        message,
-      );
-
-      this.logger.error(
-        `Failed to enqueue reel ${savedReel.id} for processing: ${message}`,
-      );
-
-      return failedReel;
-    }
-
-    return savedReel;
+      },
+      {
+        id: mediaJob.jobId,
+        eventType: REEL_MEDIA_JOB_EVENT_TYPE,
+        payload: mediaJob,
+        createdAt: new Date(mediaJob.createdAt),
+      },
+    );
   }
 }

@@ -61,6 +61,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 /docs/*
 !/docs/reel-pipeline-temporary-artifacts.md
 !/docs/reel-pipeline-phase-0-baseline.md
+!/docs/reel-pipeline-phase-1-outbox-and-queues.md
 
 # Local notification service secrets
 apps/notification-service/secrets/

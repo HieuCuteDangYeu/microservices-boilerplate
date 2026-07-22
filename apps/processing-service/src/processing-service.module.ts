@@ -12,6 +12,7 @@ import { AiServiceAdapter } from '@processing/infrastructure/adapters/ai-service
 import { ContentServiceAdapter } from '@processing/infrastructure/adapters/content-service.adapter';
 import { ConversationMediaAdapter } from '@processing/infrastructure/adapters/conversation-media.adapter';
 import { LangGraphReelIndexingWorkflowAdapter } from '@processing/infrastructure/adapters/langgraph-reel-indexing-workflow.adapter';
+import { ReelMediaRetryPublisherAdapter } from '@processing/infrastructure/adapters/reel-media-retry-publisher.adapter';
 import { BuildReelAiMetadataUseCase } from './application/use-cases/build-reel-ai-metadata.use-case';
 import { BuildReelEmbeddingTextUseCase } from './application/use-cases/build-reel-embedding-text.use-case';
 import { BuildReelSearchIndexUseCase } from './application/use-cases/build-reel-search-index.use-case';
@@ -51,6 +52,7 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
                 Number.isFinite(heartbeat) && heartbeat > 0 ? heartbeat : 300,
               retryAttempts: 10,
               retryDelay: 3000,
+              persistent: true,
             },
           };
         },
@@ -129,6 +131,7 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     SelectReelEncodingProfileUseCase,
     ClassifyReelMediaUseCase,
     ProcessingMetricsService,
+    ReelMediaRetryPublisherAdapter,
     ValidateReelSourceMediaUseCase,
     {
       provide: 'IAiService',
@@ -157,6 +160,10 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     {
       provide: 'IProcessingMetrics',
       useExisting: ProcessingMetricsService,
+    },
+    {
+      provide: 'IReelMediaRetryPublisher',
+      useExisting: ReelMediaRetryPublisherAdapter,
     },
     {
       provide: 'IConversationMediaService',

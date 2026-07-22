@@ -275,6 +275,69 @@ export class ContentController {
     }
   }
 
+  @MessagePattern('content.persist_reel_processing_completed')
+  async persistProcessingCompleted(
+    @Payload()
+    data: {
+      reelId: string;
+      status: 'COMPLETED';
+      processingAttemptId?: string;
+      title?: string;
+      description?: string;
+      tags?: string[];
+      transcript?: string;
+      transcriptVtt?: string;
+      transcriptSegments?: TranscriptSegment[];
+      chunks?: ReelChunkIndexInput[];
+      thumbnailKey?: string;
+      stage?: string;
+      message?: string;
+      progress?: number;
+      mediaMetadata?: ReelProcessingMediaMetadata;
+      metricsContext?: ReelPipelineMetricContext;
+    },
+  ) {
+    const persistenceStartedAt = Date.now();
+    const metricsContext = this.resolveMetricsContext(data);
+
+    try {
+      await this.updateReelStatusUseCase.execute(
+        data.reelId,
+        data.status,
+        data.transcript,
+        data.transcriptVtt,
+        data.transcriptSegments,
+        data.thumbnailKey,
+        data.stage,
+        data.message,
+        data.progress,
+        data.chunks,
+        data.title,
+        data.description,
+        data.tags,
+        data.processingAttemptId,
+        undefined,
+        undefined,
+        data.mediaMetadata,
+      );
+      this.logPersistenceMetric(
+        metricsContext,
+        true,
+        Date.now() - persistenceStartedAt,
+      );
+
+      return { persisted: true };
+    } catch (error: unknown) {
+      this.logPersistenceMetric(
+        metricsContext,
+        false,
+        Date.now() - persistenceStartedAt,
+        'DATABASE_PERSISTENCE',
+      );
+      throw error;
+    }
+  }
+
   @EventPattern('reel.processing_failed')
   async handleProcessingFailed(
     @Payload()
@@ -332,6 +395,95 @@ export class ContentController {
         `[processing_failed] ${error.message} — reel ${data.reelId} NOT updated to FAILED`,
       );
     }
+  }
+
+  @MessagePattern('content.persist_reel_processing_failed')
+  async persistProcessingFailed(
+    @Payload()
+    data: {
+      reelId: string;
+      status: 'FAILED';
+      stage?: string;
+      message?: string;
+      progress?: number;
+      processingAttemptId?: string;
+      errorCode?: string;
+      errorDetail?: string;
+      mediaMetadata?: ReelProcessingMediaMetadata;
+      metricsContext?: ReelPipelineMetricContext;
+    },
+  ) {
+    const persistenceStartedAt = Date.now();
+    const metricsContext = this.resolveMetricsContext(data);
+
+    try {
+      await this.updateReelStatusUseCase.execute(
+        data.reelId,
+        data.status,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        data.stage,
+        data.message,
+        data.progress,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        data.processingAttemptId,
+        data.errorCode,
+        data.errorDetail,
+        data.mediaMetadata,
+      );
+      this.logPersistenceMetric(
+        metricsContext,
+        true,
+        Date.now() - persistenceStartedAt,
+      );
+
+      return { persisted: true };
+    } catch (error: unknown) {
+      this.logPersistenceMetric(
+        metricsContext,
+        false,
+        Date.now() - persistenceStartedAt,
+        'DATABASE_PERSISTENCE',
+      );
+      throw error;
+    }
+  }
+
+  @MessagePattern('content.persist_reel_processing_retry_scheduled')
+  async persistProcessingRetryScheduled(
+    @Payload()
+    data: {
+      reelId: string;
+      status: 'PENDING';
+      stage: 'RETRY_SCHEDULED';
+      message: string;
+      progress: number;
+      processingAttemptId: string;
+    },
+  ) {
+    await this.updateReelStatusUseCase.execute(
+      data.reelId,
+      data.status,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      data.stage,
+      data.message,
+      data.progress,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      data.processingAttemptId,
+    );
+
+    return { persisted: true };
   }
 
   private resolveMetricsContext(data: {
@@ -465,6 +617,7 @@ export class ContentController {
     data: {
       reelId: string;
       processingAttemptId: string;
+      allowReclaim?: boolean;
     },
   ) {
     if (
@@ -480,6 +633,7 @@ export class ContentController {
     return await this.claimReelProcessingAttemptUseCase.execute({
       reelId: data.reelId,
       processingAttemptId: data.processingAttemptId,
+      allowReclaim: data.allowReclaim === true,
     });
   }
 

@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
+import { OutboxEvent } from '@content/domain/entities/outbox-event.entity';
 import { ReelShareLink } from '@content/domain/entities/reel-share-link.entity';
 import { ReelShare } from '@content/domain/entities/reel-share.entity';
 import type { ReelViewEvent as DomainReelViewEvent } from '@content/domain/entities/reel-view-event.entity';
@@ -9,6 +10,7 @@ import {
   IReelViewEventRepository,
   PersistReelViewEventsResult,
 } from '@content/domain/interfaces/reel-view-event.repository.interface';
+import type { IOutboxRepository } from '@content/domain/interfaces/outbox.repository.interface';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/content-client';
@@ -25,6 +27,7 @@ import {
   ReelProcessingMediaMetadata,
   ReelProfileContextQuery,
   ReelProfileContextResult,
+  ReelMediaOutboxEventInput,
   ReelSearchQuery,
   ReelSearchResult,
   ReelShareCreateInput,
@@ -53,7 +56,11 @@ interface StartedReelViewSession {
 @Injectable()
 export class ContentRepository
   extends PrismaClient
-  implements OnModuleInit, IContentRepository, IReelViewEventRepository
+  implements
+    OnModuleInit,
+    IContentRepository,
+    IReelViewEventRepository,
+    IOutboxRepository
 {
   constructor(private readonly configService: ConfigService) {
     super();
@@ -224,59 +231,96 @@ export class ContentRepository
     return reel;
   }
 
-  async createReel(reel: Partial<Reel>): Promise<Reel> {
-    const savedRecord = await this.reel.create({
-      data: {
-        userId: reel.userId!,
-        mediaKey: reel.mediaKey!,
-        title: reel.title,
-        description: reel.description,
-        tags: reel.tags || [],
-        status: reel.status || 'PENDING',
-        visibility: reel.visibility || 'public',
-        processingStage: reel.processingStage,
-        processingMessage: reel.processingMessage,
-        processingProgress: reel.processingProgress,
-        processingAttemptId: reel.processingAttemptId,
-        processingStartedAt: reel.processingStartedAt,
-        processingFailedAt: reel.processingFailedAt,
-        processingCompletedAt: reel.processingCompletedAt,
-        processingErrorCode: reel.processingErrorCode,
-        processingErrorDetail: reel.processingErrorDetail,
-        sourceDurationMs: reel.sourceDurationMs,
-        sourceWidth: reel.sourceWidth,
-        sourceHeight: reel.sourceHeight,
-        sourceFps: reel.sourceFps,
-        sourceBitrateKbps: reel.sourceBitrateKbps,
-        sourceHasAudio: reel.sourceHasAudio,
-        sourceRotation: reel.sourceRotation,
-        encodedVariantCount: reel.encodedVariantCount,
-        encodedMaxHeight: reel.encodedMaxHeight,
-        encodedFps: reel.encodedFps,
-      },
+  async createReelWithMediaJob(
+    reel: Partial<Reel>,
+    outboxEvent: ReelMediaOutboxEventInput,
+  ): Promise<Reel> {
+    const savedRecord = await this.$transaction(async (transaction) => {
+      const record = await transaction.reel.create({
+        data: {
+          id: reel.id,
+          userId: reel.userId!,
+          mediaKey: reel.mediaKey!,
+          title: reel.title,
+          description: reel.description,
+          tags: reel.tags || [],
+          status: reel.status || 'PENDING',
+          visibility: reel.visibility || 'public',
+          processingStage: reel.processingStage,
+          processingMessage: reel.processingMessage,
+          processingProgress: reel.processingProgress,
+          processingAttemptId: reel.processingAttemptId,
+          processingStartedAt: reel.processingStartedAt,
+          processingFailedAt: reel.processingFailedAt,
+          processingCompletedAt: reel.processingCompletedAt,
+          processingErrorCode: reel.processingErrorCode,
+          processingErrorDetail: reel.processingErrorDetail,
+          sourceDurationMs: reel.sourceDurationMs,
+          sourceWidth: reel.sourceWidth,
+          sourceHeight: reel.sourceHeight,
+          sourceFps: reel.sourceFps,
+          sourceBitrateKbps: reel.sourceBitrateKbps,
+          sourceHasAudio: reel.sourceHasAudio,
+          sourceRotation: reel.sourceRotation,
+          encodedVariantCount: reel.encodedVariantCount,
+          encodedMaxHeight: reel.encodedMaxHeight,
+          encodedFps: reel.encodedFps,
+        },
+      });
+
+      await transaction.outboxEvent.create({
+        data: {
+          id: outboxEvent.id,
+          aggregateType: 'REEL',
+          aggregateId: record.id,
+          eventType: outboxEvent.eventType,
+          payload: outboxEvent.payload as unknown as Prisma.InputJsonValue,
+          createdAt: outboxEvent.createdAt,
+          nextAttemptAt: outboxEvent.createdAt,
+        },
+      });
+
+      return record;
     });
 
     return this.toDomain(savedRecord);
   }
 
-  async queueReelProcessingAttempt(
+  async queueReelProcessingAttemptWithMediaJob(
     reelId: string,
     processingAttemptId: string,
+    outboxEvent: ReelMediaOutboxEventInput,
   ): Promise<Reel> {
-    const record = await this.reel.update({
-      where: { id: reelId },
-      data: {
-        status: 'PENDING',
-        processingStage: 'QUEUED',
-        processingMessage: 'Queued for processing',
-        processingProgress: 0,
-        processingAttemptId,
-        processingStartedAt: null,
-        processingFailedAt: null,
-        processingCompletedAt: null,
-        processingErrorCode: null,
-        processingErrorDetail: null,
-      },
+    const record = await this.$transaction(async (transaction) => {
+      const queuedRecord = await transaction.reel.update({
+        where: { id: reelId },
+        data: {
+          status: 'PENDING',
+          processingStage: 'QUEUED',
+          processingMessage: 'Queued for processing',
+          processingProgress: 0,
+          processingAttemptId,
+          processingStartedAt: null,
+          processingFailedAt: null,
+          processingCompletedAt: null,
+          processingErrorCode: null,
+          processingErrorDetail: null,
+        },
+      });
+
+      await transaction.outboxEvent.create({
+        data: {
+          id: outboxEvent.id,
+          aggregateType: 'REEL',
+          aggregateId: reelId,
+          eventType: outboxEvent.eventType,
+          payload: outboxEvent.payload as unknown as Prisma.InputJsonValue,
+          createdAt: outboxEvent.createdAt,
+          nextAttemptAt: outboxEvent.createdAt,
+        },
+      });
+
+      return queuedRecord;
     });
 
     return this.toDomain(record);
@@ -285,12 +329,15 @@ export class ContentRepository
   async claimProcessingAttempt(input: {
     reelId: string;
     processingAttemptId: string;
+    allowReclaim?: boolean;
   }): Promise<boolean> {
     const result = await this.reel.updateMany({
       where: {
         id: input.reelId,
         processingAttemptId: input.processingAttemptId,
-        status: 'PENDING',
+        status: input.allowReclaim
+          ? { in: ['PENDING', 'PROCESSING'] }
+          : 'PENDING',
       },
       data: {
         status: 'PROCESSING',
@@ -306,6 +353,104 @@ export class ContentRepository
     });
 
     return result.count > 0;
+  }
+
+  async claimPending(input: {
+    limit: number;
+    claimToken: string;
+    staleBefore: Date;
+  }): Promise<OutboxEvent[]> {
+    const rows = await this.$queryRaw<
+      Array<Record<string, unknown>>
+    >(Prisma.sql`
+      WITH candidates AS (
+        SELECT "id"
+        FROM "OutboxEvent"
+        WHERE "publishedAt" IS NULL
+          AND "nextAttemptAt" <= NOW()
+          AND (
+            "claimToken" IS NULL
+            OR "claimedAt" IS NULL
+            OR "claimedAt" < ${input.staleBefore}
+          )
+        ORDER BY "createdAt" ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT ${input.limit}
+      )
+      UPDATE "OutboxEvent" AS event
+      SET "claimToken" = ${input.claimToken},
+          "claimedAt" = NOW(),
+          "attemptCount" = event."attemptCount" + 1
+      FROM candidates
+      WHERE event."id" = candidates."id"
+      RETURNING event.*
+    `);
+
+    return rows.map((row) => this.toOutboxDomain(row));
+  }
+
+  async markPublished(input: {
+    eventId: string;
+    claimToken: string;
+    publishedAt: Date;
+  }): Promise<boolean> {
+    const result = await this.outboxEvent.updateMany({
+      where: {
+        id: input.eventId,
+        claimToken: input.claimToken,
+        publishedAt: null,
+      },
+      data: {
+        publishedAt: input.publishedAt,
+        claimToken: null,
+        claimedAt: null,
+        lastError: null,
+      },
+    });
+
+    return result.count > 0;
+  }
+
+  async markFailed(input: {
+    eventId: string;
+    claimToken: string;
+    nextAttemptAt: Date;
+    lastError: string;
+  }): Promise<boolean> {
+    const result = await this.outboxEvent.updateMany({
+      where: {
+        id: input.eventId,
+        claimToken: input.claimToken,
+        publishedAt: null,
+      },
+      data: {
+        nextAttemptAt: input.nextAttemptAt,
+        claimToken: null,
+        claimedAt: null,
+        lastError: input.lastError.slice(0, 4000),
+      },
+    });
+
+    return result.count > 0;
+  }
+
+  private toOutboxDomain(record: Record<string, unknown>): OutboxEvent {
+    const event = new OutboxEvent();
+
+    event.id = record['id'] as string;
+    event.aggregateType = record['aggregateType'] as string;
+    event.aggregateId = record['aggregateId'] as string;
+    event.eventType = record['eventType'] as string;
+    event.payload = record['payload'];
+    event.createdAt = record['createdAt'] as Date;
+    event.publishedAt = (record['publishedAt'] as Date | null) ?? undefined;
+    event.attemptCount = Number(record['attemptCount']) || 0;
+    event.nextAttemptAt = record['nextAttemptAt'] as Date;
+    event.claimToken = (record['claimToken'] as string | null) ?? undefined;
+    event.claimedAt = (record['claimedAt'] as Date | null) ?? undefined;
+    event.lastError = (record['lastError'] as string | null) ?? undefined;
+
+    return event;
   }
 
   async updateReelStatus(

@@ -79,7 +79,10 @@
     "backfill:user-memory-embeddings": "node scripts/send-rmq-message.cjs ai_queue ai.backfill_user_memory_embeddings '{\"limit\":100}'",
     "tmp:load-test:reel-pipeline": "node scripts/tmp/load-test-reel-pipeline.cjs",
     "tmp:inspect:media-output": "node scripts/tmp/inspect-media-output.cjs",
-    "tmp:test:reel-pipeline": "jest --runInBand apps/processing-service/src/application/use-cases/classify-reel-media.use-case.spec.ts apps/processing-service/src/infrastructure/services/processing-metrics.service.spec.ts scripts/tmp/load-test-reel-pipeline.spec.ts"
+    "tmp:test:reel-pipeline": "jest --runInBand apps/processing-service/src/application/use-cases/classify-reel-media.use-case.spec.ts apps/processing-service/src/infrastructure/services/processing-metrics.service.spec.ts scripts/tmp/load-test-reel-pipeline.spec.ts",
+    "tmp:inspect:reel-queues": "node scripts/tmp/inspect-reel-queues.cjs",
+    "tmp:failure-test:reel-queues": "node scripts/tmp/failure-test-reel-queues.cjs",
+    "tmp:test:reel-queues": "jest --runInBand apps/content-service/src/application/use-cases/create-reel-outbox.use-case.spec.ts apps/content-service/src/application/use-cases/classify-reel-job-length.use-case.spec.ts apps/content-service/src/application/use-cases/dispatch-outbox-events.use-case.spec.ts apps/content-service/src/application/use-cases/claim-reel-processing-attempt.use-case.spec.ts apps/processing-service/src/application/use-cases/validate-reel-source-media.use-case.phase1.spec.ts apps/processing-service/src/infrastructure/controllers/processing.controller.phase1.spec.ts scripts/tmp/reel-queue-tools.spec.ts"
   },
   "packageManager": "pnpm@9.15.0",
   "overrides": {

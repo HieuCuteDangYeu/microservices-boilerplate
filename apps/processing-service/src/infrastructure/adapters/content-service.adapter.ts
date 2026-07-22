@@ -4,7 +4,7 @@ import type { ReelPipelineMetricContext } from '@common/processing/interfaces/re
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import type { IProcessingMetrics } from '@processing/domain/interfaces/processing-metrics.interface';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import type {
   IContentService,
   ReelProcessingMediaMetadata,
@@ -47,6 +47,7 @@ export class ContentServiceAdapter implements IContentService {
   async claimReelProcessingAttempt(data: {
     reelId: string;
     processingAttemptId: string;
+    allowReclaim?: boolean;
   }): Promise<boolean> {
     try {
       return await firstValueFrom(
@@ -131,7 +132,9 @@ export class ContentServiceAdapter implements IContentService {
 
     try {
       await firstValueFrom(
-        this.messageBroker.emit('reel.processing_completed', data),
+        this.messageBroker
+          .send('content.persist_reel_processing_completed', data)
+          .pipe(timeout(30_000)),
       );
       timer?.succeed();
     } catch (error: unknown) {
@@ -167,13 +170,36 @@ export class ContentServiceAdapter implements IContentService {
 
     try {
       await firstValueFrom(
-        this.messageBroker.emit('reel.processing_failed', data),
+        this.messageBroker
+          .send('content.persist_reel_processing_failed', data)
+          .pipe(timeout(30_000)),
       );
       timer?.succeed();
     } catch (error: unknown) {
       timer?.fail('RABBITMQ_PUBLISH_FAILED');
       throw new Error(
         `Failed to emit reel.processing_failed: ${this.describeError(error)}`,
+      );
+    }
+  }
+
+  async persistProcessingRetryScheduled(data: {
+    reelId: string;
+    status: 'PENDING';
+    processingAttemptId: string;
+    stage: 'RETRY_SCHEDULED';
+    message: string;
+    progress: number;
+  }): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.messageBroker
+          .send('content.persist_reel_processing_retry_scheduled', data)
+          .pipe(timeout(30_000)),
+      );
+    } catch (error: unknown) {
+      throw new Error(
+        `Failed to persist retry scheduling: ${this.describeError(error)}`,
       );
     }
   }

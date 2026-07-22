@@ -22,7 +22,8 @@ export class ValidateReelSourceMediaUseCase {
       this.getPositiveInt('REEL_MIN_DURATION_SECONDS', 1, 1, 30) * 1000;
 
     const maxDurationMs =
-      this.getPositiveInt('REEL_MAX_DURATION_SECONDS', 180, 10, 600) * 1000;
+      this.getPositiveInt('MEDIA_LONG_MAX_DURATION_SECONDS', 7200, 10, 86_400) *
+      1000;
 
     const maxSourceLongSide = this.getPositiveInt(
       'REEL_MAX_SOURCE_LONG_SIDE',
