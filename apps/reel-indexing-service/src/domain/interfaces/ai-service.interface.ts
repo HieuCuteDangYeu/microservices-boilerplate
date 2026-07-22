@@ -2,7 +2,10 @@ import type {
   ExtractedReelMetadata,
   ReelMetadataExtractionInput,
 } from '@common/ai/interfaces/reel-metadata-extraction.interface';
-import type { GenerateEmbeddingResult } from '@common/ai/interfaces/generate-embedding.interface';
+import type {
+  GenerateEmbeddingBatchRequest,
+  GenerateEmbeddingBatchResult,
+} from '@common/ai/interfaces/generate-embedding.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 
 export interface IIndexingAiService {
@@ -15,5 +18,7 @@ export interface IIndexingAiService {
     input: ReelMetadataExtractionInput,
   ): Promise<ExtractedReelMetadata>;
 
-  generateEmbedding(text: string): Promise<GenerateEmbeddingResult>;
+  generateEmbeddingBatch(
+    input: GenerateEmbeddingBatchRequest,
+  ): Promise<GenerateEmbeddingBatchResult>;
 }

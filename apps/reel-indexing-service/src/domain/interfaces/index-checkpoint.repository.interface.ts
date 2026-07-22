@@ -1,6 +1,10 @@
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import type { TranscriptionAudioArtifact } from '@common/processing/interfaces/transcription-audio-manifest.interface';
 import type {
+  CachedEmbedding,
+  EmbeddingCacheIdentity,
+} from '@common/processing/interfaces/reel-index-document.interface';
+import type {
   AudioSegmentCheckpoint,
   IndexCheckpointStage,
   IndexJobCheckpoint,
@@ -31,4 +35,8 @@ export interface IIndexCheckpointRepository {
   }): Promise<void>;
   complete(indexAttemptId: string): Promise<void>;
   fail(indexAttemptId: string, error: string): Promise<void>;
+  findReusableEmbeddings(
+    identities: EmbeddingCacheIdentity[],
+  ): Promise<CachedEmbedding[]>;
+  saveEmbeddings(embeddings: CachedEmbedding[]): Promise<void>;
 }

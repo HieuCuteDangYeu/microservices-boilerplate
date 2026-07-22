@@ -1,9 +1,12 @@
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { TranscriptSection } from '@indexing/domain/entities/index-checkpoint.entity';
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class BuildTranscriptSectionsUseCase {
+  constructor(private readonly config: ConfigService) {}
+
   execute(text?: string, segments?: TranscriptSegment[]): TranscriptSection[] {
     if (segments && segments.length > 0) {
       return this.fromSegments(segments);
@@ -23,6 +26,12 @@ export class BuildTranscriptSectionsUseCase {
   private fromSegments(segments: TranscriptSegment[]): TranscriptSection[] {
     const sections: TranscriptSection[] = [];
     let current: TranscriptSegment[] = [];
+    const targetMs =
+      this.positiveInt('INDEX_SECTION_TARGET_SECONDS', 300, 60, 1_800) * 1000;
+    const maximumMs = Math.max(
+      targetMs,
+      this.positiveInt('INDEX_SECTION_MAX_SECONDS', 480, 60, 3_600) * 1000,
+    );
 
     const flush = () => {
       if (current.length === 0) return;
@@ -41,20 +50,17 @@ export class BuildTranscriptSectionsUseCase {
     for (const segment of [...segments].sort(
       (left, right) => left.start - right.start,
     )) {
-      const projectedTextLength =
-        current.reduce((total, value) => total + value.text.length, 0) +
-        segment.text.length;
       const projectedDurationMs = current.length
         ? (segment.end - current[0].start) * 1000
         : 0;
 
-      if (
-        current.length > 0 &&
-        (projectedTextLength > 6_000 || projectedDurationMs > 300_000)
-      ) {
+      if (current.length > 0 && projectedDurationMs > maximumMs) {
         flush();
       }
       current.push(segment);
+      const currentDurationMs =
+        (current[current.length - 1].end - current[0].start) * 1000;
+      if (currentDurationMs >= targetMs) flush();
     }
     flush();
     return sections;
@@ -78,5 +84,17 @@ export class BuildTranscriptSectionsUseCase {
       remainder = remainder.slice(splitAt).trim();
     }
     return sections;
+  }
+
+  private positiveInt(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const parsed = Number(this.config.get<string>(key) ?? fallback);
+    return Number.isInteger(parsed)
+      ? Math.min(max, Math.max(min, parsed))
+      : fallback;
   }
 }

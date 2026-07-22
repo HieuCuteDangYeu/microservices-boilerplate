@@ -33,6 +33,12 @@ enum AudioSegmentStatus {
   FAILED
 }
 
+enum IndexDocumentKind {
+  REEL
+  SECTION
+  CHUNK
+}
+
 model IndexJobCheckpoint {
   indexAttemptId    String               @id
   jobId             String               @unique
@@ -45,15 +51,36 @@ model IndexJobCheckpoint {
   mergedSegments    Json?
   extractedMetadata Json?
   sections          Json?
-  chunks             Json?
-  lastError          String?              @db.Text
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  chunks            Json?
+  lastError         String?              @db.Text
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
   audioSegments AudioSegmentCheckpoint[]
 
   @@index([reelId])
   @@index([status, updatedAt])
+}
+
+model EmbeddingCacheEntry {
+  cacheKey            String            @id
+  stableItemId        String
+  documentKind        IndexDocumentKind
+  embeddingInputHash  String
+  embeddingProvider   String
+  embeddingModel      String
+  embeddingDimensions Int
+  embeddingVersion    String
+  indexVersion        String
+  chunkingVersion     String
+  summaryVersion      String
+  embedding           Json
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@index([stableItemId])
+  @@index([embeddingInputHash, embeddingVersion])
+  @@index([indexVersion, chunkingVersion, summaryVersion])
 }
 
 model AudioSegmentCheckpoint {

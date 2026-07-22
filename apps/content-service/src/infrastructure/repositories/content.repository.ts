@@ -510,7 +510,7 @@ export class ContentRepository
         indexAttemptId: reel.indexAttemptId,
         indexVersion:
           this.configService.get<string>('INDEX_VERSION')?.trim() ||
-          'reel-index-v1',
+          'reel-index-v2',
         mediaKey: reel.mediaKey,
         transcriptionAudioManifestKey:
           input.mediaOutput.transcriptionAudioManifestKey,
@@ -743,6 +743,81 @@ export class ContentRepository
       },
     });
     return result.count > 0;
+  }
+
+  async queueReelIndexingAttempt(reelId: string): Promise<string | null> {
+    return await this.$transaction(async (transaction) => {
+      const reel = await transaction.reel.findFirst({
+        where: { id: reelId, mediaStatus: 'COMPLETED' },
+      });
+      const mediaAttemptId = reel?.mediaAttemptId || reel?.processingAttemptId;
+      if (
+        !reel ||
+        !mediaAttemptId ||
+        !reel.sourceDurationMs ||
+        !reel.sourceOrientation ||
+        !reel.sourceLengthClass
+      ) {
+        return null;
+      }
+
+      const indexAttemptId = randomUUID();
+      const result = await transaction.reel.updateMany({
+        where: {
+          id: reel.id,
+          mediaStatus: 'COMPLETED',
+          indexAttemptId: reel.indexAttemptId,
+        },
+        data: {
+          indexAttemptId,
+          indexStatus: 'PENDING',
+          status: 'COMPLETED',
+          processingStage: 'INDEX_QUEUED',
+          processingMessage: 'Video is ready; indexing queued',
+          processingProgress: 90,
+          processingFailedAt: null,
+          processingErrorCode: null,
+          processingErrorDetail: null,
+        },
+      });
+      if (result.count === 0) return null;
+
+      const createdAt = new Date();
+      const jobId = randomUUID();
+      const indexJob: ReelIndexJob = {
+        jobId,
+        reelId: reel.id,
+        userId: reel.userId,
+        mediaAttemptId,
+        indexAttemptId,
+        indexVersion:
+          this.configService.get<string>('INDEX_VERSION')?.trim() ||
+          'reel-index-v2',
+        mediaKey: reel.mediaKey,
+        transcriptionAudioManifestKey:
+          reel.transcriptionAudioManifestKey ?? undefined,
+        sourceDurationMs: reel.sourceDurationMs,
+        sourceOrientation: reel.sourceOrientation,
+        sourceLengthClass: reel.sourceLengthClass,
+        title: reel.title ?? undefined,
+        description: reel.description ?? undefined,
+        tags: reel.tags,
+        createdAt: createdAt.toISOString(),
+        schemaVersion: REEL_INDEX_JOB_SCHEMA_VERSION,
+      };
+      await transaction.outboxEvent.create({
+        data: {
+          id: jobId,
+          aggregateType: 'REEL',
+          aggregateId: reel.id,
+          eventType: REEL_INDEX_JOB_EVENT_TYPE,
+          payload: indexJob as unknown as Prisma.InputJsonValue,
+          createdAt,
+          nextAttemptAt: createdAt,
+        },
+      });
+      return indexAttemptId;
+    });
   }
 
   async claimPending(input: {

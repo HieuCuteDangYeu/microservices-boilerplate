@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { BuildAndEmbedChunksUseCase } from './application/use-cases/build-and-embed-chunks.use-case';
+import { BuildHierarchicalIndexUseCase } from './application/use-cases/build-hierarchical-index.use-case';
 import { BuildTranscriptSectionsUseCase } from './application/use-cases/build-transcript-sections.use-case';
 import { ExtractHierarchicalMetadataUseCase } from './application/use-cases/extract-hierarchical-metadata.use-case';
 import { MergeTranscriptSegmentsUseCase } from './application/use-cases/merge-transcript-segments.use-case';
@@ -55,7 +55,7 @@ const rabbitClient = (name: string, queue: string) => ({
     MergeTranscriptSegmentsUseCase,
     BuildTranscriptSectionsUseCase,
     ExtractHierarchicalMetadataUseCase,
-    BuildAndEmbedChunksUseCase,
+    BuildHierarchicalIndexUseCase,
     ProcessReelIndexJobUseCase,
     AiServiceAdapter,
     ContentServiceAdapter,

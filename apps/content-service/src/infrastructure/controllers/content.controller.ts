@@ -21,6 +21,7 @@ import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
+import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
 import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
 import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/resolve-reel-share-link.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
@@ -76,6 +77,7 @@ export class ContentController {
     private readonly backfillReelChunksUseCase: BackfillReelChunksUseCase,
     private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
     private readonly reprocessReelUseCase: ReprocessReelUseCase,
+    private readonly reindexReelUseCase: ReindexReelUseCase,
     private readonly claimReelProcessingAttemptUseCase: ClaimReelProcessingAttemptUseCase,
     private readonly claimReelIndexingAttemptUseCase: ClaimReelIndexingAttemptUseCase,
     private readonly completeReelIndexingUseCase: CompleteReelIndexingUseCase,
@@ -806,6 +808,11 @@ export class ContentController {
         message: `Reprocess Reel Error: ${err.message}`,
       });
     }
+  }
+
+  @MessagePattern('content.reindex_reel')
+  async reindexReel(@Payload() data: { reelId: string }) {
+    return await this.reindexReelUseCase.execute(data?.reelId);
   }
 
   @MessagePattern('content.search_reel_context')

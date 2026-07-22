@@ -252,6 +252,8 @@ export interface IContentRepository {
     errorDetail: string;
   }): Promise<boolean>;
 
+  queueReelIndexingAttempt(reelId: string): Promise<string | null>;
+
   updateReelStatus(
     id: string,
     status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',

@@ -2,6 +2,10 @@ import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
+import type {
+  CachedEmbedding,
+  EmbeddingCacheIdentity,
+} from '@common/processing/interfaces/reel-index-document.interface';
 import type { TranscriptionAudioArtifact } from '@common/processing/interfaces/transcription-audio-manifest.interface';
 import type {
   AudioSegmentCheckpoint,
@@ -175,6 +179,52 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
       where: { indexAttemptId },
       data: { status: 'FAILED', lastError: error },
     });
+  }
+
+  async findReusableEmbeddings(
+    identities: EmbeddingCacheIdentity[],
+  ): Promise<CachedEmbedding[]> {
+    if (identities.length === 0) return [];
+    const records = await this.prisma.embeddingCacheEntry.findMany({
+      where: {
+        cacheKey: { in: identities.map((identity) => identity.cacheKey) },
+      },
+    });
+    return records.map((record) => ({
+      cacheKey: record.cacheKey,
+      stableItemId: record.stableItemId,
+      documentKind: record.documentKind,
+      embeddingInputHash: record.embeddingInputHash,
+      embeddingProvider: record.embeddingProvider,
+      embeddingModel: record.embeddingModel,
+      embeddingDimensions: record.embeddingDimensions,
+      embeddingVersion: record.embeddingVersion,
+      indexVersion: record.indexVersion,
+      chunkingVersion: record.chunkingVersion,
+      summaryVersion: record.summaryVersion,
+      embedding: record.embedding as unknown as number[],
+    }));
+  }
+
+  async saveEmbeddings(embeddings: CachedEmbedding[]): Promise<void> {
+    if (embeddings.length === 0) return;
+    await this.prisma.$transaction(
+      embeddings.map((entry) =>
+        this.prisma.embeddingCacheEntry.upsert({
+          where: { cacheKey: entry.cacheKey },
+          create: {
+            ...entry,
+            embedding: entry.embedding,
+          },
+          update: {
+            embeddingProvider: entry.embeddingProvider,
+            embeddingModel: entry.embeddingModel,
+            embeddingDimensions: entry.embeddingDimensions,
+            embedding: entry.embedding,
+          },
+        }),
+      ),
+    );
   }
 
   private toCheckpoint(record: Record<string, unknown>): IndexJobCheckpoint {

@@ -1,5 +1,8 @@
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
-import type { GenerateEmbeddingResult } from '@common/ai/interfaces/generate-embedding.interface';
+import type {
+  GenerateEmbeddingBatchRequest,
+  GenerateEmbeddingBatchResult,
+} from '@common/ai/interfaces/generate-embedding.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import { Inject, Injectable } from '@nestjs/common';
@@ -42,15 +45,16 @@ export class AiServiceAdapter implements IIndexingAiService {
     return response.metadata;
   }
 
-  async generateEmbedding(text: string): Promise<GenerateEmbeddingResult> {
-    const response = await firstValueFrom(
+  async generateEmbeddingBatch(
+    input: GenerateEmbeddingBatchRequest,
+  ): Promise<GenerateEmbeddingBatchResult> {
+    return await firstValueFrom(
       this.client
-        .send<{ embedding: GenerateEmbeddingResult }>('ai.generate_embedding', {
-          text,
-          taskType: 'RETRIEVAL_DOCUMENT',
-        })
+        .send<GenerateEmbeddingBatchResult>(
+          'ai.generate_embedding_batch',
+          input,
+        )
         .pipe(timeout(120_000)),
     );
-    return response.embedding;
   }
 }

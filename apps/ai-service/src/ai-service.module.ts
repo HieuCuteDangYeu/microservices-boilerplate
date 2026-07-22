@@ -6,6 +6,7 @@ import { ExtractReelMetadataUseCase } from '@ai/application/use-cases/extract-re
 import { ExtractUserMemoriesFromTurnUseCase } from '@ai/application/use-cases/extract-user-memories-from-turn.use-case';
 import { GenerateDraftAnswerUseCase } from '@ai/application/use-cases/generate-draft-answer.use-case';
 import { GenerateEmbeddingUseCase } from '@ai/application/use-cases/generate-embedding.use-case';
+import { GenerateEmbeddingBatchUseCase } from '@ai/application/use-cases/generate-embedding-batch.use-case';
 import { GetConversationMemoryUseCase } from '@ai/application/use-cases/get-conversation-memory.use-case';
 import { GetRelevantUserMemoriesUseCase } from '@ai/application/use-cases/get-relevant-user-memories.use-case';
 import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
@@ -100,6 +101,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 
     StreamChatUseCase,
     GenerateEmbeddingUseCase,
+    GenerateEmbeddingBatchUseCase,
     TranscribeAudioUseCase,
     TranscribeAudioBufferUseCase,
 

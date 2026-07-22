@@ -1,9 +1,11 @@
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
+import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
+import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { IndexCheckpointStage } from '@indexing/domain/entities/index-checkpoint.entity';
 import type { IIndexingContentService } from '@indexing/domain/interfaces/content-service.interface';
 import type { IIndexCheckpointRepository } from '@indexing/domain/interfaces/index-checkpoint.repository.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { BuildAndEmbedChunksUseCase } from './build-and-embed-chunks.use-case';
+import { BuildHierarchicalIndexUseCase } from './build-hierarchical-index.use-case';
 import { BuildTranscriptSectionsUseCase } from './build-transcript-sections.use-case';
 import { ExtractHierarchicalMetadataUseCase } from './extract-hierarchical-metadata.use-case';
 import { MergeTranscriptSegmentsUseCase } from './merge-transcript-segments.use-case';
@@ -22,7 +24,7 @@ export class ProcessReelIndexJobUseCase {
     private readonly mergeTranscript: MergeTranscriptSegmentsUseCase,
     private readonly buildSections: BuildTranscriptSectionsUseCase,
     private readonly extractMetadata: ExtractHierarchicalMetadataUseCase,
-    private readonly buildAndEmbedChunks: BuildAndEmbedChunksUseCase,
+    private readonly buildHierarchicalIndex: BuildHierarchicalIndexUseCase,
     @Inject('IIndexCheckpointRepository')
     private readonly checkpoints: IIndexCheckpointRepository,
     @Inject('IIndexingContentService')
@@ -104,22 +106,18 @@ export class ProcessReelIndexJobUseCase {
         sections,
       });
 
-      let chunks = checkpoint.chunks;
-      if (!chunks) {
-        await this.stage(job, 'BUILDING_CHUNKS', 70);
-        await this.stage(job, 'EMBEDDING', 75);
-        chunks = await this.buildAndEmbedChunks.execute({
-          transcript: checkpoint.mergedTranscript,
-          transcriptSegments: checkpoint.mergedSegments,
-          metadata,
-        });
-        await this.checkpoints.setStage(job.indexAttemptId, 'EMBEDDING', {
-          chunks,
-        });
-      }
+      await this.stage(job, 'BUILDING_CHUNKS', 70);
+      await this.stage(job, 'EMBEDDING', 75);
+      const { chunks, documents } = await this.buildHierarchicalIndex.execute({
+        job,
+        transcript: checkpoint.mergedTranscript,
+        transcriptSegments: checkpoint.mergedSegments,
+        metadata,
+        sections,
+      });
 
       await this.stage(job, 'VALIDATING', 90);
-      this.validate(metadata, chunks);
+      this.validate(job, metadata, chunks, documents);
       await this.stage(job, 'PERSISTING', 95);
       const applied = await this.content.completeIndexing({
         reelId: job.reelId,
@@ -168,8 +166,10 @@ export class ProcessReelIndexJobUseCase {
   }
 
   private validate(
+    job: ReelIndexJob,
     metadata: { title?: string; description?: string; tags: string[] },
-    chunks: Array<{ text: string; embedding: number[] }>,
+    chunks: ReelChunkIndexInput[],
+    documents: ReelIndexDocument[],
   ): void {
     const hasMetadata = Boolean(
       metadata.title?.trim() ||
@@ -183,6 +183,16 @@ export class ProcessReelIndexJobUseCase {
       if (!chunk.text.trim() || chunk.embedding.length === 0) {
         throw new Error('Index output contains an invalid chunk');
       }
+    }
+    if (documents.filter((document) => document.kind === 'REEL').length !== 1) {
+      throw new Error('Index output must contain exactly one Reel document');
+    }
+    if (
+      job.sourceLengthClass === 'LONG' &&
+      chunks.some((chunk) => chunk.startTime !== undefined) &&
+      documents.every((document) => document.kind !== 'SECTION')
+    ) {
+      throw new Error('Long index output has no section documents');
     }
   }
 }

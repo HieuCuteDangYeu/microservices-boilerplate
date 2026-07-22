@@ -95,6 +95,9 @@ export class GeminiEmbeddingAdapter implements IEmbeddingService {
       values,
       model: this.model.replace(/^models\//, ''),
       dimensions: values.length,
+      provider: 'google',
+      version:
+        this.configService.get<string>('GEMINI_EMBEDDING_VERSION') || '1',
     };
   }
 

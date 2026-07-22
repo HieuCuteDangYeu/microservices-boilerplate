@@ -7,6 +7,7 @@ import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-aud
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
 import type { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+import type { GenerateEmbeddingBatchRequest } from '@common/ai/interfaces/generate-embedding.interface';
 import type { ReelMetadataExtractionInput } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 import { Controller } from '@nestjs/common';
@@ -17,11 +18,13 @@ import {
   RpcException,
 } from '@nestjs/microservices';
 import { GenerateEmbeddingUseCase } from '../../application/use-cases/generate-embedding.use-case';
+import { GenerateEmbeddingBatchUseCase } from '../../application/use-cases/generate-embedding-batch.use-case';
 
 @Controller()
 export class AiController {
   constructor(
     private readonly generateEmbeddingUseCase: GenerateEmbeddingUseCase,
+    private readonly generateEmbeddingBatchUseCase: GenerateEmbeddingBatchUseCase,
     private readonly transcribeAudioUseCase: TranscribeAudioUseCase,
     private readonly transcribeAudioBufferUseCase: TranscribeAudioBufferUseCase,
     private readonly streamChatUseCase: StreamChatUseCase,
@@ -58,6 +61,37 @@ export class AiController {
         message: error.message,
       });
     }
+  }
+
+  @MessagePattern('ai.generate_embedding_batch')
+  async handleGenerateEmbeddingBatch(
+    @Payload() data: GenerateEmbeddingBatchRequest,
+  ) {
+    const ids = data?.items?.map((item) => item.id) ?? [];
+    if (
+      !data ||
+      !Array.isArray(data.items) ||
+      data.items.length === 0 ||
+      data.items.length > 100 ||
+      new Set(ids).size !== ids.length ||
+      data.items.some(
+        (item) =>
+          typeof item !== 'object' ||
+          item === null ||
+          typeof item.id !== 'string' ||
+          !item.id.trim() ||
+          typeof item.text !== 'string' ||
+          !item.text.trim() ||
+          item.text.length > 20_000,
+      )
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid batch embedding request payload',
+      });
+    }
+
+    return await this.generateEmbeddingBatchUseCase.execute(data);
   }
 
   @MessagePattern('ai.transcribe_audio_buffer')
