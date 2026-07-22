@@ -39,7 +39,7 @@ enum IndexDocumentKind {
   CHUNK
 }
 
-model IndexJobCheckpoint {
+model IndexingAttempt {
   indexAttemptId    String               @id
   jobId             String               @unique
   reelId            String
@@ -103,8 +103,131 @@ model AudioSegmentCheckpoint {
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
-  checkpoint IndexJobCheckpoint @relation(fields: [indexAttemptId], references: [indexAttemptId], onDelete: Cascade)
+  checkpoint IndexingAttempt @relation(fields: [indexAttemptId], references: [indexAttemptId], onDelete: Cascade)
 
   @@unique([indexAttemptId, segmentNumber])
   @@index([indexAttemptId, status])
+}
+
+model ReelDocument {
+  rowId               String                     @id @default(uuid())
+  id                  String
+  reelId              String
+  indexAttemptId      String
+  isActive            Boolean                    @default(false)
+  userId              String
+  parentId            String?
+  title               String?
+  description         String?                    @db.Text
+  text                String                     @db.Text
+  tags                String[]
+  startTime           Float?
+  endTime             Float?
+  sourceDurationMs    Int
+  sourceOrientation   String
+  sourceLengthClass   String
+  embedding           Unsupported("vector(384)")
+  searchVector        Unsupported("tsvector")?
+  embeddingProvider   String
+  embeddingModel      String
+  embeddingDimensions Int
+  embeddingVersion    String
+  embeddingInputHash  String
+  indexVersion        String
+  chunkingVersion     String
+  summaryVersion      String
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@unique([id, indexAttemptId])
+  @@unique([reelId, indexAttemptId])
+  @@index([reelId, isActive])
+  @@index([userId, isActive])
+  @@index([sourceLengthClass, isActive])
+}
+
+model ReelSection {
+  rowId               String                     @id @default(uuid())
+  id                  String
+  reelId              String
+  indexAttemptId      String
+  isActive            Boolean                    @default(false)
+  userId              String
+  parentId            String
+  title               String?
+  description         String?                    @db.Text
+  text                String                     @db.Text
+  tags                String[]
+  startTime           Float
+  endTime             Float
+  sourceDurationMs    Int
+  sourceOrientation   String
+  sourceLengthClass   String
+  embedding           Unsupported("vector(384)")
+  searchVector        Unsupported("tsvector")?
+  embeddingProvider   String
+  embeddingModel      String
+  embeddingDimensions Int
+  embeddingVersion    String
+  embeddingInputHash  String
+  indexVersion        String
+  chunkingVersion     String
+  summaryVersion      String
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@unique([id, indexAttemptId])
+  @@index([reelId, isActive])
+  @@index([parentId, isActive])
+  @@index([userId, isActive])
+}
+
+model ReelChunk {
+  rowId               String                     @id @default(uuid())
+  id                  String
+  reelId              String
+  indexAttemptId      String
+  isActive            Boolean                    @default(false)
+  userId              String
+  parentId            String
+  title               String?
+  description         String?                    @db.Text
+  text                String                     @db.Text
+  tags                String[]
+  startTime           Float?
+  endTime             Float?
+  sourceDurationMs    Int
+  sourceOrientation   String
+  sourceLengthClass   String
+  embedding           Unsupported("vector(384)")
+  searchVector        Unsupported("tsvector")?
+  embeddingProvider   String
+  embeddingModel      String
+  embeddingDimensions Int
+  embeddingVersion    String
+  embeddingInputHash  String
+  indexVersion        String
+  chunkingVersion     String
+  summaryVersion      String
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@unique([id, indexAttemptId])
+  @@index([reelId, isActive])
+  @@index([parentId, isActive])
+  @@index([userId, isActive])
+}
+
+model TranscriptionSegment {
+  id             String   @id @default(uuid())
+  reelId         String
+  indexAttemptId String
+  ordinal        Int
+  startTime      Float
+  endTime        Float
+  text           String   @db.Text
+  createdAt      DateTime @default(now())
+
+  @@unique([indexAttemptId, ordinal])
+  @@index([reelId, indexAttemptId])
 }

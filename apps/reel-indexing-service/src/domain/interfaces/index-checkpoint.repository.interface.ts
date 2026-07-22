@@ -33,7 +33,6 @@ export interface IIndexCheckpointRepository {
     segmentNumber: number;
     error: string;
   }): Promise<void>;
-  complete(indexAttemptId: string): Promise<void>;
   fail(indexAttemptId: string, error: string): Promise<void>;
   findReusableEmbeddings(
     identities: EmbeddingCacheIdentity[],

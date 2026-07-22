@@ -12,8 +12,10 @@ import { ContentServiceAdapter } from './infrastructure/adapters/content-service
 import { R2ArtifactStorageAdapter } from './infrastructure/adapters/r2-artifact-storage.adapter';
 import { ReelIndexRetryPublisherAdapter } from './infrastructure/adapters/reel-index-retry-publisher.adapter';
 import { ReelIndexingController } from './infrastructure/controllers/reel-indexing.controller';
+import { SemanticIndexController } from './infrastructure/controllers/semantic-index.controller';
 import { PrismaService } from './infrastructure/prisma/prisma.service';
 import { PrismaIndexCheckpointRepository } from './infrastructure/repositories/prisma-index-checkpoint.repository';
+import { PrismaSemanticIndexRepository } from './infrastructure/repositories/prisma-semantic-index.repository';
 
 const rabbitClient = (name: string, queue: string) => ({
   name,
@@ -48,7 +50,7 @@ const rabbitClient = (name: string, queue: string) => ({
       rabbitClient('CONTENT_SERVICE_RMQ', 'content_queue'),
     ]),
   ],
-  controllers: [ReelIndexingController],
+  controllers: [ReelIndexingController, SemanticIndexController],
   providers: [
     PrismaService,
     TranscribeAudioManifestUseCase,
@@ -62,6 +64,7 @@ const rabbitClient = (name: string, queue: string) => ({
     R2ArtifactStorageAdapter,
     ReelIndexRetryPublisherAdapter,
     PrismaIndexCheckpointRepository,
+    PrismaSemanticIndexRepository,
     { provide: 'IIndexingAiService', useExisting: AiServiceAdapter },
     { provide: 'IIndexingContentService', useExisting: ContentServiceAdapter },
     { provide: 'IArtifactStorage', useExisting: R2ArtifactStorageAdapter },
@@ -72,6 +75,10 @@ const rabbitClient = (name: string, queue: string) => ({
     {
       provide: 'IIndexCheckpointRepository',
       useExisting: PrismaIndexCheckpointRepository,
+    },
+    {
+      provide: 'ISemanticIndexRepository',
+      useExisting: PrismaSemanticIndexRepository,
     },
   ],
 })

@@ -656,10 +656,16 @@ export class ContentRepository
           id: input.reelId,
           indexAttemptId: input.indexAttemptId,
           mediaStatus: 'COMPLETED',
-          indexStatus: 'PROCESSING',
         },
       });
       if (!current) return false;
+      if (
+        current.indexStatus === 'COMPLETED' ||
+        current.indexStatus === 'DEGRADED'
+      ) {
+        return true;
+      }
+      if (current.indexStatus !== 'PROCESSING') return false;
 
       const result = await transaction.reel.updateMany({
         where: {

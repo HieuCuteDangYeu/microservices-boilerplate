@@ -95,6 +95,9 @@
     "tmp:test:reel-queues": "jest --runInBand apps/content-service/src/application/use-cases/create-reel-outbox.use-case.spec.ts apps/content-service/src/application/use-cases/classify-reel-job-length.use-case.spec.ts apps/content-service/src/application/use-cases/dispatch-outbox-events.use-case.spec.ts apps/content-service/src/application/use-cases/claim-reel-processing-attempt.use-case.spec.ts apps/media-processing-service/src/application/use-cases/validate-reel-source-media.use-case.phase1.spec.ts apps/media-processing-service/src/infrastructure/controllers/media-processing.controller.phase1.spec.ts scripts/tmp/reel-queue-tools.spec.ts",
     "tmp:test:reel-state": "jest --runInBand apps/media-processing-service/src/application/use-cases/classify-reel-media.use-case.spec.ts apps/content-service/src/domain/reel-status-compatibility.mapper.phase2.spec.ts apps/content-service/src/infrastructure/repositories/content.repository.phase2.spec.ts",
     "tmp:benchmark:indexing": "node scripts/tmp/benchmark-reel-indexing.cjs",
+    "tmp:verify:semantic-index": "node scripts/tmp/verify-semantic-index.cjs",
+    "tmp:explain:semantic-index": "node scripts/tmp/explain-semantic-index.cjs",
+    "tmp:benchmark:semantic-index": "node scripts/tmp/benchmark-semantic-index.cjs",
     "ops:reindex:reel": "node scripts/ops/reindex-reel.cjs",
     "ops:reindex:status": "node scripts/ops/reindex-status.cjs"
   },

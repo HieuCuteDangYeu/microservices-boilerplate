@@ -67,4 +67,18 @@ export class ContentServiceAdapter implements IIndexingContentService {
         .pipe(timeout(30_000)),
     );
   }
+
+  async reindexReel(reelId: string): Promise<{
+    queued: boolean;
+    indexAttemptId?: string;
+  }> {
+    return await firstValueFrom(
+      this.client
+        .send<{
+          queued: boolean;
+          indexAttemptId?: string;
+        }>('content.reindex_reel', { reelId })
+        .pipe(timeout(30_000)),
+    );
+  }
 }

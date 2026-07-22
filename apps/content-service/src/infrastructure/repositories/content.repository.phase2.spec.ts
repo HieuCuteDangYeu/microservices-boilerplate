@@ -100,6 +100,40 @@ describe('ContentRepository Phase 2 state guards', () => {
     expect(transaction.reelChunk.deleteMany).not.toHaveBeenCalled();
   });
 
+  it('accepts an already completed current attempt without rewriting chunks', async () => {
+    const transaction = {
+      reel: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'reel-1',
+          indexAttemptId: 'index-attempt-current',
+          indexStatus: 'COMPLETED',
+        }),
+        updateMany: jest.fn(),
+      },
+      reelChunk: { deleteMany: jest.fn() },
+      $executeRaw: jest.fn(),
+    };
+    const repository = Object.create(
+      ContentRepository.prototype,
+    ) as ContentRepository;
+    Object.defineProperty(repository, '$transaction', {
+      value: jest.fn((callback: (tx: typeof transaction) => Promise<unknown>) =>
+        callback(transaction),
+      ),
+    });
+
+    await expect(
+      repository.completeIndexing({
+        reelId: 'reel-1',
+        indexAttemptId: 'index-attempt-current',
+        metadata: { tags: [] },
+        chunks: [],
+      }),
+    ).resolves.toBe(true);
+    expect(transaction.reel.updateMany).not.toHaveBeenCalled();
+    expect(transaction.reelChunk.deleteMany).not.toHaveBeenCalled();
+  });
+
   it('rejects a stale index attempt', async () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const repository = createRepositoryWithReelDelegate({ updateMany });

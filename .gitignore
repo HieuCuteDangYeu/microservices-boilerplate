@@ -66,6 +66,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 !/docs/reel-pipeline-phase-3-media-processing.md
 !/docs/reel-pipeline-phase-4-indexing-service.md
 !/docs/reel-pipeline-phase-5-hierarchical-indexing.md
+!/docs/reel-pipeline-phase-6-semantic-database.md
 
 # Local notification service secrets
 apps/notification-service/secrets/

@@ -23,7 +23,7 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
   constructor(private readonly prisma: PrismaService) {}
 
   async startOrResume(job: ReelIndexJob): Promise<IndexJobCheckpoint> {
-    const record = await this.prisma.indexJobCheckpoint.upsert({
+    const record = await this.prisma.indexingAttempt.upsert({
       where: { indexAttemptId: job.indexAttemptId },
       create: {
         indexAttemptId: job.indexAttemptId,
@@ -42,7 +42,7 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
   }
 
   async get(indexAttemptId: string): Promise<IndexJobCheckpoint | null> {
-    const record = await this.prisma.indexJobCheckpoint.findUnique({
+    const record = await this.prisma.indexingAttempt.findUnique({
       where: { indexAttemptId },
     });
     return record ? this.toCheckpoint(record) : null;
@@ -53,7 +53,7 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
     stage: IndexCheckpointStage,
     data: Partial<IndexJobCheckpoint> = {},
   ): Promise<void> {
-    await this.prisma.indexJobCheckpoint.update({
+    await this.prisma.indexingAttempt.update({
       where: { indexAttemptId },
       data: {
         stage,
@@ -167,15 +167,8 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
     });
   }
 
-  async complete(indexAttemptId: string): Promise<void> {
-    await this.prisma.indexJobCheckpoint.update({
-      where: { indexAttemptId },
-      data: { status: 'COMPLETED', lastError: null },
-    });
-  }
-
   async fail(indexAttemptId: string, error: string): Promise<void> {
-    await this.prisma.indexJobCheckpoint.update({
+    await this.prisma.indexingAttempt.update({
       where: { indexAttemptId },
       data: { status: 'FAILED', lastError: error },
     });

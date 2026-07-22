@@ -31,4 +31,9 @@ export interface IIndexingContentService {
     indexAttemptId: string;
     errorDetail: string;
   }): Promise<void>;
+
+  reindexReel(reelId: string): Promise<{
+    queued: boolean;
+    indexAttemptId?: string;
+  }>;
 }
