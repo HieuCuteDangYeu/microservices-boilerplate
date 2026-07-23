@@ -8,7 +8,9 @@ import { NotificationServiceAdapter } from '../adapters/notification-service.ada
 export class CallEventsSubscriber {
   private readonly logger = new Logger(CallEventsSubscriber.name);
 
-  constructor(private readonly notificationService: NotificationServiceAdapter) {}
+  constructor(
+    private readonly notificationService: NotificationServiceAdapter,
+  ) {}
 
   @EventPattern('call.initiated')
   async handleCallInitiated(@Payload() payload: CallLifecyclePayload) {

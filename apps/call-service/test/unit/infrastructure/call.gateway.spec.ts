@@ -76,7 +76,9 @@ describe('CallGateway reconnect recovery', () => {
     });
     gateway.server = {
       to: jest.fn().mockImplementation((roomId: string) => {
-        return roomId === initiatedVoiceSession.targetUserId ? userEmitter : callEmitter;
+        return roomId === initiatedVoiceSession.targetUserId
+          ? userEmitter
+          : callEmitter;
       }),
     } as never;
 
@@ -104,13 +106,16 @@ describe('CallGateway reconnect recovery', () => {
       }),
     );
 
-    expect(userEmitter.emit).toHaveBeenCalledWith('incoming_call', {
-      callId: initiatedVoiceSession.callId,
-      conversationId: initiatedVoiceSession.conversationId,
-      initiatorId: initiatedVoiceSession.initiatorId,
-      targetUserId: initiatedVoiceSession.targetUserId,
-      callType: 'VOICE',
-    });
+    expect(userEmitter.emit).toHaveBeenCalledWith(
+      'incoming_call',
+      expect.objectContaining({
+        callId: initiatedVoiceSession.callId,
+        conversationId: initiatedVoiceSession.conversationId,
+        initiatorId: initiatedVoiceSession.initiatorId,
+        targetUserId: initiatedVoiceSession.targetUserId,
+        callType: 'VOICE',
+      }),
+    );
 
     await jest.advanceTimersByTimeAsync(30000);
 
@@ -455,6 +460,7 @@ function createGateway(overrides?: {
     (overrides?.rejectCallUseCase ?? { execute: jest.fn() }) as never,
     (overrides?.answerCallUseCase ?? { execute: jest.fn() }) as never,
     {} as never,
+    {} as never,
     (overrides?.mediaEngine ?? {
       listActiveProducers: jest.fn().mockResolvedValue([]),
     }) as never,
@@ -467,6 +473,7 @@ function createGateway(overrides?: {
       removeParticipant: jest.fn(),
     }) as never,
     { send: jest.fn() } as never,
+    { issue: jest.fn().mockReturnValue('telemetry-token') } as never,
   );
 }
 

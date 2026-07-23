@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import {
+  cert,
+  getApps,
+  initializeApp,
+  type ServiceAccount,
+} from 'firebase-admin/app';
 import { getMessaging, Messaging } from 'firebase-admin/messaging';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -32,14 +37,16 @@ export class FirebaseAdminService {
     }
 
     const absolutePath = resolve(process.cwd(), serviceAccountPath);
-    const serviceAccount = JSON.parse(readFileSync(absolutePath, 'utf8'));
+    const serviceAccount = JSON.parse(
+      readFileSync(absolutePath, 'utf8'),
+    ) as ServiceAccount & { project_id?: string };
 
     const app =
       getApps().length > 0
         ? getApps()[0]
         : initializeApp({
             credential: cert(serviceAccount),
-            projectId: serviceAccount.project_id,
+            projectId: serviceAccount.projectId ?? serviceAccount.project_id,
           });
 
     this.messaging = getMessaging(app);

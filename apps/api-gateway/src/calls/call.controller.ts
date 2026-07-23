@@ -95,7 +95,7 @@ export class CallController {
 
     return lastValueFrom(
       this.monitoringClient
-        .send('call.telemetry.summary', query)
+        .send<unknown>('call.telemetry.summary', query)
         .pipe(timeout(5000)),
     );
   }
@@ -107,7 +107,7 @@ export class CallController {
   async telemetryTimeline(@Param('callId') callId: string) {
     return lastValueFrom(
       this.monitoringClient
-        .send('call.telemetry.timeline', { callId })
+        .send<unknown>('call.telemetry.timeline', { callId })
         .pipe(timeout(5000)),
     );
   }
@@ -131,7 +131,7 @@ export class CallController {
 
     return lastValueFrom(
       this.monitoringClient
-        .send('call.telemetry.recent', query)
+        .send<unknown>('call.telemetry.recent', query)
         .pipe(timeout(5000)),
     );
   }

@@ -750,10 +750,10 @@ describe('Call Service P0 flow (e2e)', () => {
     const caller = await connectClient('caller-token');
     const callee = await connectClient('callee-token');
 
-    const callerJoined = onceEvent<{ callId: string; noAnswerTimeoutMs: number }>(
-      caller,
-      'call_joined',
-    );
+    const callerJoined = onceEvent<{
+      callId: string;
+      noAnswerTimeoutMs: number;
+    }>(caller, 'call_joined');
     const incomingCall = onceEvent<{ callId: string }>(callee, 'incoming_call');
 
     caller.emit('initiate_call', {
@@ -1131,7 +1131,8 @@ describe('Call Service P0 flow (e2e)', () => {
       callId,
       callerUser.id,
       (participant) =>
-        participant?.socketIds?.length === 1 && participant.isConnected === true,
+        participant?.socketIds?.length === 1 &&
+        participant.isConnected === true,
     );
     expect(participantAfterDisconnect?.socketIds).toHaveLength(1);
     expect(participantAfterDisconnect?.isConnected).toBe(true);
@@ -1249,7 +1250,9 @@ describe('Call Service P0 flow (e2e)', () => {
   async function waitForStoredParticipant(
     callId: string,
     userId: string,
-    predicate: (participant: Awaited<ReturnType<typeof getStoredParticipant>>) => boolean,
+    predicate: (
+      participant: Awaited<ReturnType<typeof getStoredParticipant>>,
+    ) => boolean,
     timeoutMs = 500,
   ) {
     const deadline = Date.now() + timeoutMs;

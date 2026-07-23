@@ -55,8 +55,7 @@ export class CallStateController {
         recipientUserId: session.targetUserId,
         callType: session.callType,
         status: session.status,
-        initiatorDisplayName:
-          session.initiatorDisplayName ?? 'Incoming call',
+        initiatorDisplayName: session.initiatorDisplayName ?? 'Incoming call',
         initiatorAvatarUrl: session.initiatorAvatarUrl,
         ringTimeoutMs:
           session.ringTimeoutMs ??
@@ -64,8 +63,7 @@ export class CallStateController {
         expiresAt:
           session.expiresAt?.toISOString() ??
           new Date(
-            Date.now() +
-              Number(process.env.CALL_NO_ANSWER_TIMEOUT_MS || 30000),
+            Date.now() + Number(process.env.CALL_NO_ANSWER_TIMEOUT_MS || 30000),
           ).toISOString(),
       },
     };

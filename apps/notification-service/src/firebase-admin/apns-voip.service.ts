@@ -79,7 +79,9 @@ export class ApnsVoipService {
       });
       request.on('error', (error) => {
         session.destroy();
-        rejectPromise(error);
+        rejectPromise(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       });
 
       request.end(body);
@@ -108,10 +110,7 @@ export class ApnsVoipService {
   }
 
   private getJwt() {
-    if (
-      this.cachedJwt &&
-      this.cachedJwt.expiresAt > Date.now() + 60_000
-    ) {
+    if (this.cachedJwt && this.cachedJwt.expiresAt > Date.now() + 60_000) {
       return this.cachedJwt.token;
     }
 
