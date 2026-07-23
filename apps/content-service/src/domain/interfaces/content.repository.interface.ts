@@ -86,27 +86,6 @@ export interface ReelProfileContextResult {
   nextCursor: ReelCursor | null;
 }
 
-export interface ReelChunkBackfillCandidate {
-  id: string;
-  userId: string;
-  title?: string;
-  description?: string;
-  tags: string[];
-  transcript?: string;
-  transcriptSegments?: TranscriptSegment[];
-  createdAt: Date;
-}
-
-export interface ReelChunkBackfillCursor {
-  createdAt: Date;
-  id: string;
-}
-
-export interface ReelChunkBackfillPage {
-  items: ReelChunkBackfillCandidate[];
-  nextCursor: ReelChunkBackfillCursor | null;
-}
-
 export interface ReelShareCreateInput {
   reelId: string;
   ownerId: string;
@@ -310,18 +289,6 @@ export interface IContentRepository {
   findAccessibleSharedReelIds(
     input: ReelContextAccessRequest,
   ): Promise<string[]>;
-
-  findReelsForChunkBackfill(
-    limit: number,
-    cursor?: ReelChunkBackfillCursor,
-    reelId?: string,
-  ): Promise<ReelChunkBackfillPage>;
-
-  replaceReelChunks(
-    reelId: string,
-    userId: string,
-    chunks: ReelChunkIndexInput[],
-  ): Promise<void>;
 
   searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]>;
 

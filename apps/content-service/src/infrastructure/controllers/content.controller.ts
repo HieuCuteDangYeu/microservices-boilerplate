@@ -8,7 +8,6 @@ import type {
   ReelContextAccessRequest,
   ReelContextSearchRequest,
 } from '@common/content/interfaces/reel-context-search-request.interface';
-import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { ClaimReelIndexingAttemptUseCase } from '@content/application/use-cases/claim-reel-indexing-attempt.use-case';
 import { CompleteReelIndexingUseCase } from '@content/application/use-cases/complete-reel-indexing.use-case';
@@ -79,7 +78,6 @@ export class ContentController {
     private readonly createReelShareLinkUseCase: CreateReelShareLinkUseCase,
     private readonly resolveReelShareLinkUseCase: ResolveReelShareLinkUseCase,
     private readonly revokeReelShareLinkUseCase: RevokeReelShareLinkUseCase,
-    private readonly backfillReelChunksUseCase: BackfillReelChunksUseCase,
     private readonly trackReelEventsUseCase: TrackReelEventsUseCase,
     private readonly reprocessReelUseCase: ReprocessReelUseCase,
     private readonly reindexReelUseCase: ReindexReelUseCase,
@@ -1457,54 +1455,6 @@ export class ContentController {
     }
   }
 
-  @MessagePattern('content.backfill_reel_chunks')
-  async handleBackfillReelChunks(
-    @Payload()
-    payload?: {
-      limit?: number;
-      batchSize?: number;
-      maxReels?: number;
-      reelId?: string;
-      dryRun?: boolean;
-    },
-  ) {
-    try {
-      const limit = this.normalizeBackfillNumber(payload?.limit, 20, 1, 100);
-
-      const batchSize = this.normalizeBackfillNumber(
-        payload?.batchSize,
-        limit,
-        1,
-        100,
-      );
-
-      const reelId =
-        typeof payload?.reelId === 'string' && payload.reelId.trim().length > 0
-          ? payload.reelId.trim()
-          : undefined;
-
-      const maxReels = reelId
-        ? 1
-        : this.normalizeBackfillNumber(payload?.maxReels, limit, 1, 500);
-
-      const dryRun = payload?.dryRun === true;
-
-      return await this.backfillReelChunksUseCase.execute({
-        batchSize,
-        maxReels,
-        reelId,
-        dryRun,
-      });
-    } catch (error: unknown) {
-      const err = error as Error;
-
-      throw new RpcException({
-        statusCode: 500,
-        message: `Backfill Reel Chunks Error: ${err.message}`,
-      });
-    }
-  }
-
   @MessagePattern('content.track_reel_events')
   async trackReelEvents(
     @Payload()
@@ -1598,18 +1548,5 @@ export class ContentController {
       items: result.items.map((reel) => this.toSerializable(reel)),
       nextCursor: this.serializeCursor(result.nextCursor),
     };
-  }
-
-  private normalizeBackfillNumber(
-    value: number | undefined,
-    fallback: number,
-    min: number,
-    max: number,
-  ): number {
-    if (value === undefined || !Number.isFinite(value)) {
-      return fallback;
-    }
-
-    return Math.min(Math.max(Math.floor(value), min), max);
   }
 }

@@ -1,4 +1,3 @@
-import { BackfillReelChunksUseCase } from '@content/application/use-cases/backfill-reel-chunks.use-case';
 import { BuildReelMediaJobUseCase } from '@content/application/use-cases/build-reel-media-job.use-case';
 import { ClassifyReelJobLengthUseCase } from '@content/application/use-cases/classify-reel-job-length.use-case';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
@@ -128,7 +127,6 @@ function createRmqClientRegistration(name: string, queue: string) {
     CreateReelShareLinkUseCase,
     ResolveReelShareLinkUseCase,
     RevokeReelShareLinkUseCase,
-    BackfillReelChunksUseCase,
     TrackReelEventsUseCase,
     ReprocessReelUseCase,
     ReindexReelUseCase,
