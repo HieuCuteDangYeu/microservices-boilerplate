@@ -5,6 +5,7 @@ import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.
 import type {
   CachedEmbedding,
   EmbeddingCacheIdentity,
+  ReelEvidenceDocumentDraft,
 } from '@common/processing/interfaces/reel-index-document.interface';
 import type { TranscriptionAudioArtifact } from '@common/processing/interfaces/transcription-audio-manifest.interface';
 import type {
@@ -38,14 +39,22 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
       },
     });
 
-    return this.toCheckpoint(record);
+    return this.toCheckpoint(
+      record,
+      await this.loadAdditionalState(job.indexAttemptId),
+    );
   }
 
   async get(indexAttemptId: string): Promise<IndexJobCheckpoint | null> {
     const record = await this.prisma.indexingAttempt.findUnique({
       where: { indexAttemptId },
     });
-    return record ? this.toCheckpoint(record) : null;
+    return record
+      ? this.toCheckpoint(
+          record,
+          await this.loadAdditionalState(indexAttemptId),
+        )
+      : null;
   }
 
   async setStage(
@@ -80,11 +89,37 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
           : {}),
       },
     });
+    if (data.documentDrafts !== undefined) {
+      await this.prisma.$executeRaw(Prisma.sql`
+        UPDATE "IndexingAttempt"
+        SET "documentDrafts" = ${JSON.stringify(data.documentDrafts)}::jsonb
+        WHERE "indexAttemptId" = ${indexAttemptId}
+      `);
+    }
+    if (
+      data.mergedTranscriptHash !== undefined ||
+      data.mergeAlgorithmVersion !== undefined
+    ) {
+      await this.prisma.$executeRaw(Prisma.sql`
+        UPDATE "IndexingAttempt"
+        SET
+          "mergedTranscriptHash" = coalesce(
+            ${data.mergedTranscriptHash ?? null},
+            "mergedTranscriptHash"
+          ),
+          "mergeAlgorithmVersion" = coalesce(
+            ${data.mergeAlgorithmVersion ?? null},
+            "mergeAlgorithmVersion"
+          )
+        WHERE "indexAttemptId" = ${indexAttemptId}
+      `);
+    }
   }
 
   async initializeAudioSegments(
     indexAttemptId: string,
     artifacts: TranscriptionAudioArtifact[],
+    transcriptionIdentity: string,
   ): Promise<void> {
     await this.prisma.audioSegmentCheckpoint.createMany({
       data: artifacts.map((artifact, segmentNumber) => ({
@@ -98,6 +133,30 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
       })),
       skipDuplicates: true,
     });
+    for (const [segmentNumber, artifact] of artifacts.entries()) {
+      const identity = `${artifact.checksum}:${transcriptionIdentity}`;
+      await this.prisma.$executeRaw(Prisma.sql`
+        UPDATE "AudioSegmentCheckpoint"
+        SET
+          "artifactKey" = ${artifact.key},
+          "artifactChecksum" = ${artifact.checksum},
+          "startMs" = ${artifact.startMs},
+          "endMs" = ${artifact.endMs},
+          "overlapBeforeMs" = ${artifact.overlapBeforeMs},
+          "transcriptionIdentity" = ${identity},
+          "status" = 'PENDING',
+          "attemptCount" = 0,
+          "provider" = NULL,
+          "transcriptionModel" = NULL,
+          "transcriptionVersion" = NULL,
+          "transcriptText" = NULL,
+          "transcriptSegments" = NULL,
+          "lastError" = NULL
+        WHERE "indexAttemptId" = ${indexAttemptId}
+          AND "segmentNumber" = ${segmentNumber}
+          AND "transcriptionIdentity" IS DISTINCT FROM ${identity}
+      `);
+    }
   }
 
   async listAudioSegments(
@@ -220,7 +279,14 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
     );
   }
 
-  private toCheckpoint(record: Record<string, unknown>): IndexJobCheckpoint {
+  private toCheckpoint(
+    record: Record<string, unknown>,
+    additional?: {
+      documentDrafts?: ReelEvidenceDocumentDraft[];
+      mergedTranscriptHash?: string;
+      mergeAlgorithmVersion?: string;
+    },
+  ): IndexJobCheckpoint {
     return {
       indexAttemptId: record['indexAttemptId'] as string,
       jobId: record['jobId'] as string,
@@ -231,6 +297,8 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
       stage: record['stage'] as IndexCheckpointStage,
       mergedTranscript:
         (record['mergedTranscript'] as string | null) ?? undefined,
+      mergedTranscriptHash: additional?.mergedTranscriptHash,
+      mergeAlgorithmVersion: additional?.mergeAlgorithmVersion,
       mergedSegments:
         (record['mergedSegments'] as TranscriptSegment[] | null) ?? undefined,
       extractedMetadata:
@@ -238,7 +306,35 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
         undefined,
       sections: (record['sections'] as TranscriptSection[] | null) ?? undefined,
       chunks: (record['chunks'] as ReelChunkIndexInput[] | null) ?? undefined,
+      documentDrafts: additional?.documentDrafts,
       lastError: (record['lastError'] as string | null) ?? undefined,
+    };
+  }
+
+  private async loadAdditionalState(indexAttemptId: string): Promise<{
+    documentDrafts?: ReelEvidenceDocumentDraft[];
+    mergedTranscriptHash?: string;
+    mergeAlgorithmVersion?: string;
+  }> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        documentDrafts: unknown;
+        mergedTranscriptHash: string | null;
+        mergeAlgorithmVersion: string | null;
+      }>
+    >(Prisma.sql`
+      SELECT "documentDrafts", "mergedTranscriptHash", "mergeAlgorithmVersion"
+      FROM "IndexingAttempt"
+      WHERE "indexAttemptId" = ${indexAttemptId}
+      LIMIT 1
+    `);
+    const row = rows[0];
+    return {
+      documentDrafts:
+        (row?.documentDrafts as ReelEvidenceDocumentDraft[] | null) ??
+        undefined,
+      mergedTranscriptHash: row?.mergedTranscriptHash ?? undefined,
+      mergeAlgorithmVersion: row?.mergeAlgorithmVersion ?? undefined,
     };
   }
 

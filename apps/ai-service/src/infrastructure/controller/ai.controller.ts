@@ -1,4 +1,5 @@
 import { BackfillUserMemoryEmbeddingsUseCase } from '@ai/application/use-cases/backfill-user-memory-embeddings.use-case';
+import { CountDocumentTokensUseCase } from '@ai/application/use-cases/count-document-tokens.use-case';
 import { ExtractReelMetadataUseCase } from '@ai/application/use-cases/extract-reel-metadata.use-case';
 import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
@@ -7,6 +8,7 @@ import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-aud
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
 import type { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
+import type { CountDocumentTokensRequest } from '@common/ai/interfaces/count-document-tokens.interface';
 import type { GenerateEmbeddingBatchRequest } from '@common/ai/interfaces/generate-embedding.interface';
 import type { ReelMetadataExtractionInput } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
@@ -25,6 +27,7 @@ export class AiController {
   constructor(
     private readonly generateEmbeddingUseCase: GenerateEmbeddingUseCase,
     private readonly generateEmbeddingBatchUseCase: GenerateEmbeddingBatchUseCase,
+    private readonly countDocumentTokensUseCase: CountDocumentTokensUseCase,
     private readonly transcribeAudioUseCase: TranscribeAudioUseCase,
     private readonly transcribeAudioBufferUseCase: TranscribeAudioBufferUseCase,
     private readonly streamChatUseCase: StreamChatUseCase,
@@ -92,6 +95,34 @@ export class AiController {
     }
 
     return await this.generateEmbeddingBatchUseCase.execute(data);
+  }
+
+  @MessagePattern('ai.count_document_tokens')
+  async handleCountDocumentTokens(@Payload() data: CountDocumentTokensRequest) {
+    const ids = data?.items?.map((item) => item.id) ?? [];
+    if (
+      !data ||
+      typeof data.model !== 'string' ||
+      !data.model.trim() ||
+      !Array.isArray(data.items) ||
+      data.items.length === 0 ||
+      data.items.length > 100 ||
+      new Set(ids).size !== ids.length ||
+      data.items.some(
+        (item) =>
+          typeof item?.id !== 'string' ||
+          !item.id.trim() ||
+          typeof item.text !== 'string' ||
+          !item.text.trim() ||
+          item.text.length > 20_000,
+      )
+    ) {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid document token count request payload',
+      });
+    }
+    return await this.countDocumentTokensUseCase.execute(data);
   }
 
   @MessagePattern('ai.transcribe_audio_buffer')

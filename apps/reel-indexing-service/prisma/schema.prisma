@@ -39,27 +39,66 @@ enum IndexDocumentKind {
   CHUNK
 }
 
+enum EvidenceQuality {
+  VERIFIED
+  LOW_CONFIDENCE
+  METADATA_ONLY
+}
+
 model IndexingAttempt {
-  indexAttemptId    String               @id
-  jobId             String               @unique
-  reelId            String
-  mediaAttemptId    String
-  indexVersion      String
-  status            IndexJobStatus       @default(PROCESSING)
-  stage             IndexCheckpointStage @default(TRANSCRIBING_AUDIO_SEGMENTS)
-  mergedTranscript  String?              @db.Text
-  mergedSegments    Json?
-  extractedMetadata Json?
-  sections          Json?
-  chunks            Json?
-  lastError         String?              @db.Text
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  indexAttemptId        String               @id
+  jobId                 String               @unique
+  reelId                String
+  mediaAttemptId        String
+  indexVersion          String
+  status                IndexJobStatus       @default(PROCESSING)
+  stage                 IndexCheckpointStage @default(TRANSCRIBING_AUDIO_SEGMENTS)
+  mergedTranscript      String?              @db.Text
+  mergedTranscriptHash  String?
+  mergeAlgorithmVersion String?
+  mergedSegments        Json?
+  extractedMetadata     Json?
+  sections              Json?
+  chunks                Json?
+  documentDrafts        Json?
+  lastError             String?              @db.Text
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   audioSegments AudioSegmentCheckpoint[]
 
   @@index([reelId])
   @@index([status, updatedAt])
+}
+
+model LangGraphCheckpoint {
+  threadId            String
+  checkpointNamespace String
+  checkpointId        String
+  parentCheckpointId  String?
+  checkpointType      String
+  checkpoint          Bytes
+  metadataType        String
+  metadata            Bytes
+  createdAt           DateTime @default(now())
+
+  @@id([threadId, checkpointNamespace, checkpointId])
+  @@index([threadId, checkpointNamespace, createdAt])
+}
+
+model LangGraphCheckpointWrite {
+  threadId            String
+  checkpointNamespace String
+  checkpointId        String
+  taskId              String
+  writeIndex          Int
+  channel             String
+  valueType           String
+  value               Bytes
+  createdAt           DateTime @default(now())
+
+  @@id([threadId, checkpointNamespace, checkpointId, taskId, writeIndex])
+  @@index([threadId, checkpointNamespace, checkpointId])
 }
 
 model EmbeddingCacheEntry {
@@ -84,24 +123,25 @@ model EmbeddingCacheEntry {
 }
 
 model AudioSegmentCheckpoint {
-  id                   String             @id @default(uuid())
-  indexAttemptId       String
-  segmentNumber        Int
-  artifactKey          String
-  artifactChecksum     String
-  startMs              Int
-  endMs                Int
-  overlapBeforeMs      Int
-  provider             String?
-  transcriptionModel   String?
-  transcriptionVersion String?
-  status               AudioSegmentStatus @default(PENDING)
-  attemptCount         Int                @default(0)
-  transcriptText       String?            @db.Text
-  transcriptSegments   Json?
-  lastError            String?            @db.Text
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  id                    String             @id @default(uuid())
+  indexAttemptId        String
+  segmentNumber         Int
+  artifactKey           String
+  artifactChecksum      String
+  startMs               Int
+  endMs                 Int
+  overlapBeforeMs       Int
+  provider              String?
+  transcriptionModel    String?
+  transcriptionVersion  String?
+  transcriptionIdentity String?
+  status                AudioSegmentStatus @default(PENDING)
+  attemptCount          Int                @default(0)
+  transcriptText        String?            @db.Text
+  transcriptSegments    Json?
+  lastError             String?            @db.Text
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   checkpoint IndexingAttempt @relation(fields: [indexAttemptId], references: [indexAttemptId], onDelete: Cascade)
 
@@ -110,34 +150,45 @@ model AudioSegmentCheckpoint {
 }
 
 model ReelDocument {
-  rowId               String                     @id @default(uuid())
-  id                  String
-  reelId              String
-  indexAttemptId      String
-  isActive            Boolean                    @default(false)
-  userId              String
-  parentId            String?
-  title               String?
-  description         String?                    @db.Text
-  text                String                     @db.Text
-  tags                String[]
-  startTime           Float?
-  endTime             Float?
-  sourceDurationMs    Int
-  sourceOrientation   String
-  sourceLengthClass   String
-  embedding           Unsupported("vector(384)")
-  searchVector        Unsupported("tsvector")?
-  embeddingProvider   String
-  embeddingModel      String
-  embeddingDimensions Int
-  embeddingVersion    String
-  embeddingInputHash  String
-  indexVersion        String
-  chunkingVersion     String
-  summaryVersion      String
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime                   @updatedAt
+  rowId                  String                     @id @default(uuid())
+  id                     String
+  reelId                 String
+  indexAttemptId         String
+  isActive               Boolean                    @default(false)
+  userId                 String
+  parentId               String?
+  title                  String?
+  description            String?                    @db.Text
+  evidenceText           String?                    @db.Text
+  retrievalText          String                     @db.Text
+  derivedSummary         String?                    @db.Text
+  sourceSectionIds       String[]
+  sourceSegmentIds       String[]
+  sourceAudioArtifactIds String[]
+  evidenceHash           String?
+  retrievalHash          String
+  evidenceQuality        EvidenceQuality
+  transcriptVersion      String?
+  sectioningVersion      String
+  tokenCount             Int
+  tags                   String[]
+  startTime              Float?
+  endTime                Float?
+  sourceDurationMs       Int
+  sourceOrientation      String
+  sourceLengthClass      String
+  embedding              Unsupported("vector(384)")
+  searchVector           Unsupported("tsvector")?
+  embeddingProvider      String
+  embeddingModel         String
+  embeddingDimensions    Int
+  embeddingVersion       String
+  embeddingInputHash     String
+  indexVersion           String
+  chunkingVersion        String
+  summaryVersion         String
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
 
   @@unique([id, indexAttemptId])
   @@unique([reelId, indexAttemptId])
@@ -147,34 +198,45 @@ model ReelDocument {
 }
 
 model ReelSection {
-  rowId               String                     @id @default(uuid())
-  id                  String
-  reelId              String
-  indexAttemptId      String
-  isActive            Boolean                    @default(false)
-  userId              String
-  parentId            String
-  title               String?
-  description         String?                    @db.Text
-  text                String                     @db.Text
-  tags                String[]
-  startTime           Float
-  endTime             Float
-  sourceDurationMs    Int
-  sourceOrientation   String
-  sourceLengthClass   String
-  embedding           Unsupported("vector(384)")
-  searchVector        Unsupported("tsvector")?
-  embeddingProvider   String
-  embeddingModel      String
-  embeddingDimensions Int
-  embeddingVersion    String
-  embeddingInputHash  String
-  indexVersion        String
-  chunkingVersion     String
-  summaryVersion      String
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime                   @updatedAt
+  rowId                  String                     @id @default(uuid())
+  id                     String
+  reelId                 String
+  indexAttemptId         String
+  isActive               Boolean                    @default(false)
+  userId                 String
+  parentId               String
+  title                  String?
+  description            String?                    @db.Text
+  evidenceText           String?                    @db.Text
+  retrievalText          String                     @db.Text
+  derivedSummary         String?                    @db.Text
+  sourceSectionIds       String[]
+  sourceSegmentIds       String[]
+  sourceAudioArtifactIds String[]
+  evidenceHash           String?
+  retrievalHash          String
+  evidenceQuality        EvidenceQuality
+  transcriptVersion      String?
+  sectioningVersion      String
+  tokenCount             Int
+  tags                   String[]
+  startTime              Float
+  endTime                Float
+  sourceDurationMs       Int
+  sourceOrientation      String
+  sourceLengthClass      String
+  embedding              Unsupported("vector(384)")
+  searchVector           Unsupported("tsvector")?
+  embeddingProvider      String
+  embeddingModel         String
+  embeddingDimensions    Int
+  embeddingVersion       String
+  embeddingInputHash     String
+  indexVersion           String
+  chunkingVersion        String
+  summaryVersion         String
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
 
   @@unique([id, indexAttemptId])
   @@index([reelId, isActive])
@@ -183,34 +245,45 @@ model ReelSection {
 }
 
 model ReelChunk {
-  rowId               String                     @id @default(uuid())
-  id                  String
-  reelId              String
-  indexAttemptId      String
-  isActive            Boolean                    @default(false)
-  userId              String
-  parentId            String
-  title               String?
-  description         String?                    @db.Text
-  text                String                     @db.Text
-  tags                String[]
-  startTime           Float?
-  endTime             Float?
-  sourceDurationMs    Int
-  sourceOrientation   String
-  sourceLengthClass   String
-  embedding           Unsupported("vector(384)")
-  searchVector        Unsupported("tsvector")?
-  embeddingProvider   String
-  embeddingModel      String
-  embeddingDimensions Int
-  embeddingVersion    String
-  embeddingInputHash  String
-  indexVersion        String
-  chunkingVersion     String
-  summaryVersion      String
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime                   @updatedAt
+  rowId                  String                     @id @default(uuid())
+  id                     String
+  reelId                 String
+  indexAttemptId         String
+  isActive               Boolean                    @default(false)
+  userId                 String
+  parentId               String
+  title                  String?
+  description            String?                    @db.Text
+  evidenceText           String?                    @db.Text
+  retrievalText          String                     @db.Text
+  derivedSummary         String?                    @db.Text
+  sourceSectionIds       String[]
+  sourceSegmentIds       String[]
+  sourceAudioArtifactIds String[]
+  evidenceHash           String?
+  retrievalHash          String
+  evidenceQuality        EvidenceQuality
+  transcriptVersion      String?
+  sectioningVersion      String
+  tokenCount             Int
+  tags                   String[]
+  startTime              Float?
+  endTime                Float?
+  sourceDurationMs       Int
+  sourceOrientation      String
+  sourceLengthClass      String
+  embedding              Unsupported("vector(384)")
+  searchVector           Unsupported("tsvector")?
+  embeddingProvider      String
+  embeddingModel         String
+  embeddingDimensions    Int
+  embeddingVersion       String
+  embeddingInputHash     String
+  indexVersion           String
+  chunkingVersion        String
+  summaryVersion         String
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
 
   @@unique([id, indexAttemptId])
   @@index([reelId, isActive])

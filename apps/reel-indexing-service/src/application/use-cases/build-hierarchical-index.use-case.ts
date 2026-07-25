@@ -1,13 +1,17 @@
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
-import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import type {
   CachedEmbedding,
   EmbeddingCacheIdentity,
-  ReelIndexDocument,
-  ReelIndexDocumentKind,
+  ReelEvidenceDocument,
+  ReelEvidenceDocumentDraft,
+  ReelEvidenceQuality,
 } from '@common/processing/interfaces/reel-index-document.interface';
+import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
+import { BuildLongEvidenceChunksUseCase } from '@indexing/application/use-cases/build-long-evidence-chunks.use-case';
+import { BuildShortEvidenceChunksUseCase } from '@indexing/application/use-cases/build-short-evidence-chunks.use-case';
+import type { EvidenceChunk } from '@indexing/domain/entities/evidence-chunk.entity';
 import type { TranscriptSection } from '@indexing/domain/entities/index-checkpoint.entity';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import type { IIndexCheckpointRepository } from '@indexing/domain/interfaces/index-checkpoint.repository.interface';
@@ -15,28 +19,17 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 
-interface TimedToken {
-  value: string;
-  start: number;
-  end: number;
-  sentenceEnd: boolean;
-}
-
-interface DocumentDraft extends EmbeddingCacheIdentity {
-  id: string;
-  reelId: string;
-  kind: ReelIndexDocumentKind;
-  ordinal: number;
-  parentId?: string;
-  text: string;
-  startTime?: number;
-  endTime?: number;
-}
+type DraftInput = Omit<
+  ReelEvidenceDocumentDraft,
+  keyof EmbeddingCacheIdentity | 'retrievalHash' | 'sectioningVersion'
+>;
 
 @Injectable()
 export class BuildHierarchicalIndexUseCase {
   constructor(
     private readonly config: ConfigService,
+    private readonly shortChunks: BuildShortEvidenceChunksUseCase,
+    private readonly longChunks: BuildLongEvidenceChunksUseCase,
     @Inject('IIndexingAiService') private readonly ai: IIndexingAiService,
     @Inject('IIndexCheckpointRepository')
     private readonly checkpoints: IIndexCheckpointRepository,
@@ -49,15 +42,242 @@ export class BuildHierarchicalIndexUseCase {
     transcript?: string;
     transcriptSegments?: TranscriptSegment[];
   }): Promise<{
-    documents: ReelIndexDocument[];
+    documents: ReelEvidenceDocument[];
     chunks: ReelChunkIndexInput[];
   }> {
-    const drafts = this.buildDocumentDrafts(input);
+    const drafts = await this.validateDocumentTokens(
+      this.buildDocumentDrafts(input),
+    );
+    await this.generateMissingEmbeddings(drafts);
+    const documents = await this.materializeDocuments(drafts);
+    return { documents, chunks: this.toLegacyChunks(documents) };
+  }
+
+  buildDocumentDrafts(input: {
+    job: ReelIndexJob;
+    metadata: ExtractedReelMetadata;
+    sections: TranscriptSection[];
+    transcript?: string;
+    transcriptSegments?: TranscriptSegment[];
+  }): ReelEvidenceDocumentDraft[] {
+    const hasTimedSegments = Boolean(input.transcriptSegments?.length);
+    const normalizedTranscript = this.normalizeEvidence(input.transcript ?? '');
+    const segments = input.transcriptSegments?.length
+      ? input.transcriptSegments
+      : normalizedTranscript
+        ? [
+            {
+              start: 0,
+              end: input.job.sourceDurationMs / 1000,
+              text: normalizedTranscript,
+              sourceSegmentId: `transcript:${this.hash(normalizedTranscript)}`,
+            },
+          ]
+        : [];
+    const reelDocumentId = `reel:${input.job.reelId}`;
+    const sectionIds = input.sections.map(
+      (section) => `${reelDocumentId}:section:${section.index}`,
+    );
+    const evidenceQuality: ReelEvidenceQuality = hasTimedSegments
+      ? 'VERIFIED'
+      : segments.length
+        ? 'LOW_CONFIDENCE'
+        : 'METADATA_ONLY';
+    const drafts: DraftInput[] = [
+      {
+        id: reelDocumentId,
+        reelId: input.job.reelId,
+        kind: 'REEL',
+        ordinal: 0,
+        retrievalText: this.reelRetrievalText(input.metadata),
+        derivedSummary: input.metadata.description,
+        sourceSectionIds: sectionIds,
+        sourceSegmentIds: this.sourceSegmentIds(segments),
+        sourceAudioArtifactIds: this.sourceAudioArtifactIds(segments),
+        evidenceQuality,
+        transcriptVersion: segments.length
+          ? this.transcriptVersion()
+          : undefined,
+        tokenCount: 0,
+      },
+    ];
+
+    if (input.job.sourceLengthClass === 'LONG') {
+      for (const section of input.sections) {
+        const id = `${reelDocumentId}:section:${section.index}`;
+        const sectionSegments = this.segmentsInside(
+          segments,
+          section.startMs,
+          section.endMs,
+        );
+        const evidenceText = this.normalizeEvidence(section.text);
+        drafts.push({
+          id,
+          reelId: input.job.reelId,
+          kind: 'SECTION',
+          ordinal: section.index,
+          parentId: reelDocumentId,
+          evidenceText,
+          retrievalText: this.retrievalText({
+            kind: 'Section',
+            metadata: input.metadata,
+            ordinal: section.index,
+            startTime: section.startMs / 1000,
+            endTime: section.endMs / 1000,
+            evidenceText,
+          }),
+          derivedSummary: section.summary,
+          sourceSectionIds: [id],
+          startTime: section.startMs / 1000,
+          endTime: section.endMs / 1000,
+          sourceSegmentIds: this.sourceSegmentIds(sectionSegments),
+          sourceAudioArtifactIds: this.sourceAudioArtifactIds(sectionSegments),
+          evidenceHash: this.hash(evidenceText),
+          evidenceQuality,
+          transcriptVersion: this.transcriptVersion(),
+          tokenCount: 0,
+        });
+      }
+    }
+
+    if (segments.length) {
+      const chunks: Array<EvidenceChunk & { sectionIndex?: number }> =
+        input.job.sourceLengthClass === 'LONG'
+          ? this.longChunks.execute(input.sections, segments)
+          : this.shortChunks
+              .execute(segments)
+              .map((chunk) => ({ ...chunk, sectionIndex: undefined }));
+      chunks.forEach((chunk, ordinal) => {
+        const sectionId =
+          chunk.sectionIndex === undefined
+            ? undefined
+            : `${reelDocumentId}:section:${chunk.sectionIndex}`;
+        const evidenceText = this.normalizeEvidence(chunk.evidenceText);
+        drafts.push({
+          id: `${reelDocumentId}:chunk:${ordinal}`,
+          reelId: input.job.reelId,
+          kind: 'CHUNK',
+          ordinal,
+          parentId: sectionId ?? reelDocumentId,
+          evidenceText,
+          retrievalText: this.retrievalText({
+            kind: 'Chunk',
+            metadata: input.metadata,
+            ordinal,
+            startTime: chunk.startTime,
+            endTime: chunk.endTime,
+            evidenceText,
+          }),
+          sourceSectionIds: sectionId ? [sectionId] : [],
+          startTime: chunk.startTime,
+          endTime: chunk.endTime,
+          sourceSegmentIds: chunk.sourceSegmentIds,
+          sourceAudioArtifactIds: chunk.sourceAudioArtifactIds,
+          evidenceHash: this.hash(evidenceText),
+          evidenceQuality,
+          transcriptVersion: this.transcriptVersion(),
+          tokenCount: 0,
+        });
+      });
+    } else {
+      const retrievalText = this.reelRetrievalText(input.metadata);
+      if (retrievalText) {
+        drafts.push({
+          id: `${reelDocumentId}:chunk:0`,
+          reelId: input.job.reelId,
+          kind: 'CHUNK',
+          ordinal: 0,
+          parentId: reelDocumentId,
+          retrievalText,
+          sourceSectionIds: [],
+          sourceSegmentIds: [],
+          sourceAudioArtifactIds: [],
+          evidenceQuality: 'METADATA_ONLY',
+          tokenCount: 0,
+        });
+      }
+    }
+
+    return drafts.map((draft) => this.versionedDraft(draft, input.job));
+  }
+
+  async validateDocumentTokens(
+    drafts: ReelEvidenceDocumentDraft[],
+  ): Promise<ReelEvidenceDocumentDraft[]> {
+    let current = drafts;
+    const maximum = this.positiveInt(
+      'INDEX_DOCUMENT_MAX_TOKENS',
+      this.positiveInt('INDEX_SHORT_CHUNK_MAX_TOKENS', 340, 20, 4_000),
+      20,
+      4_000,
+    );
+    const model = current[0]?.embeddingModel;
+    if (!model || !current.length) return current;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const counts = new Map<string, number>();
+      for (let offset = 0; offset < current.length; offset += 100) {
+        const batch = current.slice(offset, offset + 100);
+        const result = await this.ai.countDocumentTokens({
+          model,
+          items: batch.map((draft) => ({
+            id: draft.id,
+            text: draft.retrievalText,
+          })),
+        });
+        const expected = new Set(batch.map((draft) => draft.id));
+        if (
+          result.items.length !== batch.length ||
+          result.items.some(
+            (item) =>
+              !expected.has(item.id) ||
+              !Number.isInteger(item.tokenCount) ||
+              item.tokenCount < 1,
+          )
+        ) {
+          throw new Error('Token counter returned incomplete document results');
+        }
+        result.items.forEach((item) => counts.set(item.id, item.tokenCount));
+      }
+
+      const oversized = current.filter(
+        (draft) => (counts.get(draft.id) ?? maximum + 1) > maximum,
+      );
+      current = current.map((draft) => ({
+        ...draft,
+        tokenCount: counts.get(draft.id),
+      }));
+      if (!oversized.length) return current;
+      if (attempt === 2) {
+        throw new Error(
+          `Unable to fit ${oversized.length} documents within the model token limit`,
+        );
+      }
+      current = current.map((draft) => {
+        const count = counts.get(draft.id)!;
+        if (count <= maximum) return draft;
+        const words = draft.retrievalText.split(/\s+/);
+        const keep = Math.max(
+          1,
+          Math.floor(words.length * (maximum / count) * 0.9),
+        );
+        return this.reversionDraft(
+          { ...draft, retrievalText: words.slice(0, keep).join(' ') },
+          draft,
+        );
+      });
+    }
+    return current;
+  }
+
+  async generateMissingEmbeddings(
+    drafts: ReelEvidenceDocumentDraft[],
+  ): Promise<void> {
     const cached = (
       await this.checkpoints.findReusableEmbeddings(drafts)
     ).filter((entry) => this.isValidCachedEmbedding(entry));
-    const embeddings = new Map(cached.map((entry) => [entry.cacheKey, entry]));
-    const missing = drafts.filter((draft) => !embeddings.has(draft.cacheKey));
+    const existing = new Set(cached.map((entry) => entry.cacheKey));
+    const missing = drafts.filter((draft) => !existing.has(draft.cacheKey));
     const batchSize = this.positiveInt(
       'INDEX_EMBEDDING_BATCH_SIZE',
       32,
@@ -70,9 +290,8 @@ export class BuildHierarchicalIndexUseCase {
       const result = await this.ai.generateEmbeddingBatch({
         items: batch.map((draft) => ({
           id: draft.id,
-          text: draft.text,
+          text: draft.retrievalText,
           taskType: 'RETRIEVAL_DOCUMENT',
-          title: draft.kind === 'REEL' ? input.metadata.title : undefined,
         })),
       });
       const byId = new Map(batch.map((draft) => [draft.id, draft]));
@@ -80,16 +299,16 @@ export class BuildHierarchicalIndexUseCase {
       const invalidIds: string[] = [];
       for (const embedding of result.embeddings) {
         const draft = byId.get(embedding.id);
-        if (!draft)
+        if (!draft) {
           throw new Error(`Unexpected batch embedding item ${embedding.id}`);
+        }
         const provider = embedding.provider || draft.embeddingProvider;
         const model = embedding.model.replace(/^models\//, '');
         const version = embedding.version || draft.embeddingVersion;
         if (
-          !embedding.values.length ||
-          embedding.values.some((value) => !Number.isFinite(value)) ||
+          embedding.values.length !== draft.embeddingDimensions ||
           embedding.dimensions !== embedding.values.length ||
-          embedding.dimensions !== draft.embeddingDimensions ||
+          embedding.values.some((value) => !Number.isFinite(value)) ||
           provider !== draft.embeddingProvider ||
           model !== draft.embeddingModel ||
           version !== draft.embeddingVersion
@@ -100,288 +319,75 @@ export class BuildHierarchicalIndexUseCase {
         completed.push({
           ...this.identity(draft),
           embedding: embedding.values,
-          embeddingProvider: provider,
-          embeddingModel: model,
-          embeddingDimensions: embedding.dimensions,
-          embeddingVersion: version,
         });
       }
-      await this.checkpoints.saveEmbeddings(completed);
-      for (const entry of completed) embeddings.set(entry.cacheKey, entry);
-
       const returnedIds = new Set(result.embeddings.map((entry) => entry.id));
       const missingIds = batch
         .filter((draft) => !returnedIds.has(draft.id))
         .map((draft) => draft.id);
       if (result.errors.length || missingIds.length || invalidIds.length) {
-        const failedIds = [
-          ...result.errors.map((error) => error.id),
-          ...missingIds,
-          ...invalidIds,
-        ];
         throw new Error(
-          `Batch embedding failed for ${new Set(failedIds).size} items`,
+          `Batch embedding failed for ${
+            new Set([
+              ...result.errors.map((error) => error.id),
+              ...missingIds,
+              ...invalidIds,
+            ]).size
+          } items`,
         );
       }
+      await this.checkpoints.saveEmbeddings(completed);
     }
+  }
 
-    const documents = drafts.map((draft): ReelIndexDocument => {
-      const embedding = embeddings.get(draft.cacheKey);
-      if (!embedding)
-        throw new Error(`Missing cached embedding for ${draft.id}`);
+  async materializeDocuments(
+    drafts: ReelEvidenceDocumentDraft[],
+  ): Promise<ReelEvidenceDocument[]> {
+    const cached = await this.checkpoints.findReusableEmbeddings(drafts);
+    const byKey = new Map(cached.map((entry) => [entry.cacheKey, entry]));
+    return drafts.map((draft) => {
+      const embedding = byKey.get(draft.cacheKey);
+      if (!embedding || !this.isValidCachedEmbedding(embedding)) {
+        throw new Error(`Missing valid embedding for document ${draft.id}`);
+      }
       return {
-        id: draft.id,
-        reelId: draft.reelId,
-        kind: draft.kind,
-        ordinal: draft.ordinal,
-        parentId: draft.parentId,
-        text: draft.text,
-        startTime: draft.startTime,
-        endTime: draft.endTime,
+        ...draft,
+        tokenCount: draft.tokenCount ?? 0,
         embedding: embedding.embedding,
-        embeddingProvider: embedding.embeddingProvider,
-        embeddingModel: embedding.embeddingModel,
-        embeddingDimensions: embedding.embeddingDimensions,
-        embeddingVersion: embedding.embeddingVersion,
-        embeddingInputHash: draft.embeddingInputHash,
-        indexVersion: draft.indexVersion,
-        chunkingVersion: draft.chunkingVersion,
-        summaryVersion: draft.summaryVersion,
       };
     });
-    const chunks = documents
+  }
+
+  toLegacyChunks(documents: ReelEvidenceDocument[]): ReelChunkIndexInput[] {
+    return documents
       .filter((document) => document.kind === 'CHUNK')
-      .map(
-        (document): ReelChunkIndexInput => ({
-          chunkIndex: document.ordinal,
-          text: document.text,
-          startTime: document.startTime,
-          endTime: document.endTime,
-          embedding: document.embedding,
-          embeddingModel: [
-            document.embeddingProvider,
-            document.embeddingModel,
-            document.embeddingDimensions,
-            document.embeddingVersion,
-          ].join(':'),
-        }),
-      );
-    return { documents, chunks };
-  }
-
-  buildDocumentDrafts(input: {
-    job: ReelIndexJob;
-    metadata: ExtractedReelMetadata;
-    sections: TranscriptSection[];
-    transcript?: string;
-    transcriptSegments?: TranscriptSegment[];
-  }): DocumentDraft[] {
-    const drafts: Array<Omit<DocumentDraft, keyof EmbeddingCacheIdentity>> = [];
-    const reelId = `reel:${input.job.reelId}`;
-    drafts.push({
-      id: reelId,
-      reelId: input.job.reelId,
-      kind: 'REEL',
-      ordinal: 0,
-      text: this.reelText(input.metadata, input.transcript),
-    });
-
-    if (input.job.sourceLengthClass === 'LONG') {
-      for (const section of input.sections) {
-        drafts.push({
-          id: `reel:${input.job.reelId}:section:${section.index}`,
-          reelId: input.job.reelId,
-          kind: 'SECTION',
-          ordinal: section.index,
-          parentId: reelId,
-          text: this.sectionText(section),
-          startTime: section.startMs / 1000,
-          endTime: section.endMs / 1000,
-        });
-      }
-    }
-
-    const chunks = this.buildChunks(
-      input.transcriptSegments,
-      input.sections,
-      input.transcript,
-      input.metadata,
-    );
-    chunks.forEach((chunk, ordinal) => {
-      const section = input.sections.find(
-        (candidate) =>
-          chunk.startTime !== undefined &&
-          chunk.startTime * 1000 >= candidate.startMs &&
-          chunk.startTime * 1000 < candidate.endMs,
-      );
-      drafts.push({
-        id: `reel:${input.job.reelId}:chunk:${ordinal}`,
-        reelId: input.job.reelId,
-        kind: 'CHUNK',
-        ordinal,
-        parentId:
-          input.job.sourceLengthClass === 'LONG' && section
-            ? `reel:${input.job.reelId}:section:${section.index}`
-            : reelId,
-        ...chunk,
-      });
-    });
-
-    return drafts.map((draft) => this.versionedDraft(draft, input.job));
-  }
-
-  private buildChunks(
-    transcriptSegments: TranscriptSegment[] | undefined,
-    sections: TranscriptSection[],
-    transcript: string | undefined,
-    metadata: ExtractedReelMetadata,
-  ): Array<{ text: string; startTime?: number; endTime?: number }> {
-    if (!transcriptSegments?.length) {
-      const fallback = [
-        metadata.title,
-        metadata.description,
-        metadata.tags.join(' '),
-        transcript,
-      ]
-        .filter((value): value is string => Boolean(value?.trim()))
-        .join('\n');
-      return fallback
-        ? [{ text: this.limitTokens(fallback, this.maxTokens()) }]
-        : [];
-    }
-
-    const boundaries = sections.length
-      ? sections
-      : [{ index: 0, startMs: 0, endMs: Number.MAX_SAFE_INTEGER, text: '' }];
-    const output: Array<{ text: string; startTime: number; endTime: number }> =
-      [];
-    for (const section of boundaries) {
-      const sectionSegments = transcriptSegments.filter(
-        (segment) =>
-          segment.start * 1000 >= section.startMs &&
-          segment.start * 1000 < section.endMs,
-      );
-      output.push(...this.chunkSection(sectionSegments));
-    }
-    return output;
-  }
-
-  private chunkSection(
-    segments: TranscriptSegment[],
-  ): Array<{ text: string; startTime: number; endTime: number }> {
-    const tokens = segments.flatMap((segment) =>
-      this.tokensForSegment(segment),
-    );
-    if (!tokens.length) return [];
-    const chunks: Array<{ text: string; startTime: number; endTime: number }> =
-      [];
-    const target = this.positiveInt(
-      'INDEX_CHUNK_TARGET_TOKENS',
-      240,
-      20,
-      2_000,
-    );
-    const maximum = this.maxTokens();
-    const overlap = this.positiveInt(
-      'INDEX_CHUNK_OVERLAP_TOKENS',
-      40,
-      0,
-      maximum - 1,
-    );
-    const maxSeconds = this.positiveInt('INDEX_CHUNK_MAX_SECONDS', 45, 5, 600);
-    let current: TimedToken[] = [];
-
-    const flush = () => {
-      if (!current.length) return;
-      chunks.push({
-        text: this.limitTokens(
-          current.map((token) => token.value).join(' '),
-          maximum,
-        ),
-        startTime: current[0].start,
-        endTime: current[current.length - 1].end,
-      });
-      current = overlap > 0 ? current.slice(-overlap) : [];
-    };
-
-    for (const token of tokens) {
-      const duration = current.length ? token.end - current[0].start : 0;
-      if (
-        current.length &&
-        (current.length >= maximum || duration > maxSeconds)
-      )
-        flush();
-      current.push(token);
-      if (current.length >= target && token.sentenceEnd) flush();
-    }
-    if (current.length > overlap || chunks.length === 0) flush();
-    const minimum = this.positiveInt('INDEX_CHUNK_MIN_TOKENS', 80, 1, maximum);
-    if (chunks.length > 1) {
-      const last = chunks[chunks.length - 1];
-      const previous = chunks[chunks.length - 2];
-      const lastTokens = last.text.split(/\s+/);
-      const previousTokens = previous.text.split(/\s+/);
-      const uniqueLast = lastTokens.slice(Math.min(overlap, lastTokens.length));
-      if (
-        lastTokens.length < minimum &&
-        previousTokens.length + uniqueLast.length <= maximum
-      ) {
-        previous.text = [...previousTokens, ...uniqueLast].join(' ');
-        previous.endTime = last.endTime;
-        chunks.pop();
-      }
-    }
-    return chunks;
-  }
-
-  private tokensForSegment(segment: TranscriptSegment): TimedToken[] {
-    const values = segment.text.trim().split(/\s+/).filter(Boolean);
-    const duration = Math.max(0, segment.end - segment.start);
-    return values.map((value, index) => ({
-      value,
-      start: segment.start + (duration * index) / Math.max(values.length, 1),
-      end:
-        segment.start + (duration * (index + 1)) / Math.max(values.length, 1),
-      sentenceEnd: /[.!?]["')\]]*$/.test(value),
-    }));
-  }
-
-  private reelText(
-    metadata: ExtractedReelMetadata,
-    transcript?: string,
-  ): string {
-    return this.limitTokens(
-      [
-        metadata.title ? `Title: ${metadata.title}` : undefined,
-        metadata.description ? `Summary: ${metadata.description}` : undefined,
-        metadata.tags.length
-          ? `Topics: ${metadata.tags.join(', ')}`
-          : undefined,
-        !metadata.description && transcript
-          ? `Summary: ${transcript}`
-          : undefined,
-      ]
-        .filter((value): value is string => Boolean(value))
-        .join('\n'),
-      this.maxTokens(),
-    );
-  }
-
-  private sectionText(section: TranscriptSection): string {
-    return this.limitTokens(section.summary || section.text, this.maxTokens());
+      .map((document) => ({
+        chunkIndex: document.ordinal,
+        text: document.evidenceText ?? document.retrievalText,
+        startTime: document.startTime,
+        endTime: document.endTime,
+        embedding: document.embedding,
+        embeddingModel: [
+          document.embeddingProvider,
+          document.embeddingModel,
+          document.embeddingDimensions,
+          document.embeddingVersion,
+        ].join(':'),
+      }));
   }
 
   private versionedDraft(
-    draft: Omit<DocumentDraft, keyof EmbeddingCacheIdentity>,
+    draft: DraftInput,
     job: ReelIndexJob,
-  ): DocumentDraft {
-    const embeddingInputHash = createHash('sha256')
-      .update(draft.text.normalize('NFKC').trim())
-      .digest('hex');
-    const identityWithoutKey = {
+  ): ReelEvidenceDocumentDraft {
+    const base = {
+      ...draft,
+      retrievalHash: this.hash(draft.retrievalText),
+      sectioningVersion:
+        this.config.get<string>('INDEX_SECTIONING_VERSION') ||
+        'reel-section-v2',
       stableItemId: draft.id,
       documentKind: draft.kind,
-      embeddingInputHash,
       embeddingProvider:
         this.config.get<string>('INDEX_EMBEDDING_PROVIDER') || 'google',
       embeddingModel: (
@@ -401,17 +407,139 @@ export class BuildHierarchicalIndexUseCase {
         '1',
       indexVersion: job.indexVersion,
       chunkingVersion:
-        this.config.get<string>('INDEX_CHUNKING_VERSION') || 'reel-chunk-v2',
+        this.config.get<string>('INDEX_CHUNKING_VERSION') || 'reel-chunk-v3',
       summaryVersion:
         this.config.get<string>('INDEX_SUMMARY_VERSION') || 'reel-summary-v1',
     };
-    const cacheKey = createHash('sha256')
-      .update(JSON.stringify(identityWithoutKey))
-      .digest('hex');
-    return { ...draft, ...identityWithoutKey, cacheKey };
+    return this.reversionDraft(base, base);
   }
 
-  private identity(draft: DocumentDraft): EmbeddingCacheIdentity {
+  private reversionDraft(
+    draft: Omit<ReelEvidenceDocumentDraft, 'cacheKey' | 'embeddingInputHash'> &
+      Partial<
+        Pick<ReelEvidenceDocumentDraft, 'cacheKey' | 'embeddingInputHash'>
+      >,
+    identity: Pick<
+      ReelEvidenceDocumentDraft,
+      | 'stableItemId'
+      | 'documentKind'
+      | 'embeddingProvider'
+      | 'embeddingModel'
+      | 'embeddingDimensions'
+      | 'embeddingVersion'
+      | 'indexVersion'
+      | 'chunkingVersion'
+      | 'summaryVersion'
+    >,
+  ): ReelEvidenceDocumentDraft {
+    const embeddingInputHash = this.hash(draft.retrievalText);
+    const identityWithoutKey = {
+      stableItemId: identity.stableItemId,
+      documentKind: identity.documentKind,
+      embeddingInputHash,
+      embeddingProvider: identity.embeddingProvider,
+      embeddingModel: identity.embeddingModel,
+      embeddingDimensions: identity.embeddingDimensions,
+      embeddingVersion: identity.embeddingVersion,
+      indexVersion: identity.indexVersion,
+      chunkingVersion: identity.chunkingVersion,
+      summaryVersion: identity.summaryVersion,
+    };
+    return {
+      ...draft,
+      retrievalHash: this.hash(draft.retrievalText),
+      ...identityWithoutKey,
+      cacheKey: this.hash(JSON.stringify(identityWithoutKey)),
+    };
+  }
+
+  private reelRetrievalText(metadata: ExtractedReelMetadata): string {
+    return [
+      'Document type: Reel',
+      metadata.title ? `Title: ${metadata.title.trim()}` : undefined,
+      metadata.tags.length
+        ? `Trusted tags: ${metadata.tags.join(', ')}`
+        : undefined,
+      metadata.description
+        ? `Derived summary: ${metadata.description.trim()}`
+        : undefined,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join('\n')
+      .trim();
+  }
+
+  private retrievalText(input: {
+    kind: 'Section' | 'Chunk';
+    metadata: ExtractedReelMetadata;
+    ordinal: number;
+    startTime: number;
+    endTime: number;
+    evidenceText: string;
+  }): string {
+    return [
+      `Document type: ${input.kind}`,
+      input.metadata.title ? `Reel title: ${input.metadata.title}` : undefined,
+      input.metadata.tags.length
+        ? `Trusted tags: ${input.metadata.tags.join(', ')}`
+        : undefined,
+      `${input.kind} ordinal: ${input.ordinal}`,
+      `Time range: ${input.startTime.toFixed(3)}-${input.endTime.toFixed(3)} seconds`,
+      `Exact evidence: ${input.evidenceText}`,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join('\n');
+  }
+
+  private segmentsInside(
+    segments: TranscriptSegment[],
+    startMs: number,
+    endMs: number,
+  ): TranscriptSegment[] {
+    return segments.filter(
+      (segment) =>
+        segment.start * 1000 >= startMs && segment.start * 1000 < endMs,
+    );
+  }
+
+  private sourceSegmentIds(segments: TranscriptSegment[]): string[] {
+    return [
+      ...new Set(
+        segments.map((segment, ordinal) =>
+          typeof segment['sourceSegmentId'] === 'string'
+            ? segment['sourceSegmentId']
+            : `transcription:0:${segment.id ?? ordinal}`,
+        ),
+      ),
+    ];
+  }
+
+  private sourceAudioArtifactIds(segments: TranscriptSegment[]): string[] {
+    return [
+      ...new Set(
+        segments
+          .map((segment) => segment['sourceAudioArtifactId'])
+          .filter((value): value is string => typeof value === 'string'),
+      ),
+    ];
+  }
+
+  private normalizeEvidence(text: string): string {
+    return text.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  }
+
+  private transcriptVersion(): string {
+    return (
+      this.config.get<string>('INDEX_TRANSCRIPT_VERSION') ||
+      'normalized-transcript-v1'
+    );
+  }
+
+  private hash(value: string): string {
+    return createHash('sha256').update(value.normalize('NFKC')).digest('hex');
+  }
+
+  private identity(draft: ReelEvidenceDocumentDraft): EmbeddingCacheIdentity {
     return {
       cacheKey: draft.cacheKey,
       stableItemId: draft.stableItemId,
@@ -427,38 +555,23 @@ export class BuildHierarchicalIndexUseCase {
     };
   }
 
-  private limitTokens(text: string, maximum: number): string {
-    return text
-      .trim()
-      .split(/\s+/)
-      .slice(0, maximum)
-      .join(' ')
-      .slice(0, 20_000)
-      .trim();
-  }
-
   private isValidCachedEmbedding(entry: CachedEmbedding): boolean {
     return (
-      Array.isArray(entry.embedding) &&
-      entry.embedding.length > 0 &&
       entry.embedding.length === entry.embeddingDimensions &&
+      entry.embedding.length > 0 &&
       entry.embedding.every((value) => Number.isFinite(value))
     );
-  }
-
-  private maxTokens(): number {
-    return this.positiveInt('INDEX_CHUNK_MAX_TOKENS', 350, 20, 4_000);
   }
 
   private positiveInt(
     key: string,
     fallback: number,
-    min: number,
-    max: number,
+    minimum: number,
+    maximum: number,
   ): number {
-    const parsed = Number(this.config.get<string>(key) ?? fallback);
-    return Number.isInteger(parsed)
-      ? Math.min(max, Math.max(min, parsed))
+    const value = Number(this.config.get<string>(key) ?? fallback);
+    return Number.isInteger(value)
+      ? Math.min(maximum, Math.max(minimum, value))
       : fallback;
   }
 }

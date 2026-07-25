@@ -6,6 +6,10 @@ import type {
   GenerateEmbeddingBatchRequest,
   GenerateEmbeddingBatchResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
+import type {
+  CountDocumentTokensRequest,
+  CountDocumentTokensResult,
+} from '@common/ai/interfaces/count-document-tokens.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 
 export interface IIndexingAiService {
@@ -21,4 +25,8 @@ export interface IIndexingAiService {
   generateEmbeddingBatch(
     input: GenerateEmbeddingBatchRequest,
   ): Promise<GenerateEmbeddingBatchResult>;
+
+  countDocumentTokens(
+    input: CountDocumentTokensRequest,
+  ): Promise<CountDocumentTokensResult>;
 }

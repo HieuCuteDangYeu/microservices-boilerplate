@@ -1,6 +1,7 @@
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { AudioSegmentCheckpoint } from '@indexing/domain/entities/index-checkpoint.entity';
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
 
 export class MissingAudioSegmentsError extends Error {
   constructor(readonly missingSegmentNumbers: number[]) {
@@ -14,6 +15,8 @@ export class MissingAudioSegmentsError extends Error {
 export interface MergedTranscript {
   text?: string;
   segments?: TranscriptSegment[];
+  transcriptHash: string;
+  mergeAlgorithmVersion: string;
 }
 
 @Injectable()
@@ -34,7 +37,12 @@ export class MergeTranscriptSegmentsUseCase {
     });
 
     if (missing.length > 0) throw new MissingAudioSegmentsError(missing);
-    if (expectedCount === 0) return {};
+    if (expectedCount === 0) {
+      return {
+        transcriptHash: this.hash([]),
+        mergeAlgorithmVersion: 'transcript-merge-v2',
+      };
+    }
 
     let mergedText = '';
     const mergedSegments: Array<
@@ -51,13 +59,19 @@ export class MergeTranscriptSegmentsUseCase {
         hasTimestampOverlap,
       );
 
-      for (const segment of checkpoint.transcriptSegments ?? []) {
+      for (const [segmentOrdinal, segment] of (
+        checkpoint.transcriptSegments ?? []
+      ).entries()) {
         const offsetSeconds = checkpoint.startMs / 1000;
         const candidate = {
           ...segment,
           start: Math.max(0, Number(segment.start) + offsetSeconds),
           end: Math.max(0, Number(segment.end) + offsetSeconds),
           sourceSegmentNumber: checkpoint.segmentNumber,
+          sourceSegmentId: `transcription:${checkpoint.segmentNumber}:${
+            segment.id ?? segmentOrdinal
+          }`,
+          sourceAudioArtifactId: checkpoint.artifactChecksum,
         };
         const previous = mergedSegments.at(-1);
 
@@ -80,7 +94,21 @@ export class MergeTranscriptSegmentsUseCase {
     return {
       text: mergedText || undefined,
       segments: mergedSegments.length > 0 ? mergedSegments : undefined,
+      transcriptHash: this.hash(
+        byNumber.map((segment) => ({
+          artifactChecksum: segment.artifactChecksum,
+          transcriptText: segment.transcriptText,
+          provider: segment.provider,
+          transcriptionModel: segment.transcriptionModel,
+          transcriptionVersion: segment.transcriptionVersion,
+        })),
+      ),
+      mergeAlgorithmVersion: 'transcript-merge-v2',
     };
+  }
+
+  private hash(value: unknown): string {
+    return createHash('sha256').update(JSON.stringify(value)).digest('hex');
   }
 
   private appendWithOverlap(

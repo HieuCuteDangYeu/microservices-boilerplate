@@ -7,4 +7,6 @@ export interface IEmbeddingService {
   generateVector(
     input: GenerateEmbeddingRequest,
   ): Promise<GenerateEmbeddingResult>;
+
+  countTokens(model: string, text: string): Promise<number>;
 }

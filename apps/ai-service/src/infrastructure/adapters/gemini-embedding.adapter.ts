@@ -15,6 +15,13 @@ interface GeminiEmbedResponse {
   };
 }
 
+interface GeminiCountTokensResponse {
+  totalTokens?: number;
+  error?: {
+    message?: string;
+  };
+}
+
 @Injectable()
 export class GeminiEmbeddingAdapter implements IEmbeddingService {
   private readonly apiKey: string;
@@ -99,6 +106,47 @@ export class GeminiEmbeddingAdapter implements IEmbeddingService {
       version:
         this.configService.get<string>('GEMINI_EMBEDDING_VERSION') || '1',
     };
+  }
+
+  async countTokens(model: string, text: string): Promise<number> {
+    const normalizedModel = model.trim().replace(/^models\//, '');
+    const normalizedText = text.trim();
+    if (!normalizedModel || !normalizedText) {
+      throw new Error('Token counting requires a model and non-empty text');
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${normalizedModel}:countTokens`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: normalizedText }] }],
+        }),
+      },
+    );
+    const rawBody = await response.text();
+    let payload: GeminiCountTokensResponse = {};
+    try {
+      payload = JSON.parse(rawBody) as GeminiCountTokensResponse;
+    } catch {
+      // The response check below produces a bounded provider error.
+    }
+    if (!response.ok) {
+      throw new Error(
+        payload.error?.message || rawBody || 'Gemini token counting failed',
+      );
+    }
+    if (
+      !Number.isInteger(payload.totalTokens) ||
+      (payload.totalTokens ?? 0) < 1
+    ) {
+      throw new Error('Gemini token counting returned an invalid token count');
+    }
+    return payload.totalTokens!;
   }
 
   private normalizeVector(vector: number[]): number[] {

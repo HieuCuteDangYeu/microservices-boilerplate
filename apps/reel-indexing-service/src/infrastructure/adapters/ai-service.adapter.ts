@@ -3,6 +3,10 @@ import type {
   GenerateEmbeddingBatchRequest,
   GenerateEmbeddingBatchResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
+import type {
+  CountDocumentTokensRequest,
+  CountDocumentTokensResult,
+} from '@common/ai/interfaces/count-document-tokens.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import { Inject, Injectable } from '@nestjs/common';
@@ -54,6 +58,16 @@ export class AiServiceAdapter implements IIndexingAiService {
           'ai.generate_embedding_batch',
           input,
         )
+        .pipe(timeout(120_000)),
+    );
+  }
+
+  async countDocumentTokens(
+    input: CountDocumentTokensRequest,
+  ): Promise<CountDocumentTokensResult> {
+    return await firstValueFrom(
+      this.client
+        .send<CountDocumentTokensResult>('ai.count_document_tokens', input)
         .pipe(timeout(120_000)),
     );
   }

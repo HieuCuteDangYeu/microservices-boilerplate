@@ -21,6 +21,7 @@ export interface IIndexCheckpointRepository {
   initializeAudioSegments(
     indexAttemptId: string,
     artifacts: TranscriptionAudioArtifact[],
+    transcriptionIdentity: string,
   ): Promise<void>;
   listAudioSegments(indexAttemptId: string): Promise<AudioSegmentCheckpoint[]>;
   markAudioSegmentProcessing(

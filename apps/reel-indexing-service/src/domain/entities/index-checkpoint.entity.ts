@@ -1,6 +1,7 @@
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { ReelEvidenceDocumentDraft } from '@common/processing/interfaces/reel-index-document.interface';
 
 export const INDEX_CHECKPOINT_STAGES = [
   'TRANSCRIBING_AUDIO_SEGMENTS',
@@ -38,10 +39,13 @@ export interface IndexJobCheckpoint {
   status: IndexJobStatus;
   stage: IndexCheckpointStage;
   mergedTranscript?: string;
+  mergedTranscriptHash?: string;
+  mergeAlgorithmVersion?: string;
   mergedSegments?: TranscriptSegment[];
   extractedMetadata?: ExtractedReelMetadata;
   sections?: TranscriptSection[];
   chunks?: ReelChunkIndexInput[];
+  documentDrafts?: ReelEvidenceDocumentDraft[];
   lastError?: string;
 }
 
@@ -56,6 +60,7 @@ export interface AudioSegmentCheckpoint {
   provider?: string;
   transcriptionModel?: string;
   transcriptionVersion?: string;
+  transcriptionIdentity?: string;
   status: AudioSegmentStatus;
   attemptCount: number;
   transcriptText?: string;

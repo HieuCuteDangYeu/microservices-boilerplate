@@ -2,11 +2,15 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { BuildHierarchicalIndexUseCase } from './application/use-cases/build-hierarchical-index.use-case';
+import { BuildAdaptiveTranscriptSectionsUseCase } from './application/use-cases/build-adaptive-transcript-sections.use-case';
+import { BuildLongEvidenceChunksUseCase } from './application/use-cases/build-long-evidence-chunks.use-case';
+import { BuildShortEvidenceChunksUseCase } from './application/use-cases/build-short-evidence-chunks.use-case';
 import { BuildTranscriptSectionsUseCase } from './application/use-cases/build-transcript-sections.use-case';
 import { ExtractHierarchicalMetadataUseCase } from './application/use-cases/extract-hierarchical-metadata.use-case';
 import { MergeTranscriptSegmentsUseCase } from './application/use-cases/merge-transcript-segments.use-case';
 import { ProcessReelIndexJobUseCase } from './application/use-cases/process-reel-index-job.use-case';
 import { TranscribeAudioManifestUseCase } from './application/use-cases/transcribe-audio-manifest.use-case';
+import { ValidateEvidenceIndexCandidateUseCase } from './application/use-cases/validate-evidence-index-candidate.use-case';
 import { AiServiceAdapter } from './infrastructure/adapters/ai-service.adapter';
 import { ContentServiceAdapter } from './infrastructure/adapters/content-service.adapter';
 import { R2ArtifactStorageAdapter } from './infrastructure/adapters/r2-artifact-storage.adapter';
@@ -15,7 +19,9 @@ import { ReelIndexingController } from './infrastructure/controllers/reel-indexi
 import { SemanticIndexController } from './infrastructure/controllers/semantic-index.controller';
 import { PrismaService } from './infrastructure/prisma/prisma.service';
 import { PrismaIndexCheckpointRepository } from './infrastructure/repositories/prisma-index-checkpoint.repository';
+import { PrismaLangGraphCheckpointSaver } from './infrastructure/repositories/prisma-langgraph-checkpoint-saver';
 import { PrismaSemanticIndexRepository } from './infrastructure/repositories/prisma-semantic-index.repository';
+import { ReelIndexLangGraphWorkflow } from './infrastructure/workflows/reel-index-langgraph.workflow';
 
 const rabbitClient = (name: string, queue: string) => ({
   name,
@@ -56,8 +62,14 @@ const rabbitClient = (name: string, queue: string) => ({
     TranscribeAudioManifestUseCase,
     MergeTranscriptSegmentsUseCase,
     BuildTranscriptSectionsUseCase,
+    BuildAdaptiveTranscriptSectionsUseCase,
+    BuildShortEvidenceChunksUseCase,
+    BuildLongEvidenceChunksUseCase,
     ExtractHierarchicalMetadataUseCase,
     BuildHierarchicalIndexUseCase,
+    ValidateEvidenceIndexCandidateUseCase,
+    PrismaLangGraphCheckpointSaver,
+    ReelIndexLangGraphWorkflow,
     ProcessReelIndexJobUseCase,
     AiServiceAdapter,
     ContentServiceAdapter,

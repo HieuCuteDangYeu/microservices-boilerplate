@@ -376,6 +376,7 @@ export class PrepareReelMediaUseCase {
         hlsMasterKey,
         thumbnailKey,
         transcriptionAudioManifestKey: audioResult.manifestKey,
+        sourceHasAudio: sourceMetadata.hasAudio === true,
         sourceLengthClass: classification.mediaClass,
         variants: transcodeResult.variants,
         hlsObjectCount: hlsStats.fileCount,

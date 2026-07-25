@@ -218,7 +218,8 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
 
   async getReelDocument(reelId: string): Promise<SemanticReelDocument | null> {
     const rows = await this.prisma.$queryRaw<ReelDocumentRow[]>(Prisma.sql`
-      SELECT "id", "reelId", "userId", "title", "description", "text",
+      SELECT "id", "reelId", "userId", "title", "description",
+        "retrievalText" AS "text",
         "tags", "sourceDurationMs", "sourceOrientation", "sourceLengthClass",
         "indexAttemptId", "indexVersion", "embeddingProvider", "embeddingModel",
         "embeddingDimensions", "embeddingVersion", "chunkingVersion",
@@ -314,7 +315,8 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
         UNION SELECT "rowId" FROM keyword_candidates
         UNION SELECT "rowId" FROM metadata_candidates
       )
-      SELECT t."id", t."reelId", t."parentId", t."userId", t."text", t."tags",
+      SELECT t."id", t."reelId", t."parentId", t."userId",
+        t."retrievalText" AS "text", t."tags",
         t."startTime", t."endTime", t."sourceDurationMs", t."sourceOrientation",
         t."sourceLengthClass", v.distance AS "vectorDistance", v.rank AS "vectorRank",
         k.rank AS "keywordRank", m.rank AS "metadataRank",
@@ -455,7 +457,12 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     const rows = documents.map(
       (document) => Prisma.sql`(
       ${randomUUID()}, ${document.id}, ${document.reelId}, ${input.job.indexAttemptId}, false,
-      ${input.job.userId}, ${document.parentId ?? null}, ${title}, ${description}, ${document.text},
+      ${input.job.userId}, ${document.parentId ?? null}, ${title}, ${description},
+      ${document.evidenceText ?? null}, ${document.retrievalText}, ${document.derivedSummary ?? null},
+      ${document.sourceSectionIds}::text[], ${document.sourceSegmentIds}::text[],
+      ${document.sourceAudioArtifactIds}::text[], ${document.evidenceHash ?? null},
+      ${document.retrievalHash}, ${document.evidenceQuality}::"EvidenceQuality",
+      ${document.transcriptVersion ?? null}, ${document.sectioningVersion}, ${document.tokenCount},
       ${tags}::text[], ${document.startTime ?? null}, ${document.endTime ?? null},
       ${input.job.sourceDurationMs}, ${input.job.sourceOrientation}, ${input.job.sourceLengthClass},
       ${`[${document.embedding.join(',')}]`}::vector, ${document.embeddingProvider},
@@ -467,7 +474,10 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     return Prisma.sql`
       INSERT INTO ${Prisma.raw(`"${table}"`)} (
         "rowId", "id", "reelId", "indexAttemptId", "isActive", "userId", "parentId",
-        "title", "description", "text", "tags", "startTime", "endTime", "sourceDurationMs",
+        "title", "description", "evidenceText", "retrievalText", "derivedSummary",
+        "sourceSectionIds", "sourceSegmentIds", "sourceAudioArtifactIds", "evidenceHash",
+        "retrievalHash", "evidenceQuality", "transcriptVersion", "sectioningVersion",
+        "tokenCount", "tags", "startTime", "endTime", "sourceDurationMs",
         "sourceOrientation", "sourceLengthClass", "embedding", "embeddingProvider",
         "embeddingModel", "embeddingDimensions", "embeddingVersion", "embeddingInputHash",
         "indexVersion", "chunkingVersion", "summaryVersion", "createdAt", "updatedAt"
@@ -486,6 +496,13 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       throw new Error(
         `Document ${document.id} must use a ${SEMANTIC_INDEX_EMBEDDING_DIMENSIONS}-dimension embedding`,
       );
+    }
+    if (
+      !document.retrievalText.trim() ||
+      !document.retrievalHash.trim() ||
+      document.tokenCount < 1
+    ) {
+      throw new Error(`Document ${document.id} has invalid retrieval evidence`);
     }
   }
 

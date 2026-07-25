@@ -12,6 +12,7 @@ export interface ReelMediaOutput {
   hlsMasterKey: string;
   thumbnailKey: string;
   transcriptionAudioManifestKey: string;
+  sourceHasAudio: boolean;
   sourceLengthClass: ReelSourceLengthClass;
   variants: ReelEncodingVariantOutput[];
   hlsObjectCount: number;

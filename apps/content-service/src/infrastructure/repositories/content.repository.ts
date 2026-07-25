@@ -513,6 +513,7 @@ export class ContentRepository
         transcriptionAudioManifestKey:
           input.mediaOutput.transcriptionAudioManifestKey,
         sourceDurationMs: input.mediaMetadata.sourceDurationMs!,
+        sourceHasAudio: input.mediaOutput.sourceHasAudio,
         sourceOrientation: input.mediaMetadata.sourceOrientation!,
         sourceLengthClass: input.mediaOutput.sourceLengthClass,
         title: reel.title ?? undefined,
@@ -801,6 +802,7 @@ export class ContentRepository
         transcriptionAudioManifestKey:
           reel.transcriptionAudioManifestKey ?? undefined,
         sourceDurationMs: reel.sourceDurationMs,
+        sourceHasAudio: reel.sourceHasAudio ?? undefined,
         sourceOrientation: reel.sourceOrientation,
         sourceLengthClass: reel.sourceLengthClass,
         title: reel.title ?? undefined,

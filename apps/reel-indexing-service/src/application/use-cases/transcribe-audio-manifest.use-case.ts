@@ -6,6 +6,7 @@ import type { IArtifactStorage } from '@indexing/domain/interfaces/artifact-stor
 import type { IIndexCheckpointRepository } from '@indexing/domain/interfaces/index-checkpoint.repository.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class TranscribeAudioManifestUseCase {
@@ -38,6 +39,7 @@ export class TranscribeAudioManifestUseCase {
     await this.checkpoints.initializeAudioSegments(
       job.indexAttemptId,
       manifest.artifacts,
+      this.transcriptionIdentity(manifest.artifacts),
     );
     const current = await this.checkpoints.listAudioSegments(
       job.indexAttemptId,
@@ -54,6 +56,27 @@ export class TranscribeAudioManifestUseCase {
       manifest,
       segments: await this.checkpoints.listAudioSegments(job.indexAttemptId),
     };
+  }
+
+  private transcriptionIdentity(
+    artifacts: TranscriptionAudioManifest['artifacts'],
+  ): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          artifactChecksums: artifacts.map((artifact) => artifact.checksum),
+          provider:
+            this.configService.get<string>('INDEX_TRANSCRIPTION_PROVIDER') ||
+            'cloudflare-workers-ai',
+          model:
+            this.configService.get<string>('INDEX_TRANSCRIPTION_MODEL') ||
+            '@cf/openai/whisper-large-v3-turbo',
+          version:
+            this.configService.get<string>('INDEX_TRANSCRIPTION_VERSION') ||
+            '1',
+        }),
+      )
+      .digest('hex');
   }
 
   private async transcribeSegment(

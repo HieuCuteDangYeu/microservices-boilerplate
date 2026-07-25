@@ -1,24 +1,43 @@
 export type ReelIndexDocumentKind = 'REEL' | 'SECTION' | 'CHUNK';
+export type ReelEvidenceQuality =
+  | 'VERIFIED'
+  | 'LOW_CONFIDENCE'
+  | 'METADATA_ONLY';
 
-export interface ReelIndexDocument {
+export interface ReelEvidenceDocument {
   id: string;
   reelId: string;
+  parentId?: string;
   kind: ReelIndexDocumentKind;
   ordinal: number;
-  parentId?: string;
-  text: string;
+  evidenceText?: string;
+  retrievalText: string;
+  derivedSummary?: string;
+  sourceSectionIds: string[];
   startTime?: number;
   endTime?: number;
-  embedding: number[];
+  sourceSegmentIds: string[];
+  sourceAudioArtifactIds: string[];
+  evidenceHash?: string;
+  retrievalHash: string;
+  evidenceQuality: ReelEvidenceQuality;
+  transcriptVersion?: string;
+  sectioningVersion: string;
+  chunkingVersion: string;
+  summaryVersion: string;
+  indexVersion: string;
   embeddingProvider: string;
   embeddingModel: string;
   embeddingDimensions: number;
   embeddingVersion: string;
   embeddingInputHash: string;
-  indexVersion: string;
-  chunkingVersion: string;
-  summaryVersion: string;
+  embedding: number[];
+  tokenCount: number;
 }
+
+// Retained as a source-compatible name while callers migrate to the
+// evidence-specific contract.
+export type ReelIndexDocument = ReelEvidenceDocument;
 
 export interface EmbeddingCacheIdentity {
   cacheKey: string;
@@ -32,6 +51,28 @@ export interface EmbeddingCacheIdentity {
   indexVersion: string;
   chunkingVersion: string;
   summaryVersion: string;
+}
+
+export interface ReelEvidenceDocumentDraft extends EmbeddingCacheIdentity {
+  id: string;
+  reelId: string;
+  parentId?: string;
+  kind: ReelIndexDocumentKind;
+  ordinal: number;
+  evidenceText?: string;
+  retrievalText: string;
+  derivedSummary?: string;
+  sourceSectionIds: string[];
+  startTime?: number;
+  endTime?: number;
+  sourceSegmentIds: string[];
+  sourceAudioArtifactIds: string[];
+  evidenceHash?: string;
+  retrievalHash: string;
+  evidenceQuality: ReelEvidenceQuality;
+  transcriptVersion?: string;
+  sectioningVersion: string;
+  tokenCount?: number;
 }
 
 export interface CachedEmbedding extends EmbeddingCacheIdentity {
