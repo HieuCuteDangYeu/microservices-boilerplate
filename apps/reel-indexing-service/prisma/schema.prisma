@@ -157,6 +157,7 @@ model ReelDocument {
   isActive               Boolean                    @default(false)
   userId                 String
   parentId               String?
+  ordinal                Int
   title                  String?
   description            String?                    @db.Text
   evidenceText           String?                    @db.Text
@@ -195,6 +196,7 @@ model ReelDocument {
   @@index([reelId, isActive])
   @@index([userId, isActive])
   @@index([sourceLengthClass, isActive])
+  @@index([reelId, indexAttemptId, ordinal])
 }
 
 model ReelSection {
@@ -205,6 +207,7 @@ model ReelSection {
   isActive               Boolean                    @default(false)
   userId                 String
   parentId               String
+  ordinal                Int
   title                  String?
   description            String?                    @db.Text
   evidenceText           String?                    @db.Text
@@ -242,6 +245,7 @@ model ReelSection {
   @@index([reelId, isActive])
   @@index([parentId, isActive])
   @@index([userId, isActive])
+  @@index([reelId, indexAttemptId, ordinal])
 }
 
 model ReelChunk {
@@ -252,6 +256,7 @@ model ReelChunk {
   isActive               Boolean                    @default(false)
   userId                 String
   parentId               String
+  ordinal                Int
   title                  String?
   description            String?                    @db.Text
   evidenceText           String?                    @db.Text
@@ -289,6 +294,7 @@ model ReelChunk {
   @@index([reelId, isActive])
   @@index([parentId, isActive])
   @@index([userId, isActive])
+  @@index([parentId, isActive, ordinal])
 }
 
 model TranscriptionSegment {

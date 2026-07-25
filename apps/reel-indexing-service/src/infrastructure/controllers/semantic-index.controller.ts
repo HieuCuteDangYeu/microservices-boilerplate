@@ -1,5 +1,6 @@
 import {
   SEMANTIC_INDEX_PATTERNS,
+  type AdjacentChunkRequest,
   type SemanticIndexDeleteResult,
   type SemanticIndexReindexResult,
   type SemanticIndexSearchRequest,
@@ -39,6 +40,13 @@ export class SemanticIndexController {
     @Payload() input: SemanticIndexSearchRequest,
   ): Promise<SemanticIndexSearchResult[]> {
     return await this.semanticIndex.searchChunks(input ?? {});
+  }
+
+  @MessagePattern(SEMANTIC_INDEX_PATTERNS.GET_ADJACENT_CHUNKS)
+  async getAdjacentChunks(
+    @Payload() input: AdjacentChunkRequest,
+  ): Promise<SemanticIndexSearchResult[]> {
+    return await this.semanticIndex.getAdjacentChunks(input);
   }
 
   @MessagePattern(SEMANTIC_INDEX_PATTERNS.GET_REEL_DOCUMENT)

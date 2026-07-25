@@ -1,4 +1,5 @@
 import type {
+  AdjacentChunkRequest,
   SemanticIndexSearchFilters,
   SemanticIndexSearchRequest,
   SemanticIndexSearchResult,
@@ -21,6 +22,7 @@ interface SearchRow {
   id: string;
   reelId: string;
   parentId: string | null;
+  ordinal: number;
   userId: string;
   text: string;
   tags: string[];
@@ -216,6 +218,43 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     return await this.search('ReelChunk', input);
   }
 
+  async getAdjacentChunks(
+    input: AdjacentChunkRequest,
+  ): Promise<SemanticIndexSearchResult[]> {
+    const chunkId = input.chunkId?.trim();
+    const reelId = input.reelId?.trim();
+    const parentId = input.parentId?.trim();
+    const eligibleReelIds = this.cleanStrings(input.eligibleReelIds);
+    if (!chunkId || !reelId || !parentId || !eligibleReelIds.includes(reelId)) {
+      return [];
+    }
+
+    const requiredIndexVersion = input.requiredIndexVersion?.trim();
+    const rows = await this.prisma.$queryRaw<SearchRow[]>(Prisma.sql`
+      WITH target AS (
+        SELECT "ordinal" FROM "ReelChunk"
+        WHERE "id" = ${chunkId} AND "reelId" = ${reelId}
+          AND "parentId" = ${parentId} AND "isActive" = true
+          ${requiredIndexVersion ? Prisma.sql`AND "indexVersion" = ${requiredIndexVersion}` : Prisma.empty}
+        LIMIT 1
+      )
+      SELECT c."id", c."reelId", c."parentId", c."ordinal", c."userId",
+        c."retrievalText" AS "text", c."tags", c."startTime", c."endTime",
+        c."sourceDurationMs", c."sourceOrientation", c."sourceLengthClass",
+        0::double precision AS "rrfScore", NULL::double precision AS "vectorDistance",
+        NULL::bigint AS "vectorRank", NULL::bigint AS "keywordRank", NULL::bigint AS "metadataRank"
+      FROM "ReelChunk" c, target
+      WHERE c."reelId" = ${reelId}
+        AND c."parentId" = ${parentId}
+        AND c."isActive" = true
+        AND c."ordinal" BETWEEN target."ordinal" - 1 AND target."ordinal" + 1
+        ${requiredIndexVersion ? Prisma.sql`AND c."indexVersion" = ${requiredIndexVersion}` : Prisma.empty}
+      ORDER BY c."ordinal"
+      LIMIT ${this.boundedInt(input.limit, 3, 1, 3)}
+    `);
+    return rows.map((row) => this.toSearchResult(row));
+  }
+
   async getReelDocument(reelId: string): Promise<SemanticReelDocument | null> {
     const rows = await this.prisma.$queryRaw<ReelDocumentRow[]>(Prisma.sql`
       SELECT "id", "reelId", "userId", "title", "description",
@@ -267,7 +306,11 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
   ): Promise<SemanticIndexSearchResult[]> {
     const normalized = this.normalizeSearch(input);
     const table = Prisma.raw(`"${target}"`);
-    const where = this.filters(normalized.filters);
+    const where = this.filters(
+      normalized.filters,
+      normalized.excludedIds,
+      normalized.requiredIndexVersion,
+    );
     const vector = normalized.queryEmbedding
       ? `[${normalized.queryEmbedding.join(',')}]`
       : null;
@@ -315,7 +358,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
         UNION SELECT "rowId" FROM keyword_candidates
         UNION SELECT "rowId" FROM metadata_candidates
       )
-      SELECT t."id", t."reelId", t."parentId", t."userId",
+      SELECT t."id", t."reelId", t."parentId", t."ordinal", t."userId",
         t."retrievalText" AS "text", t."tags",
         t."startTime", t."endTime", t."sourceDurationMs", t."sourceOrientation",
         t."sourceLengthClass", v.distance AS "vectorDistance", v.rank AS "vectorRank",
@@ -336,18 +379,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       await this.configureHnsw(transaction);
       return await transaction.$queryRaw<SearchRow[]>(query);
     });
-    return rows.map((row) => ({
-      ...row,
-      parentId: row.parentId ?? undefined,
-      startTime: row.startTime ?? undefined,
-      endTime: row.endTime ?? undefined,
-      vectorDistance: row.vectorDistance ?? undefined,
-      vectorRank: row.vectorRank === null ? undefined : Number(row.vectorRank),
-      keywordRank:
-        row.keywordRank === null ? undefined : Number(row.keywordRank),
-      metadataRank:
-        row.metadataRank === null ? undefined : Number(row.metadataRank),
-    }));
+    return rows.map((row) => this.toSearchResult(row));
   }
 
   private normalizeSearch(input: SemanticIndexSearchRequest): {
@@ -355,6 +387,8 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     queryEmbedding?: number[];
     queryTags: string[];
     filters: SemanticIndexSearchFilters;
+    excludedIds: string[];
+    requiredIndexVersion?: string;
     limit: number;
     candidateLimit: number;
   } {
@@ -379,6 +413,8 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       queryEmbedding: input.queryEmbedding,
       queryTags,
       filters: input.filters ?? {},
+      excludedIds: this.cleanStrings(input.excludedIds),
+      requiredIndexVersion: input.requiredIndexVersion?.trim() || undefined,
       limit,
       candidateLimit: Math.max(
         limit,
@@ -387,7 +423,11 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     };
   }
 
-  private filters(filters: SemanticIndexSearchFilters): Prisma.Sql {
+  private filters(
+    filters: SemanticIndexSearchFilters,
+    excludedIds: string[] = [],
+    requiredIndexVersion?: string,
+  ): Prisma.Sql {
     const reelIds = this.cleanStrings(filters.reelIds);
     const userIds = this.cleanStrings(filters.userIds);
     const parentIds = this.cleanStrings(filters.parentIds);
@@ -401,6 +441,8 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       ${parentIds.length ? Prisma.sql`AND t."parentId" IN (${Prisma.join(parentIds)})` : Prisma.empty}
       ${tags.length ? Prisma.sql`AND t."tags" && ${tags}::text[]` : Prisma.empty}
       ${lengthClasses.length ? Prisma.sql`AND t."sourceLengthClass" IN (${Prisma.join(lengthClasses)})` : Prisma.empty}
+      ${excludedIds.length ? Prisma.sql`AND t."id" NOT IN (${Prisma.join(excludedIds)})` : Prisma.empty}
+      ${requiredIndexVersion ? Prisma.sql`AND t."indexVersion" = ${requiredIndexVersion}` : Prisma.empty}
     `;
   }
 
@@ -457,7 +499,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     const rows = documents.map(
       (document) => Prisma.sql`(
       ${randomUUID()}, ${document.id}, ${document.reelId}, ${input.job.indexAttemptId}, false,
-      ${input.job.userId}, ${document.parentId ?? null}, ${title}, ${description},
+      ${input.job.userId}, ${document.parentId ?? null}, ${document.ordinal}, ${title}, ${description},
       ${document.evidenceText ?? null}, ${document.retrievalText}, ${document.derivedSummary ?? null},
       ${document.sourceSectionIds}::text[], ${document.sourceSegmentIds}::text[],
       ${document.sourceAudioArtifactIds}::text[], ${document.evidenceHash ?? null},
@@ -473,7 +515,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     );
     return Prisma.sql`
       INSERT INTO ${Prisma.raw(`"${table}"`)} (
-        "rowId", "id", "reelId", "indexAttemptId", "isActive", "userId", "parentId",
+        "rowId", "id", "reelId", "indexAttemptId", "isActive", "userId", "parentId", "ordinal",
         "title", "description", "evidenceText", "retrievalText", "derivedSummary",
         "sourceSectionIds", "sourceSegmentIds", "sourceAudioArtifactIds", "evidenceHash",
         "retrievalHash", "evidenceQuality", "transcriptVersion", "sectioningVersion",
@@ -504,6 +546,21 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     ) {
       throw new Error(`Document ${document.id} has invalid retrieval evidence`);
     }
+  }
+
+  private toSearchResult(row: SearchRow): SemanticIndexSearchResult {
+    return {
+      ...row,
+      parentId: row.parentId ?? undefined,
+      startTime: row.startTime ?? undefined,
+      endTime: row.endTime ?? undefined,
+      vectorDistance: row.vectorDistance ?? undefined,
+      vectorRank: row.vectorRank === null ? undefined : Number(row.vectorRank),
+      keywordRank:
+        row.keywordRank === null ? undefined : Number(row.keywordRank),
+      metadataRank:
+        row.metadataRank === null ? undefined : Number(row.metadataRank),
+    };
   }
 
   private cleanStrings(values?: string[]): string[] {

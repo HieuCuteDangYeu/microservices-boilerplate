@@ -28,6 +28,9 @@ export class RecommendationConfigService implements IRecommendationConfig {
       'REEL_SEMANTIC_POOL_ENABLED',
       true,
     );
+    this.semanticPoolEnabled =
+      this.semanticPoolEnabled &&
+      this.readBoolean('RECOMMENDATION_SEMANTIC_INDEX_ENABLED', false);
   }
 
   getAlgorithmVersion(): string {

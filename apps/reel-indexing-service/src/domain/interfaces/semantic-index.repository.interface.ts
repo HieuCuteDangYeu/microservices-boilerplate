@@ -3,6 +3,7 @@ import type { TranscriptSegment } from '@common/ai/interfaces/transcription-resu
 import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import type {
+  AdjacentChunkRequest,
   SemanticIndexSearchRequest,
   SemanticIndexSearchResult,
   SemanticReelDocument,
@@ -27,6 +28,9 @@ export interface ISemanticIndexRepository {
   ): Promise<SemanticIndexSearchResult[]>;
   searchChunks(
     input: SemanticIndexSearchRequest,
+  ): Promise<SemanticIndexSearchResult[]>;
+  getAdjacentChunks(
+    input: AdjacentChunkRequest,
   ): Promise<SemanticIndexSearchResult[]>;
   getReelDocument(reelId: string): Promise<SemanticReelDocument | null>;
   deleteReel(reelId: string): Promise<boolean>;

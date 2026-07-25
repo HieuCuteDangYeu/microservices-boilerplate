@@ -1585,6 +1585,20 @@ export class ContentRepository
       .sort((left, right) => right.score - left.score);
   }
 
+  async findSearchablePublicReels(ids: string[]): Promise<Reel[]> {
+    const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) return [];
+    const records = await this.reel.findMany({
+      where: {
+        id: { in: uniqueIds },
+        visibility: 'public',
+        mediaStatus: 'COMPLETED',
+        indexStatus: 'COMPLETED',
+      },
+    });
+    return records.map((record) => this.toDomain(record));
+  }
+
   private normalizeRecommendationTag(tag: string): string {
     return tag.trim().toLowerCase().replace(/^#/, '');
   }

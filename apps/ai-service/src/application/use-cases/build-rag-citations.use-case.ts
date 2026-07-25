@@ -20,7 +20,7 @@ export class BuildRagCitationsUseCase {
       title: chunk.title ?? undefined,
       startTime: this.toOptionalNumber(chunk.startTime),
       endTime: this.toOptionalNumber(chunk.endTime),
-      quote: this.truncate(chunk.chunkText, 240),
+      quote: this.exactQuote(chunk.chunkText, 240),
     }));
   }
 
@@ -34,13 +34,14 @@ export class BuildRagCitationsUseCase {
     return value;
   }
 
-  private truncate(value: string, maxLength: number): string {
+  private exactQuote(value: string, maxLength: number): string {
     const clean = value.replace(/\s+/g, ' ').trim();
 
     if (clean.length <= maxLength) {
       return clean;
     }
 
-    return `${clean.slice(0, maxLength).trim()}...`;
+    const boundary = clean.lastIndexOf(' ', maxLength);
+    return clean.slice(0, boundary > 0 ? boundary : maxLength).trim();
   }
 }

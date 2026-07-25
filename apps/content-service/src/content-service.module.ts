@@ -38,6 +38,7 @@ import { ReelMediaJobPublisherAdapter } from '@content/infrastructure/adapters/r
 import { ReelIndexJobPublisherAdapter } from '@content/infrastructure/adapters/reel-index-job-publisher.adapter';
 import { RecommendationTelemetryServiceAdapter } from '@content/infrastructure/adapters/recommendation-telemetry-service.adapter';
 import { SemanticRecommendationServiceAdapter } from '@content/infrastructure/adapters/semantic-recommendation-service.adapter';
+import { SemanticReelSearchAdapter } from '@content/infrastructure/adapters/semantic-reel-search.adapter';
 import { REEL_INDEX_QUERY_QUEUE } from '@common/processing/interfaces/semantic-index.interface';
 import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
 import { ContentController } from '@content/infrastructure/controllers/content.controller';
@@ -206,6 +207,10 @@ function createRmqClientRegistration(name: string, queue: string) {
     {
       provide: 'ISemanticRecommendationService',
       useClass: SemanticRecommendationServiceAdapter,
+    },
+    {
+      provide: 'ISemanticReelSearchService',
+      useClass: SemanticReelSearchAdapter,
     },
   ],
 })

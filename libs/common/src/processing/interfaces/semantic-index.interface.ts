@@ -7,6 +7,7 @@ export const SEMANTIC_INDEX_PATTERNS = {
   SEARCH_REELS: 'index.search_reels',
   SEARCH_SECTIONS: 'index.search_sections',
   SEARCH_CHUNKS: 'index.search_chunks',
+  GET_ADJACENT_CHUNKS: 'index.get_adjacent_chunks',
   GET_REEL_DOCUMENT: 'index.get_reel_document',
   DELETE_REEL: 'index.delete_reel',
   REINDEX_REEL: 'index.reindex_reel',
@@ -28,6 +29,8 @@ export interface SemanticIndexSearchRequest {
   queryEmbedding?: number[];
   queryTags?: string[];
   filters?: SemanticIndexSearchFilters;
+  excludedIds?: string[];
+  requiredIndexVersion?: string;
   limit?: number;
   candidateLimit?: number;
 }
@@ -36,6 +39,7 @@ export interface SemanticIndexSearchResult {
   id: string;
   reelId: string;
   parentId?: string;
+  ordinal: number;
   userId: string;
   text: string;
   tags: string[];
@@ -49,6 +53,15 @@ export interface SemanticIndexSearchResult {
   vectorRank?: number;
   keywordRank?: number;
   metadataRank?: number;
+}
+
+export interface AdjacentChunkRequest {
+  chunkId: string;
+  reelId: string;
+  parentId: string;
+  eligibleReelIds: string[];
+  requiredIndexVersion?: string;
+  limit?: number;
 }
 
 export interface SemanticReelDocument {

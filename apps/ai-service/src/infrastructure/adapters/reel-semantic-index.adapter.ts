@@ -1,6 +1,7 @@
 import type { IReelSemanticIndexService } from '@ai/domain/interfaces/reel-semantic-index.service.interface';
 import {
   SEMANTIC_INDEX_PATTERNS,
+  type AdjacentChunkRequest,
   type SemanticIndexSearchRequest,
   type SemanticIndexSearchResult,
   type SemanticReelDocument,
@@ -34,6 +35,12 @@ export class ReelSemanticIndexAdapter implements IReelSemanticIndexService {
     input: SemanticIndexSearchRequest,
   ): Promise<SemanticIndexSearchResult[]> {
     return this.search(SEMANTIC_INDEX_PATTERNS.SEARCH_CHUNKS, input);
+  }
+
+  getAdjacentChunks(
+    input: AdjacentChunkRequest,
+  ): Promise<SemanticIndexSearchResult[]> {
+    return this.search(SEMANTIC_INDEX_PATTERNS.GET_ADJACENT_CHUNKS, input);
   }
 
   async getReelDocument(reelId: string): Promise<SemanticReelDocument | null> {

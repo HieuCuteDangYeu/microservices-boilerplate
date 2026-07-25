@@ -292,6 +292,8 @@ export interface IContentRepository {
 
   searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]>;
 
+  findSearchablePublicReels(ids: string[]): Promise<Reel[]>;
+
   getSearchSuggestions(
     query: SearchSuggestionsQuery,
   ): Promise<SearchSuggestion[]>;

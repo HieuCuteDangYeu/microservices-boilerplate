@@ -14,6 +14,7 @@ import type {
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type {
   SemanticIndexSearchResult,
   SemanticReelDocument,
@@ -49,6 +50,8 @@ export class RetrievalAgentUseCase {
 
     @Inject('IRerankerService')
     private readonly rerankerService: IRerankerService,
+
+    private readonly config: ConfigService,
   ) {}
 
   async execute(input: {
@@ -93,12 +96,31 @@ export class RetrievalAgentUseCase {
         taskType: 'RETRIEVAL_QUERY',
       });
 
-      const retrievedChunks = await this.retrieveHierarchically({
+      const retrievalInput = {
         queryText,
         queryEmbedding: queryEmbedding.values,
         accessibleReelIds,
         limit: plan.searchLimit,
-      });
+      };
+      const retrievedChunks = this.indexingSearchEnabled()
+        ? await this.retrieveHierarchically(retrievalInput)
+        : await this.contentService.searchReelContext({
+            queryText,
+            queryVector: queryEmbedding.values,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            sharedOnly: true,
+            limit: plan.searchLimit,
+          });
+
+      if (!this.indexingSearchEnabled() && this.hierarchicalShadowEnabled()) {
+        void this.retrieveHierarchically(retrievalInput).catch(
+          (error: unknown) =>
+            this.logger.warn(
+              `Indexing retrieval shadow request failed: ${this.errorMessage(error)}`,
+            ),
+        );
+      }
 
       allCandidates.push(...retrievedChunks);
     }
@@ -126,6 +148,9 @@ export class RetrievalAgentUseCase {
     accessibleReelIds: string[];
     limit: number;
   }): Promise<TranscriptMatch[]> {
+    if (!this.hierarchicalRetrievalEnabled()) {
+      return await this.retrieveDirectly(input);
+    }
     const reelCandidates = await this.semanticIndexService.searchReels({
       queryText: input.queryText,
       queryEmbedding: input.queryEmbedding,
@@ -176,8 +201,12 @@ export class RetrievalAgentUseCase {
       candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
     });
 
+    const expandedChunks = await this.expandNeighbours(
+      chunkCandidates,
+      input.accessibleReelIds,
+    );
     const documents = await Promise.all(
-      [...new Set(chunkCandidates.map((candidate) => candidate.reelId))].map(
+      [...new Set(expandedChunks.map((candidate) => candidate.reelId))].map(
         async (reelId) =>
           [
             reelId,
@@ -189,12 +218,95 @@ export class RetrievalAgentUseCase {
       documents,
     );
 
-    return chunkCandidates.map((candidate) =>
+    return expandedChunks.map((candidate) =>
       this.toTranscriptMatch(
         candidate,
         documentByReelId.get(candidate.reelId) ?? null,
       ),
     );
+  }
+
+  private async retrieveDirectly(input: {
+    queryText: string;
+    queryEmbedding: number[];
+    accessibleReelIds: string[];
+    limit: number;
+  }): Promise<TranscriptMatch[]> {
+    const chunks = await this.semanticIndexService.searchChunks({
+      queryText: input.queryText,
+      queryEmbedding: input.queryEmbedding,
+      filters: { reelIds: input.accessibleReelIds },
+      limit: input.limit,
+      candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
+    });
+    const expanded = await this.expandNeighbours(
+      chunks,
+      input.accessibleReelIds,
+    );
+    const documents = await Promise.all(
+      [...new Set(expanded.map((candidate) => candidate.reelId))].map(
+        async (reelId) =>
+          [
+            reelId,
+            await this.semanticIndexService.getReelDocument(reelId),
+          ] as const,
+      ),
+    );
+    const documentByReelId = new Map<string, SemanticReelDocument | null>(
+      documents,
+    );
+    return expanded.map((candidate) =>
+      this.toTranscriptMatch(
+        candidate,
+        documentByReelId.get(candidate.reelId) ?? null,
+      ),
+    );
+  }
+
+  private async expandNeighbours(
+    chunks: SemanticIndexSearchResult[],
+    eligibleReelIds: string[],
+  ): Promise<SemanticIndexSearchResult[]> {
+    const neighbours = await Promise.all(
+      chunks.slice(0, 10).map(async (chunk) => {
+        if (!chunk.parentId) return [];
+        return await this.semanticIndexService.getAdjacentChunks({
+          chunkId: chunk.id,
+          reelId: chunk.reelId,
+          parentId: chunk.parentId,
+          eligibleReelIds,
+          limit: 3,
+        });
+      }),
+    );
+    const byId = new Map<string, SemanticIndexSearchResult>();
+    for (const chunk of [...chunks, ...neighbours.flat()]) {
+      byId.set(chunk.id, chunk);
+    }
+    return [...byId.values()];
+  }
+
+  private indexingSearchEnabled(): boolean {
+    return this.readBoolean('RAG_INDEXING_SERVICE_SEARCH_ENABLED', false);
+  }
+
+  private hierarchicalRetrievalEnabled(): boolean {
+    return this.readBoolean('RAG_HIERARCHICAL_RETRIEVAL_ENABLED', false);
+  }
+
+  private hierarchicalShadowEnabled(): boolean {
+    return this.readBoolean('RAG_HIERARCHICAL_SHADOW_MODE', true);
+  }
+
+  private readBoolean(name: string, fallback: boolean): boolean {
+    const value = this.config.get<string>(name)?.trim().toLowerCase();
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return fallback;
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private toTranscriptMatch(

@@ -1,4 +1,5 @@
 import type {
+  AdjacentChunkRequest,
   SemanticIndexSearchRequest,
   SemanticIndexSearchResult,
   SemanticReelDocument,
@@ -13,6 +14,9 @@ export interface IReelSemanticIndexService {
   ): Promise<SemanticIndexSearchResult[]>;
   searchChunks(
     input: SemanticIndexSearchRequest,
+  ): Promise<SemanticIndexSearchResult[]>;
+  getAdjacentChunks(
+    input: AdjacentChunkRequest,
   ): Promise<SemanticIndexSearchResult[]>;
   getReelDocument(reelId: string): Promise<SemanticReelDocument | null>;
 }
