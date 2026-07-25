@@ -155,6 +155,7 @@ model ReelDocument {
   reelId                 String
   indexAttemptId         String
   isActive               Boolean                    @default(false)
+  isLegacyImport         Boolean                    @default(false)
   userId                 String
   parentId               String?
   ordinal                Int
@@ -205,6 +206,7 @@ model ReelSection {
   reelId                 String
   indexAttemptId         String
   isActive               Boolean                    @default(false)
+  isLegacyImport         Boolean                    @default(false)
   userId                 String
   parentId               String
   ordinal                Int
@@ -254,6 +256,7 @@ model ReelChunk {
   reelId                 String
   indexAttemptId         String
   isActive               Boolean                    @default(false)
+  isLegacyImport         Boolean                    @default(false)
   userId                 String
   parentId               String
   ordinal                Int

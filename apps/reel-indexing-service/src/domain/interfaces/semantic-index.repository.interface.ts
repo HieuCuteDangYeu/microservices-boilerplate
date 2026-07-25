@@ -8,12 +8,14 @@ import type {
   SemanticIndexSearchResult,
   SemanticReelDocument,
 } from '@common/processing/interfaces/semantic-index.interface';
+import type { LegacySemanticReel } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
 
 export interface SemanticIndexCandidate {
   job: ReelIndexJob;
   metadata: ExtractedReelMetadata;
   transcriptSegments?: TranscriptSegment[];
   documents: ReelIndexDocument[];
+  legacyImport?: boolean;
 }
 
 export interface ISemanticIndexRepository {
@@ -34,4 +36,13 @@ export interface ISemanticIndexRepository {
   ): Promise<SemanticIndexSearchResult[]>;
   getReelDocument(reelId: string): Promise<SemanticReelDocument | null>;
   deleteReel(reelId: string): Promise<boolean>;
+  importLegacySemanticReels(input: LegacySemanticReel[]): Promise<{
+    importedReels: number;
+    skippedReels: number;
+  }>;
+  getLegacySemanticImportStatus(): Promise<{
+    activeLegacyReels: number;
+    activeLegacySections: number;
+    activeLegacyChunks: number;
+  }>;
 }

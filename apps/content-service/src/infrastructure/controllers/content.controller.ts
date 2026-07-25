@@ -22,6 +22,8 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
+import { ListLegacySemanticReelsUseCase } from '@content/application/use-cases/list-legacy-semantic-reels.use-case';
+import { LEGACY_SEMANTIC_BACKFILL_PATTERNS } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
 import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
@@ -92,6 +94,7 @@ export class ContentController {
     private readonly searchPublicReelsUseCase: SearchPublicReelsUseCase,
     private readonly getSearchSuggestionsUseCase: GetSearchSuggestionsUseCase,
     private readonly getFriendsReelsUseCase: GetFriendsReelsUseCase,
+    private readonly listLegacySemanticReelsUseCase: ListLegacySemanticReelsUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -883,6 +886,13 @@ export class ContentController {
     }
 
     return await this.resolveReelContextAccessUseCase.execute(payload);
+  }
+
+  @MessagePattern(LEGACY_SEMANTIC_BACKFILL_PATTERNS.LIST_CONTENT_PAGE)
+  async listLegacySemanticReels(
+    @Payload() payload: { cursor?: string; limit?: number },
+  ) {
+    return await this.listLegacySemanticReelsUseCase.execute(payload ?? {});
   }
 
   @MessagePattern('content.get_profile_reel_context')

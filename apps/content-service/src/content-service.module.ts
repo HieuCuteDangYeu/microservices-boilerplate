@@ -16,6 +16,7 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
+import { ListLegacySemanticReelsUseCase } from '@content/application/use-cases/list-legacy-semantic-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
 import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
@@ -116,6 +117,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     ClassifyReelJobLengthUseCase,
     DispatchOutboxEventsUseCase,
     ListReelsUseCase,
+    ListLegacySemanticReelsUseCase,
     GetReelUseCase,
     GetProfileReelContextUseCase,
     UpdateReelUseCase,

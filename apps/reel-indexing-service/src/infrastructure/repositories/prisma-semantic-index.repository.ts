@@ -5,6 +5,9 @@ import type {
   SemanticIndexSearchResult,
   SemanticReelDocument,
 } from '@common/processing/interfaces/semantic-index.interface';
+import type { LegacySemanticReel } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
+import type { ReelEvidenceDocument } from '@common/processing/interfaces/reel-index-document.interface';
+import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import { SEMANTIC_INDEX_EMBEDDING_DIMENSIONS } from '@common/processing/interfaces/semantic-index.interface';
 import type {
   ISemanticIndexRepository,
@@ -15,6 +18,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/reel-indexing-client';
 import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 
 type SemanticTable = 'ReelDocument' | 'ReelSection' | 'ReelChunk';
 
@@ -300,6 +304,61 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     });
   }
 
+  async importLegacySemanticReels(input: LegacySemanticReel[]): Promise<{
+    importedReels: number;
+    skippedReels: number;
+  }> {
+    let importedReels = 0;
+    let skippedReels = 0;
+    for (const reel of input) {
+      const [active] = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count
+        FROM "ReelDocument"
+        WHERE "reelId" = ${reel.reelId}
+          AND "isActive" = true
+          AND "isLegacyImport" = false
+      `;
+      if (Number(active?.count ?? 0) > 0) {
+        skippedReels += 1;
+        continue;
+      }
+      const { job, documents } = this.legacyCandidate(reel);
+      await this.persistCandidate({
+        job,
+        metadata: {
+          title: reel.title,
+          description: reel.description,
+          tags: reel.tags,
+        },
+        documents,
+        legacyImport: true,
+      });
+      await this.activateLegacyCandidate(job.reelId, job.indexAttemptId);
+      importedReels += 1;
+    }
+    return { importedReels, skippedReels };
+  }
+
+  async getLegacySemanticImportStatus(): Promise<{
+    activeLegacyReels: number;
+    activeLegacySections: number;
+    activeLegacyChunks: number;
+  }> {
+    const [row] = await this.prisma.$queryRaw<
+      Array<{ reels: bigint; sections: bigint; chunks: bigint }>
+    >`
+      SELECT
+        (SELECT count(*) FROM "ReelDocument" WHERE "isActive" = true AND "isLegacyImport" = true)::bigint AS reels,
+        (SELECT count(*) FROM "ReelSection" WHERE "isActive" = true AND "isLegacyImport" = true)::bigint AS sections,
+        (SELECT count(*) FROM "ReelChunk" WHERE "isActive" = true AND "isLegacyImport" = true)::bigint AS chunks
+    `;
+    return {
+      activeLegacyReels: Number(row?.reels ?? 0),
+      activeLegacySections: Number(row?.sections ?? 0),
+      activeLegacyChunks: Number(row?.chunks ?? 0),
+    };
+  }
+
   private async search(
     target: SemanticTable,
     input: SemanticIndexSearchRequest,
@@ -498,7 +557,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     const tags = this.cleanStrings(input.metadata.tags);
     const rows = documents.map(
       (document) => Prisma.sql`(
-      ${randomUUID()}, ${document.id}, ${document.reelId}, ${input.job.indexAttemptId}, false,
+      ${randomUUID()}, ${document.id}, ${document.reelId}, ${input.job.indexAttemptId}, false, ${input.legacyImport === true},
       ${input.job.userId}, ${document.parentId ?? null}, ${document.ordinal}, ${title}, ${description},
       ${document.evidenceText ?? null}, ${document.retrievalText}, ${document.derivedSummary ?? null},
       ${document.sourceSectionIds}::text[], ${document.sourceSegmentIds}::text[],
@@ -515,7 +574,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     );
     return Prisma.sql`
       INSERT INTO ${Prisma.raw(`"${table}"`)} (
-        "rowId", "id", "reelId", "indexAttemptId", "isActive", "userId", "parentId", "ordinal",
+        "rowId", "id", "reelId", "indexAttemptId", "isActive", "isLegacyImport", "userId", "parentId", "ordinal",
         "title", "description", "evidenceText", "retrievalText", "derivedSummary",
         "sourceSectionIds", "sourceSegmentIds", "sourceAudioArtifactIds", "evidenceHash",
         "retrievalHash", "evidenceQuality", "transcriptVersion", "sectioningVersion",
@@ -561,6 +620,178 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       metadataRank:
         row.metadataRank === null ? undefined : Number(row.metadataRank),
     };
+  }
+
+  private async activateLegacyCandidate(
+    reelId: string,
+    indexAttemptId: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${reelId}))`;
+      await transaction.reelChunk.updateMany({
+        where: { reelId, isActive: true },
+        data: { isActive: false },
+      });
+      await transaction.reelSection.updateMany({
+        where: { reelId, isActive: true },
+        data: { isActive: false },
+      });
+      await transaction.reelDocument.updateMany({
+        where: { reelId, isActive: true },
+        data: { isActive: false },
+      });
+      await transaction.reelDocument.updateMany({
+        where: { reelId, indexAttemptId },
+        data: { isActive: true },
+      });
+      await transaction.reelSection.updateMany({
+        where: { reelId, indexAttemptId },
+        data: { isActive: true },
+      });
+      await transaction.reelChunk.updateMany({
+        where: { reelId, indexAttemptId },
+        data: { isActive: true },
+      });
+    });
+  }
+
+  private legacyCandidate(reel: LegacySemanticReel): {
+    job: ReelIndexJob;
+    documents: ReelEvidenceDocument[];
+  } {
+    if (reel.chunks.length === 0) {
+      throw new Error(`Legacy Reel ${reel.reelId} has no chunks`);
+    }
+    const attempt = `legacy-import:${reel.reelId}`;
+    const reelId = `reel:${reel.reelId}`;
+    const sectionId = `${reelId}:section:legacy:0`;
+    const version = 'legacy-content-v1';
+    const now = new Date().toISOString();
+    const average = this.averageEmbedding(
+      reel.chunks.map((chunk) => chunk.embedding),
+    );
+    const base = {
+      reelId: reel.reelId,
+      sourceSectionIds: reel.sourceLengthClass === 'LONG' ? [sectionId] : [],
+      sourceSegmentIds: [],
+      sourceAudioArtifactIds: [],
+      evidenceQuality: 'LOW_CONFIDENCE' as const,
+      sectioningVersion: version,
+      chunkingVersion: version,
+      summaryVersion: version,
+      indexVersion: version,
+      embeddingProvider: 'legacy-content',
+      embeddingModel: 'legacy-content-reel-chunk',
+      embeddingDimensions: SEMANTIC_INDEX_EMBEDDING_DIMENSIONS,
+      embeddingVersion: version,
+      tokenCount: 1,
+    };
+    const retrievalText =
+      [reel.title, reel.description, ...reel.tags]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .join('\n') || 'Legacy imported Reel';
+    const document = (
+      input: Omit<ReelEvidenceDocument, keyof typeof base>,
+    ) => ({
+      ...base,
+      ...input,
+    });
+    const documents: ReelEvidenceDocument[] = [
+      document({
+        id: reelId,
+        kind: 'REEL',
+        ordinal: 0,
+        retrievalText,
+        retrievalHash: this.hash(retrievalText),
+        embeddingInputHash: this.hash(retrievalText),
+        embedding: average,
+      }),
+    ];
+    if (reel.sourceLengthClass === 'LONG') {
+      documents.push(
+        document({
+          id: sectionId,
+          parentId: reelId,
+          kind: 'SECTION',
+          ordinal: 0,
+          retrievalText,
+          retrievalHash: this.hash(retrievalText),
+          embeddingInputHash: this.hash(retrievalText),
+          embedding: average,
+          startTime: 0,
+          endTime: reel.sourceDurationMs / 1000,
+        }),
+      );
+    }
+    for (const chunk of reel.chunks) {
+      const evidenceText = chunk.text.trim();
+      if (!evidenceText || !this.validEmbedding(chunk.embedding)) {
+        throw new Error(
+          `Legacy Reel ${reel.reelId} has invalid chunk ${chunk.id}`,
+        );
+      }
+      documents.push(
+        document({
+          id: `${reelId}:chunk:${chunk.ordinal}`,
+          parentId: reel.sourceLengthClass === 'LONG' ? sectionId : reelId,
+          kind: 'CHUNK',
+          ordinal: chunk.ordinal,
+          evidenceText,
+          retrievalText: evidenceText,
+          evidenceHash: this.hash(evidenceText),
+          retrievalHash: this.hash(evidenceText),
+          embeddingInputHash: this.hash(evidenceText),
+          embedding: chunk.embedding,
+          startTime: chunk.startTime,
+          endTime: chunk.endTime,
+        }),
+      );
+    }
+    return {
+      job: {
+        jobId: attempt,
+        reelId: reel.reelId,
+        userId: reel.userId,
+        mediaAttemptId: attempt,
+        indexAttemptId: attempt,
+        indexVersion: version,
+        mediaKey: `legacy-import:${reel.reelId}`,
+        sourceDurationMs: Math.max(reel.sourceDurationMs, 1),
+        sourceOrientation: reel.sourceOrientation,
+        sourceLengthClass: reel.sourceLengthClass,
+        title: reel.title,
+        description: reel.description,
+        tags: reel.tags,
+        createdAt: now,
+        schemaVersion: 1,
+      },
+      documents,
+    };
+  }
+
+  private averageEmbedding(embeddings: number[][]): number[] {
+    if (
+      embeddings.length === 0 ||
+      embeddings.some((entry) => !this.validEmbedding(entry))
+    ) {
+      throw new Error('Legacy Reel has an invalid embedding');
+    }
+    return embeddings[0].map(
+      (_, index) =>
+        embeddings.reduce((sum, embedding) => sum + embedding[index], 0) /
+        embeddings.length,
+    );
+  }
+
+  private validEmbedding(embedding: number[]): boolean {
+    return (
+      embedding.length === SEMANTIC_INDEX_EMBEDDING_DIMENSIONS &&
+      embedding.every((value) => Number.isFinite(value))
+    );
+  }
+
+  private hash(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
   }
 
   private cleanStrings(values?: string[]): string[] {

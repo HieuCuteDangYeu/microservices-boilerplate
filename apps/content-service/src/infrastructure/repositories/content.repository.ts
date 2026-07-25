@@ -2,6 +2,7 @@ import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.in
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
+import type { LegacySemanticBackfillPage } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
 import {
   REEL_INDEX_JOB_EVENT_TYPE,
   REEL_INDEX_JOB_SCHEMA_VERSION,
@@ -1597,6 +1598,105 @@ export class ContentRepository
       },
     });
     return records.map((record) => this.toDomain(record));
+  }
+
+  async listLegacySemanticReels(input: {
+    cursor?: string;
+    limit: number;
+  }): Promise<LegacySemanticBackfillPage> {
+    const cursor = input.cursor?.trim() || '';
+    const limit = Math.min(Math.max(input.limit, 1), 100);
+    const rows = await this.$queryRaw<
+      Array<{
+        reelId: string;
+        userId: string;
+        title: string | null;
+        description: string | null;
+        tags: string[];
+        sourceDurationMs: number | null;
+        sourceOrientation: 'PORTRAIT' | 'LANDSCAPE' | 'SQUARE' | null;
+        sourceLengthClass: 'SHORT' | 'LONG' | null;
+        chunks: Array<{
+          id: string;
+          ordinal: number;
+          text: string;
+          startTime: number | null;
+          endTime: number | null;
+          embedding: string;
+          embeddingModel: string;
+        }>;
+      }>
+    >`
+      WITH selected AS (
+        SELECT r.id, r."userId", r.title, r.description, r.tags,
+          r."sourceDurationMs", r."sourceOrientation", r."sourceLengthClass"
+        FROM "Reel" r
+        WHERE r.id > ${cursor}
+          AND r."mediaStatus" = 'COMPLETED'
+          AND EXISTS (SELECT 1 FROM "ReelChunk" rc WHERE rc."reelId" = r.id)
+        ORDER BY r.id
+        LIMIT ${limit}
+      )
+      SELECT selected.id AS "reelId", selected."userId", selected.title,
+        selected.description, selected.tags, selected."sourceDurationMs",
+        selected."sourceOrientation", selected."sourceLengthClass",
+        json_agg(
+          json_build_object(
+            'id', rc.id,
+            'ordinal', rc."chunkIndex",
+            'text', rc.text,
+            'startTime', rc."startTime",
+            'endTime', rc."endTime",
+            'embedding', rc.embedding::text,
+            'embeddingModel', rc."embeddingModel"
+          ) ORDER BY rc."chunkIndex"
+        ) AS chunks
+      FROM selected
+      JOIN "ReelChunk" rc ON rc."reelId" = selected.id
+      GROUP BY selected.id, selected."userId", selected.title, selected.description,
+        selected.tags, selected."sourceDurationMs", selected."sourceOrientation",
+        selected."sourceLengthClass"
+      ORDER BY selected.id
+    `;
+
+    return {
+      items: rows.map((row) => ({
+        reelId: row.reelId,
+        userId: row.userId,
+        title: row.title ?? undefined,
+        description: row.description ?? undefined,
+        tags: row.tags,
+        sourceDurationMs: row.sourceDurationMs ?? 0,
+        sourceOrientation: row.sourceOrientation ?? 'PORTRAIT',
+        sourceLengthClass: row.sourceLengthClass ?? 'SHORT',
+        chunks: row.chunks.map((chunk) => ({
+          id: chunk.id,
+          ordinal: chunk.ordinal,
+          text: chunk.text,
+          startTime: chunk.startTime ?? undefined,
+          endTime: chunk.endTime ?? undefined,
+          embedding: this.parseLegacyVector(chunk.embedding),
+          embeddingModel: chunk.embeddingModel,
+        })),
+      })),
+      nextCursor:
+        rows.length === limit ? rows[rows.length - 1]?.reelId : undefined,
+    };
+  }
+
+  private parseLegacyVector(value: string): number[] {
+    const values = value
+      .replace(/^\[/, '')
+      .replace(/\]$/, '')
+      .split(',')
+      .map((entry) => Number(entry));
+    if (
+      values.length !== 384 ||
+      values.some((entry) => !Number.isFinite(entry))
+    ) {
+      throw new Error('Legacy ReelChunk contains an invalid embedding');
+    }
+    return values;
   }
 
   private normalizeRecommendationTag(tag: string): string {

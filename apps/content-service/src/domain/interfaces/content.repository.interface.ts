@@ -19,6 +19,7 @@ import {
 import { ReelShareLink } from '../entities/reel-share-link.entity';
 import { ReelShare } from '../entities/reel-share.entity';
 import { Reel } from '../entities/reel.entity';
+import type { LegacySemanticBackfillPage } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
 
 export interface ReelProcessingMediaMetadata {
   sourceDurationMs?: number;
@@ -293,6 +294,11 @@ export interface IContentRepository {
   searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]>;
 
   findSearchablePublicReels(ids: string[]): Promise<Reel[]>;
+
+  listLegacySemanticReels(input: {
+    cursor?: string;
+    limit: number;
+  }): Promise<LegacySemanticBackfillPage>;
 
   getSearchSuggestions(
     query: SearchSuggestionsQuery,
