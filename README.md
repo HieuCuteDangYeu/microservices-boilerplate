@@ -159,9 +159,18 @@ MAIL_QUEUE_PASSWORD=
 # JWT
 JWT_SECRET=your_super_secret_jwt_key
 
+# Seeded system identities (generate a unique UUIDv4 for each environment)
+DEFAULT_ADMIN_ID=replace_with_a_uuidv4
+BOT_USER_ID=replace_with_a_uuidv4
+
 # Webhook Port
 WEBHOOK_PORT=3006
 ```
+
+Generate the system IDs with `node -e "console.log(crypto.randomUUID())"`. Keep
+their values consistent for the seed commands and every service deployment. Do
+not rotate them against an existing database without a coordinated data
+migration, because they identify persisted admin and bot records.
 
 ## Installation
 

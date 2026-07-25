@@ -71,6 +71,7 @@
     "migrate:ai": "cd apps/ai-service && prisma migrate dev",
     "migrate:notification": "cd apps/notification-service && prisma migrate dev",
     "migrate:monitoring": "cd apps/monitoring-service && prisma migrate dev",
+    "migrate:reel-indexing": "prisma migrate deploy --schema=apps/reel-indexing-service/prisma/schema.prisma",
     "studio:user": "cd apps/user-service && prisma studio",
     "studio:friend": "cd apps/friend-service && prisma studio",
     "studio:auth": "cd apps/auth-service && prisma studio",

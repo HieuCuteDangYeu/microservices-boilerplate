@@ -9,6 +9,10 @@ import {
 } from '../../../libs/common/src/constants/seed.constants';
 
 const prisma = new PrismaClient();
+const DEFAULT_ADMIN_AVATAR_URL =
+  'https://ui-avatars.com/api/?name=Admin+User&background=2563eb&color=ffffff&bold=true';
+const BOT_AVATAR_URL =
+  'https://ui-avatars.com/api/?name=System+Bot&background=7c3aed&color=ffffff&bold=true';
 
 async function main() {
   console.log('Seeding User Service...');
@@ -22,6 +26,7 @@ async function main() {
       username: 'admin',
       password: hashedPassword,
       isVerified: true,
+      avatarKey: DEFAULT_ADMIN_AVATAR_URL,
     },
     create: {
       id: DEFAULT_ADMIN_ID,
@@ -30,6 +35,7 @@ async function main() {
       username: 'admin',
       password: hashedPassword,
       isVerified: true,
+      avatarKey: DEFAULT_ADMIN_AVATAR_URL,
       createdAt: new Date(),
     },
   });
@@ -43,6 +49,7 @@ async function main() {
       username: 'system_bot',
       password: hashedPassword,
       isVerified: true,
+      avatarKey: BOT_AVATAR_URL,
     },
     create: {
       id: BOT_USER_ID,
@@ -51,6 +58,7 @@ async function main() {
       username: 'system_bot',
       password: hashedPassword,
       isVerified: true,
+      avatarKey: BOT_AVATAR_URL,
       createdAt: new Date(),
     },
   });
