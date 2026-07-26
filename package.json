@@ -88,13 +88,7 @@
     "backfill:conversation-client-message-ids": "node scripts/backfill-conversation-client-message-ids.cjs",
     "backfill:user-memory-embeddings": "node scripts/send-rmq-message.cjs ai_queue ai.backfill_user_memory_embeddings '{\"limit\":100}'",
     "ops:reindex:reel": "node scripts/ops/reindex-reel.cjs",
-    "ops:reindex:status": "node scripts/ops/reindex-status.cjs",
-    "ops:semantic-backfill:start": "node scripts/ops/semantic-backfill-start.cjs",
-    "ops:semantic-backfill:status": "node scripts/ops/semantic-backfill-status.cjs",
-    "tmp:verify:semantic-cutover": "node scripts/tmp/verify-semantic-cutover.cjs",
-    "tmp:compare:legacy-indexing-search": "node scripts/tmp/compare-legacy-indexing-search.cjs",
-    "tmp:compare:public-semantic-search": "node scripts/tmp/compare-public-semantic-search.cjs",
-    "tmp:compare:semantic-recommendations": "node scripts/tmp/compare-semantic-recommendations.cjs"
+    "ops:reindex:status": "node scripts/ops/reindex-status.cjs"
   },
   "packageManager": "pnpm@9.15.0",
   "overrides": {
