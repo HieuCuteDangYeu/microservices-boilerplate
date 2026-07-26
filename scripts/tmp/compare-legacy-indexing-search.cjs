@@ -11,6 +11,22 @@ function overlap(left, right) {
   return left.filter((id) => rightIds.has(id)).length;
 }
 
+function normalizeText(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function evidenceKey(item, text) {
+  return [
+    item.reelId,
+    normalizeText(text),
+    item.startTime ?? '',
+    item.endTime ?? '',
+  ].join('|');
+}
+
 async function main() {
   const queryText = required('SEMANTIC_QUERY_TEXT');
   const queryVector = JSON.parse(required('SEMANTIC_QUERY_VECTOR'));
@@ -46,15 +62,27 @@ async function main() {
       limit,
     },
   });
-  const legacyIds = (legacy || []).map((item) => item.chunkId);
-  const indexingIds = (indexing || []).map((item) => item.id);
+  const legacyItems = Array.isArray(legacy) ? legacy : [];
+  const indexingItems = Array.isArray(indexing) ? indexing : [];
+  const legacyReelIds = legacyItems.map((item) => item.reelId);
+  const indexingReelIds = indexingItems.map((item) => item.reelId);
+  const legacyEvidence = legacyItems.map((item) =>
+    evidenceKey(item, item.chunkText),
+  );
+  const indexingEvidence = indexingItems.map((item) =>
+    evidenceKey(item, item.text),
+  );
+  const evidenceOverlap = overlap(legacyEvidence, indexingEvidence);
   console.log(
     JSON.stringify(
       {
         requestedLimit: limit,
-        chunkOverlap: overlap(legacyIds, indexingIds),
-        chunkRecallAtK: legacyIds.length
-          ? overlap(legacyIds, indexingIds) / legacyIds.length
+        legacyResultCount: legacyItems.length,
+        indexingResultCount: indexingItems.length,
+        reelOverlap: overlap(legacyReelIds, indexingReelIds),
+        evidenceOverlap,
+        evidenceRecallAtK: legacyEvidence.length
+          ? evidenceOverlap / legacyEvidence.length
           : null,
         legacyLatencyMs: startedIndex - startedLegacy,
         indexingLatencyMs: Date.now() - startedIndex,
