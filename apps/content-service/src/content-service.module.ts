@@ -16,7 +16,6 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
-import { ListLegacySemanticReelsUseCase } from '@content/application/use-cases/list-legacy-semantic-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
 import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
@@ -24,7 +23,6 @@ import { ResolveReelShareLinkUseCase } from '@content/application/use-cases/reso
 import { ResolveReelContextAccessUseCase } from '@content/application/use-cases/resolve-reel-context-access.use-case';
 import { RevokeReelShareLinkUseCase } from '@content/application/use-cases/revoke-reel-share-link.use-case';
 import { SearchPublicReelsUseCase } from '@content/application/use-cases/search-public-reels.use-case';
-import { SearchReelContextUseCase } from '@content/application/use-cases/search-reel-context.use-case';
 import { ShareReelUseCase } from '@content/application/use-cases/share-reel.use-case';
 import { TrackReelEventsUseCase } from '@content/application/use-cases/track-reel-events.use-case';
 import { UpdateReelStatusUseCase } from '@content/application/use-cases/update-reel-status.use-case';
@@ -117,14 +115,12 @@ function createRmqClientRegistration(name: string, queue: string) {
     ClassifyReelJobLengthUseCase,
     DispatchOutboxEventsUseCase,
     ListReelsUseCase,
-    ListLegacySemanticReelsUseCase,
     GetReelUseCase,
     GetProfileReelContextUseCase,
     UpdateReelUseCase,
     DeleteReelUseCase,
     UpdateReelStatusUseCase,
     GetReelStatusUseCase,
-    SearchReelContextUseCase,
     ResolveReelContextAccessUseCase,
     ShareReelUseCase,
     CreateReelShareLinkUseCase,

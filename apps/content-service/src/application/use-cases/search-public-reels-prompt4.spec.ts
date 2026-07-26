@@ -5,40 +5,25 @@
 
 import { SearchPublicReelsUseCase } from './search-public-reels.use-case';
 
-describe('Prompt 4 public semantic-search fallback', () => {
-  it('uses the frozen Content search only when the emergency flag is enabled', async () => {
-    const legacyResult = { reel: { id: 'legacy-reel' }, score: 0.8 };
+describe('Prompt 6 public semantic-search ownership', () => {
+  it('uses Indexing results and never calls Content legacy search', async () => {
     const contentRepository = {
-      searchPublicReels: jest.fn().mockResolvedValue([legacyResult]),
-      findSearchablePublicReels: jest.fn(),
+      searchPublicReels: jest.fn(),
+      findSearchablePublicReels: jest.fn().mockResolvedValue([{ id: 'reel-1' }]),
     };
     const semanticSearch = {
-      searchPublicReels: jest
-        .fn()
-        .mockRejectedValue(new Error('indexing down')),
-    };
-    const config = {
-      get: jest.fn((key: string) =>
-        key === 'PUBLIC_SEARCH_INDEXING_SERVICE_ENABLED'
-          ? 'true'
-          : key === 'LEGACY_CONTENT_SEMANTIC_READ_FALLBACK_ENABLED'
-            ? 'true'
-            : undefined,
-      ),
+      searchPublicReels: jest.fn().mockResolvedValue([
+        { reelId: 'reel-1', score: 0.8 },
+      ]),
     };
     const useCase = new SearchPublicReelsUseCase(
       contentRepository as never,
       semanticSearch,
-      config as never,
     );
 
     await expect(useCase.execute({ query: 'beach' })).resolves.toEqual([
-      legacyResult,
+      { reel: { id: 'reel-1' }, score: 0.8 },
     ]);
-    expect(contentRepository.searchPublicReels).toHaveBeenCalledWith({
-      query: 'beach',
-      viewerId: undefined,
-      limit: undefined,
-    });
+    expect(contentRepository.searchPublicReels).not.toHaveBeenCalled();
   });
 });

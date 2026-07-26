@@ -1,13 +1,9 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { TrackReelEventPayload } from '@common/content/dtos/track-reel-events.dto';
-import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { ReelPipelineMetricContext } from '@common/processing/interfaces/reel-pipeline-metric.interface';
 import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
-import type {
-  ReelContextAccessRequest,
-  ReelContextSearchRequest,
-} from '@common/content/interfaces/reel-context-search-request.interface';
+import type { ReelContextAccessRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ClaimReelProcessingAttemptUseCase } from '@content/application/use-cases/claim-reel-processing-attempt.use-case';
 import { ClaimReelIndexingAttemptUseCase } from '@content/application/use-cases/claim-reel-indexing-attempt.use-case';
 import { CompleteReelIndexingUseCase } from '@content/application/use-cases/complete-reel-indexing.use-case';
@@ -22,8 +18,6 @@ import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-st
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
-import { ListLegacySemanticReelsUseCase } from '@content/application/use-cases/list-legacy-semantic-reels.use-case';
-import { LEGACY_SEMANTIC_BACKFILL_PATTERNS } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
 import { ReportReelIndexingProgressUseCase } from '@content/application/use-cases/report-reel-indexing-progress.use-case';
@@ -58,7 +52,6 @@ import {
   RpcException,
 } from '@nestjs/microservices';
 import { CreateReelUseCase } from '../../application/use-cases/create-reel.use-case';
-import { SearchReelContextUseCase } from './../../application/use-cases/search-reel-context.use-case';
 
 @Controller()
 export class ContentController {
@@ -74,7 +67,6 @@ export class ContentController {
     private readonly deleteReelUseCase: DeleteReelUseCase,
     private readonly updateReelStatusUseCase: UpdateReelStatusUseCase,
     private readonly getReelStatusUseCase: GetReelStatusUseCase,
-    private readonly searchReelContextUseCase: SearchReelContextUseCase,
     private readonly resolveReelContextAccessUseCase: ResolveReelContextAccessUseCase,
     private readonly shareReelUseCase: ShareReelUseCase,
     private readonly createReelShareLinkUseCase: CreateReelShareLinkUseCase,
@@ -94,7 +86,6 @@ export class ContentController {
     private readonly searchPublicReelsUseCase: SearchPublicReelsUseCase,
     private readonly getSearchSuggestionsUseCase: GetSearchSuggestionsUseCase,
     private readonly getFriendsReelsUseCase: GetFriendsReelsUseCase,
-    private readonly listLegacySemanticReelsUseCase: ListLegacySemanticReelsUseCase,
   ) {}
 
   private toSerializable(reel: Reel): Record<string, unknown> {
@@ -239,7 +230,6 @@ export class ContentController {
       transcript?: string;
       transcriptVtt?: string;
       transcriptSegments?: TranscriptSegment[];
-      chunks?: ReelChunkIndexInput[];
       thumbnailKey?: string;
       stage?: string;
       message?: string;
@@ -262,7 +252,6 @@ export class ContentController {
         data.stage,
         data.message,
         data.progress,
-        data.chunks,
         data.title,
         data.description,
         data.tags,
@@ -303,7 +292,6 @@ export class ContentController {
           undefined,
           undefined,
           undefined,
-          undefined,
           data.processingAttemptId,
           'PROCESSING_COMPLETED_HANDLER_FAILED',
           error.message,
@@ -331,7 +319,6 @@ export class ContentController {
       transcript?: string;
       transcriptVtt?: string;
       transcriptSegments?: TranscriptSegment[];
-      chunks?: ReelChunkIndexInput[];
       thumbnailKey?: string;
       stage?: string;
       message?: string;
@@ -354,7 +341,6 @@ export class ContentController {
         data.stage,
         data.message,
         data.progress,
-        data.chunks,
         data.title,
         data.description,
         data.tags,
@@ -454,7 +440,6 @@ export class ContentController {
         undefined,
         undefined,
         undefined,
-        undefined,
         data.processingAttemptId,
         data.errorCode,
         data.errorDetail,
@@ -513,7 +498,6 @@ export class ContentController {
         undefined,
         undefined,
         undefined,
-        undefined,
         data.processingAttemptId,
         data.errorCode,
         data.errorDetail,
@@ -559,7 +543,6 @@ export class ContentController {
       data.stage,
       data.message,
       data.progress,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -634,7 +617,6 @@ export class ContentController {
         undefined,
         undefined,
         undefined,
-        undefined,
         data.processingAttemptId,
       );
     } catch (err: unknown) {
@@ -668,7 +650,6 @@ export class ContentController {
         data.stage,
         data.message,
         data.progress,
-        undefined,
         undefined,
         undefined,
         undefined,
@@ -827,49 +808,6 @@ export class ContentController {
     return await this.reindexReelUseCase.execute(data?.reelId);
   }
 
-  @MessagePattern('content.search_reel_context')
-  async handleSearchReelContext(@Payload() payload: ReelContextSearchRequest) {
-    const expectedVectorLength = 384;
-    const hasValidVector =
-      Array.isArray(payload?.queryVector) &&
-      payload.queryVector.length === expectedVectorLength &&
-      payload.queryVector.every(
-        (value) => typeof value === 'number' && Number.isFinite(value),
-      );
-
-    if (
-      !payload ||
-      !hasValidVector ||
-      typeof payload.queryText !== 'string' ||
-      payload.queryText.trim().length === 0 ||
-      typeof payload.userId !== 'string' ||
-      payload.userId.trim().length === 0 ||
-      (payload.sharedOnly === true &&
-        (typeof payload.conversationId !== 'string' ||
-          payload.conversationId.trim().length === 0)) ||
-      (payload.limit !== undefined &&
-        (!Number.isInteger(payload.limit) ||
-          payload.limit < 1 ||
-          payload.limit > 20))
-    ) {
-      throw new RpcException({
-        statusCode: 400,
-        message: 'Invalid payload for reel context search',
-      });
-    }
-
-    try {
-      const results = await this.searchReelContextUseCase.execute(payload);
-      return results;
-    } catch (error: unknown) {
-      const err = error as Error;
-      throw new RpcException({
-        statusCode: 500,
-        message: `Reel Context Search Error: ${err.message}`,
-      });
-    }
-  }
-
   @MessagePattern('content.resolve_reel_context_access')
   async resolveReelContextAccess(@Payload() payload: ReelContextAccessRequest) {
     if (
@@ -886,13 +824,6 @@ export class ContentController {
     }
 
     return await this.resolveReelContextAccessUseCase.execute(payload);
-  }
-
-  @MessagePattern(LEGACY_SEMANTIC_BACKFILL_PATTERNS.LIST_CONTENT_PAGE)
-  async listLegacySemanticReels(
-    @Payload() payload: { cursor?: string; limit?: number },
-  ) {
-    return await this.listLegacySemanticReelsUseCase.execute(payload ?? {});
   }
 
   @MessagePattern('content.get_profile_reel_context')

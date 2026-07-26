@@ -128,7 +128,6 @@ model Reel {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  chunks       ReelChunk[]
   shares       ReelShare[]
   shareLinks   ReelShareLink[]
   viewEvents   ReelViewEvent[]
@@ -147,26 +146,6 @@ model Reel {
   @@index([indexVersion])
   @@index([status, processingStartedAt])
   @@index([status, visibility, createdAt(sort: Desc)])
-}
-
-model ReelChunk {
-  id             String                      @id @default(uuid())
-  reelId         String
-  userId         String
-  chunkIndex     Int
-  text           String                      @db.Text
-  startTime      Float?
-  endTime        Float?
-  embedding      Unsupported("vector(384)")?
-  embeddingModel String
-  createdAt      DateTime                    @default(now())
-
-  reel Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
-
-  @@unique([reelId, chunkIndex])
-  @@index([reelId])
-  @@index([userId])
-  @@index([createdAt])
 }
 
 model ReelShare {

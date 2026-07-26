@@ -1,6 +1,6 @@
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
-import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { IndexChunkCheckpoint } from '@common/processing/interfaces/index-chunk-checkpoint.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import type {
   CachedEmbedding,
@@ -305,7 +305,7 @@ export class PrismaIndexCheckpointRepository implements IIndexCheckpointReposito
         (record['extractedMetadata'] as ExtractedReelMetadata | null) ??
         undefined,
       sections: (record['sections'] as TranscriptSection[] | null) ?? undefined,
-      chunks: (record['chunks'] as ReelChunkIndexInput[] | null) ?? undefined,
+      chunks: (record['chunks'] as IndexChunkCheckpoint[] | null) ?? undefined,
       documentDrafts: additional?.documentDrafts,
       lastError: (record['lastError'] as string | null) ?? undefined,
     };

@@ -1,6 +1,6 @@
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
-import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { IndexChunkCheckpoint } from '@common/processing/interfaces/index-chunk-checkpoint.interface';
 import type {
   CachedEmbedding,
   EmbeddingCacheIdentity,
@@ -43,14 +43,14 @@ export class BuildHierarchicalIndexUseCase {
     transcriptSegments?: TranscriptSegment[];
   }): Promise<{
     documents: ReelEvidenceDocument[];
-    chunks: ReelChunkIndexInput[];
+    chunks: IndexChunkCheckpoint[];
   }> {
     const drafts = await this.validateDocumentTokens(
       this.buildDocumentDrafts(input),
     );
     await this.generateMissingEmbeddings(drafts);
     const documents = await this.materializeDocuments(drafts);
-    return { documents, chunks: this.toLegacyChunks(documents) };
+    return { documents, chunks: this.toIndexChunks(documents) };
   }
 
   buildDocumentDrafts(input: {
@@ -358,7 +358,7 @@ export class BuildHierarchicalIndexUseCase {
     });
   }
 
-  toLegacyChunks(documents: ReelEvidenceDocument[]): ReelChunkIndexInput[] {
+  toIndexChunks(documents: ReelEvidenceDocument[]): IndexChunkCheckpoint[] {
     return documents
       .filter((document) => document.kind === 'CHUNK')
       .map((document) => ({

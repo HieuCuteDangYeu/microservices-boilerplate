@@ -1,4 +1,4 @@
-export interface ReelChunkIndexInput {
+export interface IndexChunkCheckpoint {
   chunkIndex: number;
   text: string;
   startTime?: number;

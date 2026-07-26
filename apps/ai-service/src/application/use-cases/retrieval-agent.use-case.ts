@@ -102,43 +102,9 @@ export class RetrievalAgentUseCase {
         accessibleReelIds,
         limit: plan.searchLimit,
       };
-      const legacySearchInput = {
-        queryText,
-        queryVector: queryEmbedding.values,
-        userId: input.userId,
-        conversationId: input.conversationId,
-        sharedOnly: true,
-        limit: plan.searchLimit,
-      };
-      let retrievedChunks: TranscriptMatch[];
-      if (this.indexingSearchEnabled()) {
-        try {
-          retrievedChunks = await this.retrieveHierarchically(retrievalInput);
-        } catch (error) {
-          if (!this.legacyContentSemanticReadFallbackEnabled()) {
-            throw error;
-          }
-          this.logger.warn(
-            `Indexing retrieval failed; using legacy Content fallback: ${this.errorMessage(error)}`,
-          );
-          retrievedChunks =
-            await this.contentService.searchReelContext(legacySearchInput);
-        }
-      } else {
-        retrievedChunks =
-          await this.contentService.searchReelContext(legacySearchInput);
-      }
-
-      if (!this.indexingSearchEnabled() && this.hierarchicalShadowEnabled()) {
-        void this.retrieveHierarchically(retrievalInput).catch(
-          (error: unknown) =>
-            this.logger.warn(
-              `Indexing retrieval shadow request failed: ${this.errorMessage(error)}`,
-            ),
-        );
-      }
-
-      allCandidates.push(...retrievedChunks);
+      allCandidates.push(
+        ...(await this.retrieveHierarchically(retrievalInput)),
+      );
     }
 
     const retrievedChunks = this.dedupeByChunkId(allCandidates);
@@ -302,23 +268,8 @@ export class RetrievalAgentUseCase {
     return [...byId.values()];
   }
 
-  private indexingSearchEnabled(): boolean {
-    return this.readBoolean('RAG_INDEXING_SERVICE_SEARCH_ENABLED', false);
-  }
-
   private hierarchicalRetrievalEnabled(): boolean {
     return this.readBoolean('RAG_HIERARCHICAL_RETRIEVAL_ENABLED', false);
-  }
-
-  private hierarchicalShadowEnabled(): boolean {
-    return this.readBoolean('RAG_HIERARCHICAL_SHADOW_MODE', true);
-  }
-
-  private legacyContentSemanticReadFallbackEnabled(): boolean {
-    return this.readBoolean(
-      'LEGACY_CONTENT_SEMANTIC_READ_FALLBACK_ENABLED',
-      false,
-    );
   }
 
   private readBoolean(name: string, fallback: boolean): boolean {
@@ -326,10 +277,6 @@ export class RetrievalAgentUseCase {
     if (value === 'true') return true;
     if (value === 'false') return false;
     return fallback;
-  }
-
-  private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
   }
 
   private toTranscriptMatch(

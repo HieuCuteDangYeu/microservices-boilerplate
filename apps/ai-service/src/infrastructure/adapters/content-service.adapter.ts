@@ -2,13 +2,11 @@ import {
   IContentService,
   PublicReelSearchInput,
   RecommendedReelsInput,
-  TranscriptMatch,
 } from '@ai/domain/interfaces/content-service.interface';
 import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import {
   ReelContextAccessRequest,
   ReelContextAccessResult,
-  ReelContextSearchRequest,
 } from '@common/content/interfaces/reel-context-search-request.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -82,29 +80,6 @@ export class ContentServiceAdapter implements IContentService {
       this.logger.error(
         `ContentServiceAdapter.resolveReelContextAccess failed: ${message}. Returning no accessible reels.`,
       );
-      return [];
-    }
-  }
-
-  async searchReelContext(
-    input: ReelContextSearchRequest,
-  ): Promise<TranscriptMatch[]> {
-    try {
-      const results = await firstValueFrom(
-        this.contentClient.send<TranscriptMatch[]>(
-          'content.search_reel_context',
-          input,
-        ),
-      );
-
-      return Array.isArray(results) ? results : [];
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-
-      this.logger.error(
-        `ContentServiceAdapter.searchReelContext failed: ${msg}. Returning empty context.`,
-      );
-
       return [];
     }
   }

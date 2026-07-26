@@ -1,5 +1,4 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
-import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type {
   IContentRepository,
@@ -25,7 +24,6 @@ export class UpdateReelStatusUseCase {
     processingStage?: string,
     processingMessage?: string,
     processingProgress?: number,
-    chunks?: ReelChunkIndexInput[],
     title?: string,
     description?: string,
     tags?: string[],
@@ -38,7 +36,6 @@ export class UpdateReelStatusUseCase {
     let sanitizedTranscriptVtt = transcriptVtt?.trim() || undefined;
     let sanitizedTranscriptSegments =
       this.normalizeTranscriptSegments(transcriptSegments);
-    const sanitizedChunks = this.normalizeChunks(chunks);
     const sanitizedTitle = this.normalizeOptionalText(title, 80);
     const sanitizedDescription = this.normalizeOptionalText(description, 500);
     const sanitizedTags = this.normalizeTags(tags);
@@ -67,12 +64,6 @@ export class UpdateReelStatusUseCase {
             `Reel ${reelId}: completing without transcript because transcript quality check failed: "${quality.reason}"`,
           );
         }
-      }
-
-      if (!sanitizedChunks || sanitizedChunks.length === 0) {
-        this.logger.warn(
-          `Reel ${reelId}: completing without searchable chunks. RAG will not find this reel until chunks are generated.`,
-        );
       }
 
       nextStage ??= 'READY';
@@ -107,7 +98,6 @@ export class UpdateReelStatusUseCase {
       nextStage,
       nextMessage,
       nextProgress,
-      sanitizedChunks,
       sanitizedTitle,
       sanitizedDescription,
       sanitizedTags,
@@ -193,22 +183,6 @@ export class UpdateReelStatusUseCase {
     }
 
     return Math.max(0, Number(value.toFixed(3)));
-  }
-
-  private normalizeChunks(
-    chunks?: ReelChunkIndexInput[],
-  ): ReelChunkIndexInput[] | undefined {
-    if (!Array.isArray(chunks)) {
-      return undefined;
-    }
-
-    return chunks.filter(
-      (chunk) =>
-        typeof chunk.text === 'string' &&
-        chunk.text.trim().length > 0 &&
-        Array.isArray(chunk.embedding) &&
-        chunk.embedding.length > 0,
-    );
   }
 
   private normalizeOptionalText(

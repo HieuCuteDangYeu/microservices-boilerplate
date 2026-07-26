@@ -1,6 +1,6 @@
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
-import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { IndexChunkCheckpoint } from '@common/processing/interfaces/index-chunk-checkpoint.interface';
 import type { ReelEvidenceDocumentDraft } from '@common/processing/interfaces/reel-index-document.interface';
 
 export const INDEX_CHECKPOINT_STAGES = [
@@ -44,7 +44,7 @@ export interface IndexJobCheckpoint {
   mergedSegments?: TranscriptSegment[];
   extractedMetadata?: ExtractedReelMetadata;
   sections?: TranscriptSection[];
-  chunks?: ReelChunkIndexInput[];
+  chunks?: IndexChunkCheckpoint[];
   documentDrafts?: ReelEvidenceDocumentDraft[];
   lastError?: string;
 }

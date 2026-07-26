@@ -7,7 +7,6 @@ import { BuildLongEvidenceChunksUseCase } from './application/use-cases/build-lo
 import { BuildShortEvidenceChunksUseCase } from './application/use-cases/build-short-evidence-chunks.use-case';
 import { BuildTranscriptSectionsUseCase } from './application/use-cases/build-transcript-sections.use-case';
 import { ExtractHierarchicalMetadataUseCase } from './application/use-cases/extract-hierarchical-metadata.use-case';
-import { ImportLegacySemanticReelsUseCase } from './application/use-cases/import-legacy-semantic-reels.use-case';
 import { MergeTranscriptSegmentsUseCase } from './application/use-cases/merge-transcript-segments.use-case';
 import { ProcessReelIndexJobUseCase } from './application/use-cases/process-reel-index-job.use-case';
 import { TranscribeAudioManifestUseCase } from './application/use-cases/transcribe-audio-manifest.use-case';
@@ -67,7 +66,6 @@ const rabbitClient = (name: string, queue: string) => ({
     BuildShortEvidenceChunksUseCase,
     BuildLongEvidenceChunksUseCase,
     ExtractHierarchicalMetadataUseCase,
-    ImportLegacySemanticReelsUseCase,
     BuildHierarchicalIndexUseCase,
     ValidateEvidenceIndexCandidateUseCase,
     PrismaLangGraphCheckpointSaver,

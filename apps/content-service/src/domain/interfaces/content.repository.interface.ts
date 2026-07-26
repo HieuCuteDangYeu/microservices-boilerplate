@@ -1,10 +1,6 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
-import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
-import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
 import type { CompleteReelIndexCommand } from '@common/processing/interfaces/complete-reel-index.interface';
-import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import type { ReelContextAccessRequest } from '@common/content/interfaces/reel-context-search-request.interface';
-import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 import type {
   ReelIndexStatus,
   ReelMediaStatus,
@@ -20,7 +16,6 @@ import {
 import { ReelShareLink } from '../entities/reel-share-link.entity';
 import { ReelShare } from '../entities/reel-share.entity';
 import { Reel } from '../entities/reel.entity';
-import type { LegacySemanticBackfillPage } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
 
 export interface ReelProcessingMediaMetadata {
   sourceDurationMs?: number;
@@ -239,7 +234,6 @@ export interface IContentRepository {
     processingStage?: string,
     processingMessage?: string,
     processingProgress?: number,
-    chunks?: ReelChunkIndexInput[],
     title?: string,
     description?: string,
     tags?: string[],
@@ -277,22 +271,11 @@ export interface IContentRepository {
     revokedByUserId: string;
   }): Promise<ReelShareLink | null>;
 
-  searchReelContext(
-    input: ReelContextSearchRequest,
-  ): Promise<ReelContextSearchResult[]>;
-
   findAccessibleSharedReelIds(
     input: ReelContextAccessRequest,
   ): Promise<string[]>;
 
-  searchPublicReels(query: ReelSearchQuery): Promise<ReelSearchResult[]>;
-
   findSearchablePublicReels(ids: string[]): Promise<Reel[]>;
-
-  listLegacySemanticReels(input: {
-    cursor?: string;
-    limit: number;
-  }): Promise<LegacySemanticBackfillPage>;
 
   getSearchSuggestions(
     query: SearchSuggestionsQuery,
