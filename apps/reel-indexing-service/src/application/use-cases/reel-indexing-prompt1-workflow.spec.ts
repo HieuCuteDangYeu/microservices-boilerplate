@@ -107,14 +107,6 @@ function setup(contentApplied = true) {
     validateDocumentTokens: jest.fn().mockResolvedValue([draft]),
     generateMissingEmbeddings: jest.fn().mockResolvedValue(undefined),
     materializeDocuments: jest.fn().mockResolvedValue([document]),
-    toLegacyChunks: jest.fn().mockReturnValue([
-      {
-        chunkIndex: 0,
-        text: document.retrievalText,
-        embedding: document.embedding,
-        embeddingModel: 'test',
-      },
-    ]),
   };
   const validate = { execute: jest.fn() };
   const workflow = new ReelIndexLangGraphWorkflow(
@@ -143,19 +135,26 @@ function setup(contentApplied = true) {
 }
 
 describe('Prompt 1 durable indexing workflow', () => {
-  it('persists, compatibility-writes, activates, and resumes completed work', async () => {
+  it('persists, activates, summary-completes, and resumes completed work', async () => {
     const { workflow, content, semantic, validate } = setup(true);
     await expect(workflow.execute({ job, allowReclaim: false })).resolves.toBe(
       'COMPLETED',
     );
     expect(validate.execute).toHaveBeenCalledTimes(1);
     expect(semantic.persistCandidate).toHaveBeenCalledTimes(1);
-    expect(content.completeIndexing).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reelId: job.reelId,
-        chunks: expect.any(Array),
-      }),
-    );
+    const completion = content.completeIndexing.mock.calls[0][0];
+    expect(completion).toMatchObject({
+      reelId: job.reelId,
+      indexAttemptId: job.indexAttemptId,
+      indexVersion: job.indexVersion,
+      reelDocumentCount: 1,
+      sectionCount: 0,
+      chunkCount: 0,
+      embeddingDimensions: 2,
+    });
+    expect(completion).not.toHaveProperty('chunks');
+    expect(completion).not.toHaveProperty('transcript');
+    expect(completion).not.toHaveProperty('embedding');
     expect(semantic.activateCandidate).toHaveBeenCalledWith(
       job.reelId,
       job.indexAttemptId,
@@ -167,16 +166,15 @@ describe('Prompt 1 durable indexing workflow', () => {
     expect(semantic.persistCandidate).toHaveBeenCalledTimes(1);
   });
 
-  it('discards an inactive semantic candidate when Content reports stale state', async () => {
+  it('marks the workflow stale when Content rejects its summary completion', async () => {
     const { workflow, semantic } = setup(false);
     await expect(workflow.execute({ job, allowReclaim: false })).resolves.toBe(
       'STALE',
     );
-    expect(semantic.discardCandidate).toHaveBeenCalledWith(
+    expect(semantic.activateCandidate).toHaveBeenCalledWith(
       job.reelId,
       job.indexAttemptId,
     );
-    expect(semantic.activateCandidate).not.toHaveBeenCalled();
   });
 
   it('reports indexing failure without changing media completion ownership', async () => {

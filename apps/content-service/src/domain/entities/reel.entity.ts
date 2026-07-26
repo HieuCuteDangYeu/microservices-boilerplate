@@ -40,6 +40,15 @@ export class Reel {
   processingErrorDetail?: string;
   mediaAttemptId?: string;
   indexAttemptId?: string;
+  indexVersion?: string;
+  indexCompletedAt?: Date;
+  indexDocumentCount?: number;
+  indexSectionCount?: number;
+  indexChunkCount?: number;
+  indexEmbeddingProvider?: string;
+  indexEmbeddingModel?: string;
+  indexEmbeddingDimensions?: number;
+  indexEmbeddingVersion?: string;
   sourceDurationMs?: number;
   sourceWidth?: number;
   sourceHeight?: number;

@@ -1,6 +1,4 @@
-import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
-import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
-import type { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { CompleteReelIndexCommand } from '@common/processing/interfaces/complete-reel-index.interface';
 import type { IndexCheckpointStage } from '@indexing/domain/entities/index-checkpoint.entity';
 import type { IIndexingContentService } from '@indexing/domain/interfaces/content-service.interface';
 import { Inject, Injectable } from '@nestjs/common';
@@ -38,14 +36,7 @@ export class ContentServiceAdapter implements IIndexingContentService {
     );
   }
 
-  async completeIndexing(input: {
-    reelId: string;
-    indexAttemptId: string;
-    transcript?: string;
-    transcriptSegments?: TranscriptSegment[];
-    metadata: ExtractedReelMetadata;
-    chunks: ReelChunkIndexInput[];
-  }): Promise<boolean> {
+  async completeIndexing(input: CompleteReelIndexCommand): Promise<boolean> {
     const response = await firstValueFrom(
       this.client
         .send<{

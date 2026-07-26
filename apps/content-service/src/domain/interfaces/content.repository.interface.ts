@@ -1,6 +1,7 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { CompleteReelIndexCommand } from '@common/processing/interfaces/complete-reel-index.interface';
 import { ReelContextSearchRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import type { ReelContextAccessRequest } from '@common/content/interfaces/reel-context-search-request.interface';
 import { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
@@ -218,14 +219,7 @@ export interface IContentRepository {
     progress: number;
   }): Promise<boolean>;
 
-  completeIndexing(input: {
-    reelId: string;
-    indexAttemptId: string;
-    transcript?: string;
-    transcriptSegments?: TranscriptSegment[];
-    metadata: ExtractedReelMetadata;
-    chunks: ReelChunkIndexInput[];
-  }): Promise<boolean>;
+  completeIndexing(input: CompleteReelIndexCommand): Promise<boolean>;
 
   failIndexing(input: {
     reelId: string;

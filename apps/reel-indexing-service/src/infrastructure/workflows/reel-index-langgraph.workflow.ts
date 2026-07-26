@@ -1,4 +1,6 @@
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
+import type { CompleteReelIndexCommand } from '@common/processing/interfaces/complete-reel-index.interface';
+import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
 import { BuildAdaptiveTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-adaptive-transcript-sections.use-case';
 import { BuildHierarchicalIndexUseCase } from '@indexing/application/use-cases/build-hierarchical-index.use-case';
 import { BuildTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-transcript-sections.use-case';
@@ -49,6 +51,7 @@ export interface ReelIndexGraphState {
   status?: ReelIndexWorkflowStatus;
   metadataQuality?: 'strong' | 'weak';
   chunkingStrategy?: 'metadata-only' | 'short' | 'long';
+  indexCompletion?: CompleteReelIndexCommand;
   warnings: string[];
   failure?: {
     code: string;
@@ -66,6 +69,7 @@ const ReelIndexGraphStateSchema = new StateSchema({
   status: z.enum(['COMPLETED', 'DUPLICATE', 'STALE']).optional(),
   metadataQuality: z.enum(['strong', 'weak']).optional(),
   chunkingStrategy: z.enum(['metadata-only', 'short', 'long']).optional(),
+  indexCompletion: z.any().optional(),
   warnings: z.array(z.string()).default([]),
   failure: z
     .object({
@@ -197,11 +201,11 @@ export class ReelIndexLangGraphWorkflow {
       .addNode('persist_semantic_candidate', (state) =>
         this.persistSemanticCandidate(state as ReelIndexGraphState),
       )
-      .addNode('persist_content_compatibility_copy', (state) =>
-        this.persistContentCompatibilityCopy(state as ReelIndexGraphState),
-      )
       .addNode('activate_semantic_candidate', (state) =>
         this.activateSemanticCandidate(state as ReelIndexGraphState),
+      )
+      .addNode('complete_content_index_state', (state) =>
+        this.completeContentIndexState(state as ReelIndexGraphState),
       )
       .addNode('mark_index_completed', () => this.markIndexCompleted())
       .addEdge(START, 'load_or_resume_attempt')
@@ -262,19 +266,16 @@ export class ReelIndexLangGraphWorkflow {
       .addEdge('validate_document_tokens', 'generate_missing_embeddings')
       .addEdge('generate_missing_embeddings', 'validate_index_candidate')
       .addEdge('validate_index_candidate', 'persist_semantic_candidate')
-      .addEdge(
-        'persist_semantic_candidate',
-        'persist_content_compatibility_copy',
-      )
+      .addEdge('persist_semantic_candidate', 'activate_semantic_candidate')
       .addConditionalEdges(
-        'persist_content_compatibility_copy',
+        'complete_content_index_state',
         (state) =>
           (state as ReelIndexGraphState).status === 'STALE'
             ? END
-            : 'activate_semantic_candidate',
-        ['activate_semantic_candidate', END],
+            : 'mark_index_completed',
+        ['mark_index_completed', END],
       )
-      .addEdge('activate_semantic_candidate', 'mark_index_completed')
+      .addEdge('activate_semantic_candidate', 'complete_content_index_state')
       .addEdge('mark_index_completed', END);
   }
 
@@ -583,46 +584,59 @@ export class ReelIndexLangGraphWorkflow {
     state: ReelIndexGraphState,
   ): Promise<Partial<ReelIndexGraphState>> {
     const checkpoint = await this.requireCheckpoint(state);
+    const documents = await this.buildIndex.materializeDocuments(
+      checkpoint.documentDrafts ?? [],
+    );
     await this.semanticIndex.persistCandidate({
       job: state.job,
       metadata: this.requireMetadata(checkpoint.extractedMetadata),
       transcriptSegments: checkpoint.mergedSegments,
-      documents: await this.buildIndex.materializeDocuments(
-        checkpoint.documentDrafts ?? [],
-      ),
+      documents,
     });
     await this.checkpoints.setStage(state.job.indexAttemptId, 'PERSISTING');
-    return this.stageNode(state, 'persist_semantic_candidate', 95);
+    return {
+      ...this.stageNode(state, 'persist_semantic_candidate', 95),
+      indexCompletion: this.toCompletionCommand(state.job, documents),
+    };
   }
 
-  private async persistContentCompatibilityCopy(
+  private async completeContentIndexState(
     state: ReelIndexGraphState,
   ): Promise<Partial<ReelIndexGraphState>> {
-    const checkpoint = await this.requireCheckpoint(state);
-    const documents = await this.buildIndex.materializeDocuments(
-      checkpoint.documentDrafts ?? [],
-    );
-
-    // LEGACY CONTENT SEMANTIC COMPATIBILITY WRITE REMOVE IN PROMPT 4
-    const applied = await this.content.completeIndexing({
-      reelId: state.job.reelId,
-      indexAttemptId: state.job.indexAttemptId,
-      transcript: checkpoint.mergedTranscript,
-      transcriptSegments: checkpoint.mergedSegments,
-      metadata: this.requireMetadata(checkpoint.extractedMetadata),
-      chunks: this.buildIndex.toLegacyChunks(documents),
-    });
+    const completion = state.indexCompletion;
+    if (!completion) {
+      throw new Error('Semantic index completion summary is missing');
+    }
+    const applied = await this.content.completeIndexing(completion);
     if (!applied) {
-      await this.semanticIndex.discardCandidate(
-        state.job.reelId,
-        state.job.indexAttemptId,
-      );
       return {
         status: 'STALE',
-        currentStage: 'persist_content_compatibility_copy',
+        currentStage: 'complete_content_index_state',
       };
     }
-    return this.stageNode(state, 'persist_content_compatibility_copy', 97);
+    return this.stageNode(state, 'complete_content_index_state', 100);
+  }
+
+  private toCompletionCommand(
+    job: ReelIndexJob,
+    documents: ReelIndexDocument[],
+  ): CompleteReelIndexCommand {
+    const reelDocument = documents.find((document) => document.kind === 'REEL');
+    if (!reelDocument) throw new Error('Semantic Reel document is missing');
+    return {
+      reelId: job.reelId,
+      indexAttemptId: job.indexAttemptId,
+      indexVersion: job.indexVersion,
+      reelDocumentCount: documents.filter((document) => document.kind === 'REEL')
+        .length,
+      sectionCount: documents.filter((document) => document.kind === 'SECTION').length,
+      chunkCount: documents.filter((document) => document.kind === 'CHUNK').length,
+      embeddingProvider: reelDocument.embeddingProvider,
+      embeddingModel: reelDocument.embeddingModel,
+      embeddingDimensions: reelDocument.embeddingDimensions,
+      embeddingVersion: reelDocument.embeddingVersion,
+      indexedAt: new Date().toISOString(),
+    };
   }
 
   private async activateSemanticCandidate(

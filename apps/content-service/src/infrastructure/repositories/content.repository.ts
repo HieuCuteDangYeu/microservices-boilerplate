@@ -1,6 +1,7 @@
 import { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import { ReelChunkIndexInput } from '@common/content/interfaces/reel-chunk-index.interface';
+import type { CompleteReelIndexCommand } from '@common/processing/interfaces/complete-reel-index.interface';
 import type { ReelMediaOutput } from '@common/processing/interfaces/reel-media-output.interface';
 import type { LegacySemanticBackfillPage } from '@common/processing/interfaces/legacy-semantic-backfill.interface';
 import {
@@ -253,6 +254,23 @@ export class ContentRepository
       (record['mediaAttemptId'] as string | null) ?? undefined;
     reel.indexAttemptId =
       (record['indexAttemptId'] as string | null) ?? undefined;
+    reel.indexVersion = (record['indexVersion'] as string | null) ?? undefined;
+    reel.indexCompletedAt =
+      (record['indexCompletedAt'] as Date | null) ?? undefined;
+    reel.indexDocumentCount =
+      (record['indexDocumentCount'] as number | null) ?? undefined;
+    reel.indexSectionCount =
+      (record['indexSectionCount'] as number | null) ?? undefined;
+    reel.indexChunkCount =
+      (record['indexChunkCount'] as number | null) ?? undefined;
+    reel.indexEmbeddingProvider =
+      (record['indexEmbeddingProvider'] as string | null) ?? undefined;
+    reel.indexEmbeddingModel =
+      (record['indexEmbeddingModel'] as string | null) ?? undefined;
+    reel.indexEmbeddingDimensions =
+      (record['indexEmbeddingDimensions'] as number | null) ?? undefined;
+    reel.indexEmbeddingVersion =
+      (record['indexEmbeddingVersion'] as string | null) ?? undefined;
     reel.sourceDurationMs =
       (record['sourceDurationMs'] as number | null) ?? undefined;
     reel.sourceWidth = (record['sourceWidth'] as number | null) ?? undefined;
@@ -642,14 +660,7 @@ export class ContentRepository
     return result.count > 0;
   }
 
-  async completeIndexing(input: {
-    reelId: string;
-    indexAttemptId: string;
-    transcript?: string;
-    transcriptSegments?: TranscriptSegment[];
-    metadata: ExtractedReelMetadata;
-    chunks: ReelChunkIndexInput[];
-  }): Promise<boolean> {
+  async completeIndexing(input: CompleteReelIndexCommand): Promise<boolean> {
     return await this.$transaction(async (transaction) => {
       const current = await transaction.reel.findFirst({
         where: {
@@ -667,60 +678,34 @@ export class ContentRepository
       }
       if (current.indexStatus !== 'PROCESSING') return false;
 
-      const result = await transaction.reel.updateMany({
-        where: {
-          id: input.reelId,
-          indexAttemptId: input.indexAttemptId,
-          mediaStatus: 'COMPLETED',
-          indexStatus: 'PROCESSING',
-        },
-        data: {
-          ...(input.transcript !== undefined
-            ? { transcript: input.transcript }
-            : {}),
-          ...(input.transcriptSegments !== undefined
-            ? {
-                transcriptSegments:
-                  input.transcriptSegments as unknown as Prisma.InputJsonValue,
-              }
-            : {}),
-          title: input.metadata.title ?? current.title,
-          description: input.metadata.description ?? current.description,
-          tags: input.metadata.tags,
-          indexStatus: input.chunks.length > 0 ? 'COMPLETED' : 'DEGRADED',
-          status: 'COMPLETED',
-          processingStage: 'READY',
-          processingMessage: 'Video is ready to watch',
-          processingProgress: 100,
-          processingErrorCode: null,
-          processingErrorDetail: null,
-        },
-      });
-      if (result.count === 0) return false;
+      const result = await transaction.$executeRaw(Prisma.sql`
+        UPDATE "Reel"
+        SET
+          "indexVersion" = ${input.indexVersion},
+          "indexCompletedAt" = ${new Date(input.indexedAt)},
+          "indexDocumentCount" = ${input.reelDocumentCount},
+          "indexSectionCount" = ${input.sectionCount},
+          "indexChunkCount" = ${input.chunkCount},
+          "indexEmbeddingProvider" = ${input.embeddingProvider},
+          "indexEmbeddingModel" = ${input.embeddingModel},
+          "indexEmbeddingDimensions" = ${input.embeddingDimensions},
+          "indexEmbeddingVersion" = ${input.embeddingVersion},
+          "indexStatus" = ${input.chunkCount > 0 ? 'COMPLETED' : 'DEGRADED'}::"ReelIndexStatus",
+          "status" = 'COMPLETED'::"ProcessingStatus",
+          "processingStage" = 'READY',
+          "processingMessage" = 'Video is ready to watch',
+          "processingProgress" = 100,
+          "processingErrorCode" = NULL,
+          "processingErrorDetail" = NULL,
+          "updatedAt" = NOW()
+        WHERE
+          "id" = ${input.reelId}
+          AND "indexAttemptId" = ${input.indexAttemptId}
+          AND "mediaStatus" = 'COMPLETED'::"ReelMediaStatus"
+          AND "indexStatus" = 'PROCESSING'::"ReelIndexStatus"
+      `);
+      if (result === 0) return false;
 
-      await transaction.reelChunk.deleteMany({
-        where: { reelId: input.reelId },
-      });
-      if (input.chunks.length > 0) {
-        const rows = input.chunks.map((chunk) => {
-          if (!chunk.embedding.length) {
-            throw new Error(
-              `Chunk ${chunk.chunkIndex} has an invalid embedding`,
-            );
-          }
-          return Prisma.sql`(
-            ${randomUUID()}, ${input.reelId}, ${current.userId}, ${chunk.chunkIndex},
-            ${chunk.text}, ${chunk.startTime ?? null}, ${chunk.endTime ?? null},
-            ${chunk.embeddingModel}, ${`[${chunk.embedding.join(',')}]`}::vector
-          )`;
-        });
-        await transaction.$executeRaw(Prisma.sql`
-          INSERT INTO "ReelChunk" (
-            "id", "reelId", "userId", "chunkIndex", "text", "startTime",
-            "endTime", "embeddingModel", "embedding"
-          ) VALUES ${Prisma.join(rows)}
-        `);
-      }
       return true;
     });
   }

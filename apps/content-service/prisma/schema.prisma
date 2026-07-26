@@ -99,6 +99,15 @@ model Reel {
   processingErrorDetail         String?          @db.Text
   mediaAttemptId                String?
   indexAttemptId                String?
+  indexVersion                  String?
+  indexCompletedAt              DateTime?
+  indexDocumentCount            Int?
+  indexSectionCount             Int?
+  indexChunkCount               Int?
+  indexEmbeddingProvider        String?
+  indexEmbeddingModel           String?
+  indexEmbeddingDimensions      Int?
+  indexEmbeddingVersion         String?
 
   sourceDurationMs      Int?
   sourceWidth           Int?
@@ -135,6 +144,7 @@ model Reel {
   @@index([processingAttemptId])
   @@index([mediaAttemptId])
   @@index([indexAttemptId])
+  @@index([indexVersion])
   @@index([status, processingStartedAt])
   @@index([status, visibility, createdAt(sort: Desc)])
 }
