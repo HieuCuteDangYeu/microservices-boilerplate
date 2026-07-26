@@ -66,6 +66,20 @@ export class CheckContextSufficiencyUseCase {
       };
     }
 
+    const missingMentionTerms = this.missingExplicitMentionTerms(state);
+    if (missingMentionTerms.length > 0) {
+      return {
+        sufficient: false,
+        confidence: 1,
+        availableEvidence: this.getAvailableEvidence(state),
+        missingEvidence: ['TRANSCRIPT'],
+        reason: `Retrieved transcript does not mention: ${missingMentionTerms.join(', ')}.`,
+        userFacingReason:
+          'I do not have relevant shared reel transcript context to answer that reliably.',
+        recommendedAction: 'REFUSE_NO_CONTEXT',
+      };
+    }
+
     try {
       const raw =
         await this.structuredLlmService.generateObject<RawContextSufficiencyResult>(
@@ -286,6 +300,30 @@ ${JSON.stringify(
     }
 
     return this.dedupeEvidence(evidence);
+  }
+
+  private missingExplicitMentionTerms(state: RagChatWorkflowState): string[] {
+    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') {
+      return [];
+    }
+
+    const match = state.userMessage.match(
+      /\b(?:does|did|do)\b[\s\S]*?\bmention\b\s+(.+?)[?.!]*$/i,
+    );
+    if (!match?.[1]) {
+      return [];
+    }
+
+    const terms = match[1]
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length >= 3)
+      .filter((term) => !['the', 'and', 'that', 'this'].includes(term));
+    const evidence = state.rerankedChunks
+      .map((chunk) => chunk.chunkText.toLowerCase())
+      .join(' ');
+
+    return terms.filter((term) => !evidence.includes(term));
   }
 
   private hasTranscript(chunk: ReelContextSearchResult): boolean {
