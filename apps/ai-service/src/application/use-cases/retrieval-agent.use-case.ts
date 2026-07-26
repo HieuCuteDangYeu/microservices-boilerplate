@@ -102,16 +102,32 @@ export class RetrievalAgentUseCase {
         accessibleReelIds,
         limit: plan.searchLimit,
       };
-      const retrievedChunks = this.indexingSearchEnabled()
-        ? await this.retrieveHierarchically(retrievalInput)
-        : await this.contentService.searchReelContext({
-            queryText,
-            queryVector: queryEmbedding.values,
-            userId: input.userId,
-            conversationId: input.conversationId,
-            sharedOnly: true,
-            limit: plan.searchLimit,
-          });
+      const legacySearchInput = {
+        queryText,
+        queryVector: queryEmbedding.values,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        sharedOnly: true,
+        limit: plan.searchLimit,
+      };
+      let retrievedChunks: TranscriptMatch[];
+      if (this.indexingSearchEnabled()) {
+        try {
+          retrievedChunks = await this.retrieveHierarchically(retrievalInput);
+        } catch (error) {
+          if (!this.legacyContentSemanticReadFallbackEnabled()) {
+            throw error;
+          }
+          this.logger.warn(
+            `Indexing retrieval failed; using legacy Content fallback: ${this.errorMessage(error)}`,
+          );
+          retrievedChunks =
+            await this.contentService.searchReelContext(legacySearchInput);
+        }
+      } else {
+        retrievedChunks =
+          await this.contentService.searchReelContext(legacySearchInput);
+      }
 
       if (!this.indexingSearchEnabled() && this.hierarchicalShadowEnabled()) {
         void this.retrieveHierarchically(retrievalInput).catch(
@@ -296,6 +312,13 @@ export class RetrievalAgentUseCase {
 
   private hierarchicalShadowEnabled(): boolean {
     return this.readBoolean('RAG_HIERARCHICAL_SHADOW_MODE', true);
+  }
+
+  private legacyContentSemanticReadFallbackEnabled(): boolean {
+    return this.readBoolean(
+      'LEGACY_CONTENT_SEMANTIC_READ_FALLBACK_ENABLED',
+      false,
+    );
   }
 
   private readBoolean(name: string, fallback: boolean): boolean {
