@@ -81,7 +81,7 @@ export class QueryRouterAgentUseCase {
           temperature: 0,
         });
 
-      return this.normalize(result);
+      return this.normalize(result, input.message);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 
@@ -263,12 +263,17 @@ Classify the current user message.
     };
   }
 
-  private normalize(raw: RawRouteDecision): RagChatRouteDecision {
-    const intent = this.normalizeIntent(raw.intent);
-    const reelQuestionType = this.normalizeReelQuestionType(
-      raw.reelQuestionType,
-      intent,
-    );
+  private normalize(
+    raw: RawRouteDecision,
+    message: string,
+  ): RagChatRouteDecision {
+    const sharedReelQuestionType = this.sharedReelQuestionType(message);
+    const intent = sharedReelQuestionType
+      ? 'REEL_VIDEO_QUESTION'
+      : this.normalizeIntent(raw.intent);
+    const reelQuestionType =
+      sharedReelQuestionType ??
+      this.normalizeReelQuestionType(raw.reelQuestionType, intent);
 
     const requiredEvidence = this.normalizeRequiredEvidence(
       raw.requiredEvidence,
@@ -319,6 +324,37 @@ Classify the current user message.
     return 'NORMAL_CHAT';
   }
 
+  private sharedReelQuestionType(
+    message: string,
+  ): RagReelQuestionType | undefined {
+    const normalized = message.toLowerCase();
+    const mentionsSharedMedia =
+      /\b(shared|this|that)\b/.test(normalized) &&
+      /\b(reel|video|clip|media|canary)\b/.test(normalized);
+
+    if (!mentionsSharedMedia) {
+      return undefined;
+    }
+
+    if (
+      /\b(say|says|mention|mentions|transcript|quote|chunk|timestamp|citation)\b/.test(
+        normalized,
+      )
+    ) {
+      return 'TRANSCRIPT_CONTENT';
+    }
+
+    if (
+      /\b(title|description|caption|tag|hashtag|author|uploaded)\b/.test(
+        normalized,
+      )
+    ) {
+      return 'REEL_METADATA';
+    }
+
+    return 'AMBIGUOUS_REEL_REFERENCE';
+  }
+
   private normalizeReelQuestionType(
     value: unknown,
     intent: RagChatIntent,
@@ -367,6 +403,14 @@ Classify the current user message.
     value: unknown,
     intent: RagChatIntent,
   ): RagRecommendationAction {
+    if (intent === 'REEL_VIDEO_QUESTION') {
+      return {
+        type: 'NONE',
+        reason:
+          'User asked about a shared reel, not for new reel recommendations.',
+      };
+    }
+
     const record = this.asRecord(value);
 
     if (!record) {
@@ -416,14 +460,6 @@ Classify the current user message.
           record.reason,
           'User asked for query suggestions.',
         ),
-      };
-    }
-
-    if (intent === 'REEL_VIDEO_QUESTION') {
-      return {
-        type: 'NONE',
-        reason:
-          'User asked about a shared reel, not for new reel recommendations.',
       };
     }
 
