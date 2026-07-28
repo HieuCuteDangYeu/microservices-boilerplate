@@ -5,11 +5,5 @@
     "outDir": "../../dist/apps/notification-service"
   },
   "include": ["src/**/*"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "test",
-    "**/*spec.ts",
-    "src/generated/**/*"
-  ]
+  "exclude": ["node_modules", "dist", "test", "**/*spec.ts"]
 }
