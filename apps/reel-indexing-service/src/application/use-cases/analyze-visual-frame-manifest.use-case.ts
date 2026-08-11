@@ -37,40 +37,59 @@ export class AnalyzeVisualFrameManifestUseCase {
     }
 
     const results = new Array<VisualSceneEvidence>(manifest.artifacts.length);
+    const failures: string[] = [];
     await this.mapWithConcurrency(
       manifest.artifacts,
       this.getPositiveInt('INDEX_VISUAL_ANALYSIS_CONCURRENCY', 2, 1, 8),
       async (artifact, index) => {
-        const image = await this.storage.getArtifactBuffer(artifact.key);
-        const checksum = createHash('sha256').update(image).digest('hex');
-        if (checksum !== artifact.checksum) {
-          throw new Error(
-            `Visual frame checksum mismatch for ${artifact.key}`,
+        try {
+          const image = await this.storage.getArtifactBuffer(artifact.key);
+          const checksum = createHash('sha256').update(image).digest('hex');
+          if (checksum !== artifact.checksum) {
+            throw new Error('frame checksum mismatch');
+          }
+
+          const analysis = await this.ai.analyzeVisualFrame({
+            imageBase64: image.toString('base64'),
+            mimeType: 'image/jpeg',
+            timestampMs: artifact.timestampMs,
+          });
+
+          results[index] = {
+            frameKey: artifact.key,
+            frameChecksum: artifact.checksum,
+            timestampMs: artifact.timestampMs,
+            reason: artifact.reason,
+            caption: analysis.caption,
+            ocrText: analysis.ocrText,
+            objects: analysis.objects,
+            provider: analysis.provider,
+            model: analysis.model,
+            version: analysis.version,
+          };
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          failures.push(`${artifact.timestampMs}ms: ${message}`);
+          this.logger.warn(
+            `[VisualIndex] frame analysis skipped reelId=${job.reelId} timestampMs=${artifact.timestampMs}: ${message}`,
           );
         }
-
-        const analysis = await this.ai.analyzeVisualFrame({
-          imageBase64: image.toString('base64'),
-          mimeType: 'image/jpeg',
-          timestampMs: artifact.timestampMs,
-        });
-
-        results[index] = {
-          frameKey: artifact.key,
-          frameChecksum: artifact.checksum,
-          timestampMs: artifact.timestampMs,
-          reason: artifact.reason,
-          caption: analysis.caption,
-          ocrText: analysis.ocrText,
-          objects: analysis.objects,
-          provider: analysis.provider,
-          model: analysis.model,
-          version: analysis.version,
-        };
       },
     );
 
-    return results.filter(Boolean);
+    if (failures.length > 0 && this.required()) {
+      throw new Error(
+        `Visual analysis failed for ${failures.length}/${manifest.artifacts.length} sampled frames: ${failures.slice(0, 3).join('; ')}`,
+      );
+    }
+
+    const completed = results.filter(
+      (result): result is VisualSceneEvidence => Boolean(result),
+    );
+    this.logger.log(
+      `[VisualIndex] reelId=${job.reelId} completed=${completed.length} failed=${failures.length} sampled=${manifest.artifacts.length}`,
+    );
+    return completed;
   }
 
   private deriveManifestKey(job: ReelIndexJob): string {
@@ -79,11 +98,19 @@ export class AnalyzeVisualFrameManifestUseCase {
   }
 
   private enabled(): boolean {
-    const value = this.configService
-      .get<string>('INDEX_VISUAL_ANALYSIS_ENABLED')
-      ?.trim()
-      .toLowerCase();
-    return value === undefined ? true : value === 'true';
+    return this.boolean('INDEX_VISUAL_ANALYSIS_ENABLED', true);
+  }
+
+  private required(): boolean {
+    return this.boolean('INDEX_VISUAL_ANALYSIS_REQUIRED', false);
+  }
+
+  private boolean(key: string, fallback: boolean): boolean {
+    const value = this.configService.get<string>(key)?.trim().toLowerCase();
+    if (value === undefined) return fallback;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return fallback;
   }
 
   private async mapWithConcurrency<T>(
