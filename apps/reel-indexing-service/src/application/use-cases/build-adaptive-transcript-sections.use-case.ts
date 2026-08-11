@@ -1,7 +1,7 @@
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import { BuildTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-transcript-sections.use-case';
-import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import type { TranscriptSection } from '@indexing/domain/entities/index-checkpoint.entity';
+import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -10,6 +10,18 @@ interface BoundaryCandidate {
   semanticShift: number;
   normalizedPause: number;
   lexicalShift: number;
+}
+
+export interface AdaptiveSectioningEvaluation {
+  legacySections: number;
+  adaptiveSections: number;
+  sectionCountDelta: number;
+  boundaryAgreement: number;
+  adaptiveAverageDurationSeconds: number;
+  adaptiveMinDurationSeconds: number;
+  adaptiveMaxDurationSeconds: number;
+  adaptiveTooShortCount: number;
+  adaptiveTooLongCount: number;
 }
 
 @Injectable()
@@ -40,15 +52,99 @@ export class BuildAdaptiveTranscriptSectionsUseCase {
       true,
     );
     if (!enabled && !shadow) return legacy;
+    if (!enabled && shadow && !this.shouldRunShadowEvaluation(ordered)) {
+      return legacy;
+    }
 
     const candidates = await this.scoreCandidates(ordered);
     const adaptive = this.buildSections(ordered, candidates);
     if (shadow) {
+      const evaluation = this.evaluate(legacy, adaptive);
       this.logger.log(
-        `Adaptive sectioning shadow comparison: timeWindow=${legacy.length}, adaptive=${adaptive.length}`,
+        `[AdaptiveSectioningShadow] ${JSON.stringify(evaluation)}`,
       );
     }
     return enabled ? adaptive : legacy;
+  }
+
+  evaluate(
+    legacy: TranscriptSection[],
+    adaptive: TranscriptSection[],
+  ): AdaptiveSectioningEvaluation {
+    const minimum = this.number(
+      'INDEX_LONG_SECTION_MIN_SECONDS',
+      120,
+      10,
+      3_600,
+    );
+    const maximum = this.number(
+      'INDEX_LONG_SECTION_MAX_SECONDS',
+      480,
+      minimum,
+      14_400,
+    );
+    const tolerance = this.number(
+      'INDEX_SECTION_BOUNDARY_EVAL_TOLERANCE_SECONDS',
+      15,
+      0,
+      120,
+    );
+    const durations = adaptive.map((section) =>
+      Math.max(0, (section.endMs - section.startMs) / 1000),
+    );
+    const adaptiveBoundaries = adaptive.slice(0, -1).map((section) => section.endMs);
+    const legacyBoundaries = legacy.slice(0, -1).map((section) => section.endMs);
+    const toleranceMs = tolerance * 1000;
+    const matchedBoundaries = adaptiveBoundaries.filter((boundary) =>
+      legacyBoundaries.some(
+        (legacyBoundary) => Math.abs(legacyBoundary - boundary) <= toleranceMs,
+      ),
+    ).length;
+    const boundaryDenominator = Math.max(
+      adaptiveBoundaries.length,
+      legacyBoundaries.length,
+      1,
+    );
+
+    return {
+      legacySections: legacy.length,
+      adaptiveSections: adaptive.length,
+      sectionCountDelta: adaptive.length - legacy.length,
+      boundaryAgreement: matchedBoundaries / boundaryDenominator,
+      adaptiveAverageDurationSeconds:
+        durations.length > 0
+          ? durations.reduce((sum, value) => sum + value, 0) / durations.length
+          : 0,
+      adaptiveMinDurationSeconds:
+        durations.length > 0 ? Math.min(...durations) : 0,
+      adaptiveMaxDurationSeconds:
+        durations.length > 0 ? Math.max(...durations) : 0,
+      adaptiveTooShortCount: durations.filter((value) => value < minimum).length,
+      adaptiveTooLongCount: durations.filter((value) => value > maximum).length,
+    };
+  }
+
+  private shouldRunShadowEvaluation(segments: TranscriptSegment[]): boolean {
+    const sampleRate = this.number(
+      'INDEX_LONG_ADAPTIVE_SECTIONING_SHADOW_SAMPLE_RATE',
+      0.1,
+      0,
+      1,
+    );
+    if (sampleRate <= 0) return false;
+    if (sampleRate >= 1) return true;
+
+    const fingerprint = [
+      segments.length,
+      segments[0]?.text ?? '',
+      segments.at(-1)?.text ?? '',
+    ].join('|');
+    let hash = 2166136261;
+    for (let index = 0; index < fingerprint.length; index += 1) {
+      hash ^= fingerprint.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) / 0xffffffff < sampleRate;
   }
 
   private async scoreCandidates(
