@@ -1,3 +1,4 @@
+import { AnalyzeVisualFrameUseCase } from '@ai/application/use-cases/analyze-visual-frame.use-case';
 import { BackfillUserMemoryEmbeddingsUseCase } from '@ai/application/use-cases/backfill-user-memory-embeddings.use-case';
 import { CountDocumentTokensUseCase } from '@ai/application/use-cases/count-document-tokens.use-case';
 import { ExtractReelMetadataUseCase } from '@ai/application/use-cases/extract-reel-metadata.use-case';
@@ -7,11 +8,14 @@ import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcri
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { AskQuestionResponse } from '@common/ai/dtos/ask-question-response.dto';
 import { AskQuestionPayload } from '@common/ai/dtos/ask-question.dto';
-import type { GenerateEmbeddingRequest } from '@common/ai/interfaces/generate-embedding.interface';
 import type { CountDocumentTokensRequest } from '@common/ai/interfaces/count-document-tokens.interface';
-import type { GenerateEmbeddingBatchRequest } from '@common/ai/interfaces/generate-embedding.interface';
+import type {
+  GenerateEmbeddingBatchRequest,
+  GenerateEmbeddingRequest,
+} from '@common/ai/interfaces/generate-embedding.interface';
 import type { ReelMetadataExtractionInput } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
+import type { AnalyzeVisualFrameRequest } from '@common/ai/interfaces/visual-analysis.interface';
 import { Controller } from '@nestjs/common';
 import {
   EventPattern,
@@ -30,6 +34,7 @@ export class AiController {
     private readonly countDocumentTokensUseCase: CountDocumentTokensUseCase,
     private readonly transcribeAudioUseCase: TranscribeAudioUseCase,
     private readonly transcribeAudioBufferUseCase: TranscribeAudioBufferUseCase,
+    private readonly analyzeVisualFrameUseCase: AnalyzeVisualFrameUseCase,
     private readonly streamChatUseCase: StreamChatUseCase,
     private readonly handleConversationTurnCompletedUseCase: HandleConversationTurnCompletedUseCase,
     private readonly extractReelMetadataUseCase: ExtractReelMetadataUseCase,
@@ -182,6 +187,29 @@ export class AiController {
     }
   }
 
+  @MessagePattern('ai.analyze_visual_frame')
+  async handleAnalyzeVisualFrame(
+    @Payload() payload: AnalyzeVisualFrameRequest,
+  ) {
+    if (!payload || typeof payload.imageBase64 !== 'string') {
+      throw new RpcException({
+        statusCode: 400,
+        message: 'Invalid visual frame payload received from RabbitMQ',
+      });
+    }
+
+    try {
+      return await this.analyzeVisualFrameUseCase.execute(payload);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(`[AnalyzeVisualFrame] ${error.message}`);
+      throw new RpcException({
+        statusCode: 500,
+        message: error.message,
+      });
+    }
+  }
+
   @MessagePattern('ai.stream_question')
   async handleStreamQuestion(
     @Payload() data: AskQuestionPayload,
@@ -217,6 +245,7 @@ export class AiController {
 
       return {
         answer: result.answer,
+        citations: result.citations ?? [],
         recommendedReels: result.recommendedReels ?? [],
         suggestedQueries: result.suggestedQueries ?? [],
       };
