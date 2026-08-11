@@ -47,10 +47,13 @@ export class ProcessBotReplyUseCase {
       });
 
       if (result.answer) {
+        const hasCitations = result.citations && result.citations.length > 0;
         const hasRecommendedReels =
           result.recommendedReels && result.recommendedReels.length > 0;
         const hasSuggestedQueries =
           result.suggestedQueries && result.suggestedQueries.length > 0;
+        const hasAiMetadata =
+          hasCitations || hasRecommendedReels || hasSuggestedQueries;
 
         const botMessage = new Message({
           id: '',
@@ -60,14 +63,17 @@ export class ProcessBotReplyUseCase {
           signalType: 0,
           type: 'text',
           createdAt: new Date(),
-          metadata:
-            hasRecommendedReels || hasSuggestedQueries
-              ? {
-                  kind: 'velora_ai_reel_recommendations',
-                  recommendedReels: result.recommendedReels ?? [],
-                  suggestedQueries: result.suggestedQueries ?? [],
-                }
-              : undefined,
+          metadata: hasAiMetadata
+            ? {
+                kind:
+                  hasRecommendedReels || hasSuggestedQueries
+                    ? 'velora_ai_reel_recommendations'
+                    : 'velora_ai_response',
+                citations: result.citations ?? [],
+                recommendedReels: result.recommendedReels ?? [],
+                suggestedQueries: result.suggestedQueries ?? [],
+              }
+            : undefined,
         });
 
         botReply = await this.chatRepository.createMessage(botMessage);
