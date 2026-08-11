@@ -33,6 +33,10 @@ export interface IUserMemoryRepository {
   ): Promise<UserMemory[]>;
   findWithoutEmbedding(limit: number): Promise<UserMemory[]>;
   upsertMany(memories: UserMemoryUpsertInput[]): Promise<UserMemory[]>;
+  replaceSimilar(
+    memoryId: string,
+    memory: UserMemoryUpsertInput,
+  ): Promise<UserMemory>;
   updateEmbedding(input: UserMemoryEmbeddingUpdateInput): Promise<void>;
   markUsed(memoryIds: string[]): Promise<void>;
 }
