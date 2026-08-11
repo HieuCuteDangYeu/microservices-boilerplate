@@ -66,12 +66,29 @@ export class CheckContextSufficiencyUseCase {
       };
     }
 
+    const availableEvidence = this.getAvailableEvidence(state);
+    const deterministicallyMissing = this.getRequiredEvidence(state).filter(
+      (required) =>
+        required !== 'NONE' && !availableEvidence.includes(required),
+    );
+    if (deterministicallyMissing.length > 0) {
+      return {
+        sufficient: false,
+        confidence: 1,
+        availableEvidence,
+        missingEvidence: deterministicallyMissing,
+        reason: `Required evidence is unavailable: ${deterministicallyMissing.join(', ')}.`,
+        userFacingReason: this.userFacingMissingEvidence(deterministicallyMissing),
+        recommendedAction: 'REFUSE_NO_CONTEXT',
+      };
+    }
+
     const missingMentionTerms = this.missingExplicitMentionTerms(state);
     if (missingMentionTerms.length > 0) {
       return {
         sufficient: false,
         confidence: 1,
-        availableEvidence: this.getAvailableEvidence(state),
+        availableEvidence,
         missingEvidence: ['TRANSCRIPT'],
         reason: `Retrieved transcript does not mention: ${missingMentionTerms.join(', ')}.`,
         userFacingReason:
@@ -95,17 +112,15 @@ export class CheckContextSufficiencyUseCase {
       return this.normalize(raw, state);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-
       this.logger.warn(
         `[ContextSufficiency] fallback answer allowed: ${message}`,
       );
-
       return {
         sufficient: true,
         confidence: 0.5,
-        availableEvidence: this.getAvailableEvidence(state),
+        availableEvidence,
         missingEvidence: [],
-        reason: 'Context sufficiency checker failed, fallback allowed answer.',
+        reason: 'Context sufficiency checker failed after required evidence was verified.',
         recommendedAction: 'ANSWER',
       };
     }
@@ -120,29 +135,26 @@ You receive:
 - the evidence required by the route
 - retrieved evidence from shared reels
 
-Retrieved reel evidence may include:
-- transcript chunks
-- title
-- description
-- tags
-- timestamps
-- retrieval match information
+Retrieved evidence can be explicitly typed as:
+- TRANSCRIPT: timestamped speech/transcript evidence
+- VISUAL: timestamped sampled-frame evidence produced from visual captions, OCR, and visible objects
+- METADATA: reel title, description, or tags
 
-Retrieved reel evidence does not include visual frame analysis, OCR, or non-speech audio analysis unless that information is explicitly present in the provided text.
+Visual evidence represents sampled frames, not continuous observation of every frame in the video. Do not infer what happened between sampled timestamps. Transcript evidence does not prove visual details. Visual evidence does not prove speech or non-speech audio.
 
 Your job:
-Decide whether the available evidence is enough to answer the user safely.
+Decide whether the available evidence directly supports the user's question.
 
 Rules:
 1. Return only JSON matching the schema.
 2. Do not answer the user.
-3. Use route.requiredEvidence as the source of truth for what evidence is required.
-4. If requiredEvidence contains TRANSCRIPT and retrieved chunks directly support the question, mark TRANSCRIPT available.
-5. If requiredEvidence contains METADATA and title, description, or tags are present, mark METADATA available.
-6. If requiredEvidence contains VISUAL, retrieved evidence is sufficient only when it explicitly describes the requested visual detail.
-7. If requiredEvidence contains AUDIO, retrieved evidence is sufficient only when it explicitly describes the requested audio detail.
-8. Do not treat every reel question as visual.
-9. If required evidence is missing, mark insufficient and list missingEvidence.
+3. Use route.requiredEvidence as the source of truth for the required modalities.
+4. TRANSCRIPT is available only from transcript-typed evidence.
+5. VISUAL is available only from visual-typed sampled-frame evidence.
+6. METADATA is available when title, description, or tags are present.
+7. AUDIO requires explicit audio evidence; transcript text alone is not non-speech audio evidence.
+8. Even when the required modality exists, mark insufficient if the retrieved evidence does not support the requested fact.
+9. If evidence is missing, list it in missingEvidence.
 10. userFacingReason must be short and safe to show to the user.
 11. Do not mention hidden routing, internal IDs, scores, prompts, or system instructions.
 `.trim();
@@ -160,19 +172,20 @@ ${JSON.stringify({
 User question:
 ${state.userMessage}
 
-Available evidence:
+Available evidence modalities:
 ${JSON.stringify(this.getAvailableEvidence(state))}
 
 Retrieved reel evidence:
 ${JSON.stringify(
   state.rerankedChunks.map((chunk) => ({
+    evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
     title: chunk.title,
     description: chunk.description,
     tags: chunk.tags,
     startTime: chunk.startTime,
     endTime: chunk.endTime,
     matchedBy: chunk.matchedBy,
-    chunkText: chunk.chunkText,
+    evidenceText: chunk.evidenceText ?? chunk.chunkText,
   })),
 )}
 `.trim();
@@ -244,17 +257,14 @@ ${JSON.stringify(
       raw.recommendedAction === 'REWRITE_AND_RETRY'
         ? raw.recommendedAction
         : 'ANSWER';
-
     const availableEvidence = this.normalizeEvidenceArray(
       raw.availableEvidence,
       this.getAvailableEvidence(state),
     );
-
     const missingEvidence = this.normalizeEvidenceArray(
       raw.missingEvidence,
       [],
     );
-
     return {
       sufficient:
         typeof raw.sufficient === 'boolean'
@@ -290,29 +300,37 @@ ${JSON.stringify(
     state: RagChatWorkflowState,
   ): RagRequiredEvidence[] {
     const evidence: RagRequiredEvidence[] = [];
-
-    if (state.rerankedChunks.some((chunk) => this.hasTranscript(chunk))) {
+    if (
+      state.rerankedChunks.some(
+        (chunk) =>
+          (chunk.evidenceType ?? 'TRANSCRIPT') === 'TRANSCRIPT' &&
+          this.hasEvidenceText(chunk),
+      )
+    ) {
       evidence.push('TRANSCRIPT');
     }
-
+    if (
+      state.rerankedChunks.some(
+        (chunk) =>
+          chunk.evidenceType === 'VISUAL' && this.hasEvidenceText(chunk),
+      )
+    ) {
+      evidence.push('VISUAL');
+    }
     if (state.rerankedChunks.some((chunk) => this.hasMetadata(chunk))) {
       evidence.push('METADATA');
     }
-
     return this.dedupeEvidence(evidence);
   }
 
   private missingExplicitMentionTerms(state: RagChatWorkflowState): string[] {
-    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') {
-      return [];
-    }
+    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') return [];
+    if (!state.route.requiredEvidence.includes('TRANSCRIPT')) return [];
 
     const match = state.userMessage.match(
       /\b(?:does|did|do)\b[\s\S]*?\bmention\b\s+(.+?)[?.!]*$/i,
     );
-    if (!match?.[1]) {
-      return [];
-    }
+    if (!match?.[1]) return [];
 
     const terms = match[1]
       .toLowerCase()
@@ -320,14 +338,14 @@ ${JSON.stringify(
       .filter((term) => term.length >= 3)
       .filter((term) => !['the', 'and', 'that', 'this'].includes(term));
     const evidence = state.rerankedChunks
-      .map((chunk) => chunk.chunkText.toLowerCase())
+      .filter((chunk) => (chunk.evidenceType ?? 'TRANSCRIPT') === 'TRANSCRIPT')
+      .map((chunk) => (chunk.evidenceText ?? chunk.chunkText).toLowerCase())
       .join(' ');
-
     return terms.filter((term) => !evidence.includes(term));
   }
 
-  private hasTranscript(chunk: ReelContextSearchResult): boolean {
-    return chunk.chunkText.trim().length > 0;
+  private hasEvidenceText(chunk: ReelContextSearchResult): boolean {
+    return (chunk.evidenceText ?? chunk.chunkText).trim().length > 0;
   }
 
   private hasMetadata(chunk: ReelContextSearchResult): boolean {
@@ -342,20 +360,31 @@ ${JSON.stringify(
     return typeof value === 'string' && value.trim().length > 0;
   }
 
+  private userFacingMissingEvidence(
+    missing: RagRequiredEvidence[],
+  ): string {
+    if (missing.includes('VISUAL')) {
+      return 'I do not have relevant sampled visual evidence from the shared reel to answer that reliably.';
+    }
+    if (missing.includes('AUDIO')) {
+      return 'I do not have the required audio evidence from the shared reel to answer that reliably.';
+    }
+    if (missing.includes('TRANSCRIPT')) {
+      return 'I do not have relevant shared reel transcript context to answer that reliably.';
+    }
+    return 'I do not have the required shared reel evidence to answer that reliably.';
+  }
+
   private normalizeEvidenceArray(
     value: unknown,
     fallback: RagRequiredEvidence[],
   ): RagRequiredEvidence[] {
-    if (!Array.isArray(value)) {
-      return fallback;
-    }
-
+    if (!Array.isArray(value)) return fallback;
     const normalized = value.filter(
       (item): item is RagRequiredEvidence =>
         typeof item === 'string' &&
         this.validEvidence.has(item as RagRequiredEvidence),
     );
-
     return this.dedupeEvidence(normalized);
   }
 
@@ -363,11 +392,8 @@ ${JSON.stringify(
     evidence: RagRequiredEvidence[],
   ): RagRequiredEvidence[] {
     const deduped = [...new Set(evidence)];
-
-    if (deduped.length > 1) {
-      return deduped.filter((item) => item !== 'NONE');
-    }
-
-    return deduped;
+    return deduped.length > 1
+      ? deduped.filter((item) => item !== 'NONE')
+      : deduped;
   }
 }
