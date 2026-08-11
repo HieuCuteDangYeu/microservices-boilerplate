@@ -17,13 +17,10 @@ export class R2ArtifactStorageAdapter implements IArtifactStorage {
   constructor(configService: ConfigService) {
     this.bucket = configService.getOrThrow<string>('R2_BUCKET_NAME');
     const accountId = configService.getOrThrow<string>('R2_ACCOUNT_ID');
-    const endpoint =
-      configService.get<string>('R2_ENDPOINT')?.trim() ||
-      `https://${accountId}.r2.cloudflarestorage.com`;
 
     this.client = new S3Client({
       region: 'auto',
-      endpoint,
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: configService.getOrThrow<string>('R2_ACCESS_KEY_ID'),
         secretAccessKey: configService.getOrThrow<string>(
