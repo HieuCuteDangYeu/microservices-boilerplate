@@ -8,6 +8,10 @@ import type {
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+type SelectedVisualFrame = Omit<ExtractedVisualFrame, 'reason'> & {
+  reason: VisualFrameManifest['artifacts'][number]['reason'];
+};
+
 export interface VisualFrameManifestResult {
   manifest: VisualFrameManifest;
   manifestKey: string;
@@ -131,19 +135,11 @@ export class BuildVisualFrameManifestUseCase {
   private dedupeFrames(
     candidates: ExtractedVisualFrame[],
     dedupeWindowMs: number,
-  ): Array<
-    ExtractedVisualFrame & {
-      reason: VisualFrameManifest['artifacts'][number]['reason'];
-    }
-  > {
+  ): SelectedVisualFrame[] {
     const ordered = [...candidates].sort(
       (left, right) => left.timestampMs - right.timestampMs,
     );
-    const selected: Array<
-      ExtractedVisualFrame & {
-        reason: VisualFrameManifest['artifacts'][number]['reason'];
-      }
-    > = [];
+    const selected: SelectedVisualFrame[] = [];
 
     for (const candidate of ordered) {
       const previous = selected.at(-1);
