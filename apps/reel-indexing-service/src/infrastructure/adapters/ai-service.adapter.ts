@@ -1,13 +1,17 @@
-import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
-import type {
-  GenerateEmbeddingBatchRequest,
-  GenerateEmbeddingBatchResult,
-} from '@common/ai/interfaces/generate-embedding.interface';
 import type {
   CountDocumentTokensRequest,
   CountDocumentTokensResult,
 } from '@common/ai/interfaces/count-document-tokens.interface';
+import type {
+  GenerateEmbeddingBatchRequest,
+  GenerateEmbeddingBatchResult,
+} from '@common/ai/interfaces/generate-embedding.interface';
+import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
+import type {
+  AnalyzeVisualFrameRequest,
+  VisualFrameAnalysis,
+} from '@common/ai/interfaces/visual-analysis.interface';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ClientProxy } from '@nestjs/microservices';
@@ -30,6 +34,16 @@ export class AiServiceAdapter implements IIndexingAiService {
         .pipe(timeout(10 * 60_000)),
     );
     return response.transcription ?? { text: response.transcript };
+  }
+
+  async analyzeVisualFrame(
+    input: AnalyzeVisualFrameRequest,
+  ): Promise<VisualFrameAnalysis> {
+    return await firstValueFrom(
+      this.client
+        .send<VisualFrameAnalysis>('ai.analyze_visual_frame', input)
+        .pipe(timeout(120_000)),
+    );
   }
 
   async extractReelMetadata(input: {
