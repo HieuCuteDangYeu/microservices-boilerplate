@@ -204,6 +204,50 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
     return results;
   }
 
+  async replaceSimilar(
+    memoryId: string,
+    input: UserMemoryUpsertInput,
+  ): Promise<UserMemory> {
+    const saved = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.userMemory.findUnique({
+        where: { id: memoryId },
+      });
+
+      if (!existing || existing.userId !== input.userId) {
+        throw new Error(`User memory ${memoryId} is not available for replacement`);
+      }
+
+      const updated = await tx.userMemory.update({
+        where: { id: memoryId },
+        data: {
+          type: input.type,
+          content: input.content,
+          normalizedContent: input.normalizedContent,
+          confidence: Math.max(existing.confidence, input.confidence),
+          sourceConversationId: input.sourceConversationId,
+          embeddingModel: input.embeddingModel,
+          updatedAt: new Date(),
+        },
+      });
+
+      if (this.hasEmbedding(input.embedding)) {
+        const vectorLiteral = `[${input.embedding.join(',')}]`;
+        await tx.$executeRaw`
+          UPDATE "UserMemory"
+          SET
+            embedding = ${vectorLiteral}::vector,
+            "embeddingModel" = ${input.embeddingModel ?? null},
+            "updatedAt" = CURRENT_TIMESTAMP
+          WHERE id = ${memoryId}
+        `;
+      }
+
+      return updated;
+    });
+
+    return this.toDomain(saved);
+  }
+
   async updateEmbedding(input: UserMemoryEmbeddingUpdateInput): Promise<void> {
     if (!this.hasEmbedding(input.embedding)) {
       return;
