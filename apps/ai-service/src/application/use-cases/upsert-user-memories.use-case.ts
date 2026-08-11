@@ -83,13 +83,73 @@ export class UpsertUserMemoriesUseCase {
       return [];
     }
 
-    const memoriesWithEmbeddings: UserMemoryUpsertInput[] = [];
+    const results = [];
 
     for (const memory of validMemories) {
-      memoriesWithEmbeddings.push(await this.attachEmbedding(memory));
+      const memoryWithEmbedding = await this.attachEmbedding(memory);
+      const consolidated = await this.consolidateIfSimilar(memoryWithEmbedding);
+
+      if (consolidated) {
+        results.push(consolidated);
+        continue;
+      }
+
+      results.push(
+        ...(await this.userMemoryRepository.upsertMany([memoryWithEmbedding])),
+      );
     }
 
-    return await this.userMemoryRepository.upsertMany(memoriesWithEmbeddings);
+    return results;
+  }
+
+  private async consolidateIfSimilar(
+    memory: UserMemoryUpsertInput,
+  ) {
+    if (!memory.embedding?.length) {
+      return null;
+    }
+
+    const semanticThreshold = this.getNumber(
+      'AI_USER_MEMORY_DEDUPE_SEMANTIC_SCORE',
+      0.94,
+      0.75,
+      1,
+    );
+    const lexicalThreshold = this.getNumber(
+      'AI_USER_MEMORY_DEDUPE_LEXICAL_SCORE',
+      0.55,
+      0,
+      1,
+    );
+    const candidates = await this.userMemoryRepository.findRelevantByUserId({
+      userId: memory.userId,
+      queryVector: memory.embedding,
+      limit: 5,
+      minScore: semanticThreshold,
+      minConfidence: 0,
+    });
+
+    const similar = candidates.find(
+      (candidate) =>
+        candidate.id &&
+        candidate.type === memory.type &&
+        (this.lexicalSimilarity(
+          candidate.normalizedContent,
+          memory.normalizedContent,
+        ) >= lexicalThreshold ||
+          candidate.normalizedContent.includes(memory.normalizedContent) ||
+          memory.normalizedContent.includes(candidate.normalizedContent)),
+    );
+
+    if (!similar?.id) {
+      return null;
+    }
+
+    this.logger.debug(
+      `[UserMemory] consolidating semantically similar memory id=${similar.id} type=${memory.type} score=${similar.semanticScore?.toFixed(3) ?? 'n/a'}`,
+    );
+
+    return await this.userMemoryRepository.replaceSimilar(similar.id, memory);
   }
 
   private async attachEmbedding(
@@ -179,6 +239,29 @@ export class UpsertUserMemoriesUseCase {
     return true;
   }
 
+  private lexicalSimilarity(left: string, right: string): number {
+    const leftTokens = this.tokens(left);
+    const rightTokens = this.tokens(right);
+    if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+
+    let intersection = 0;
+    for (const token of leftTokens) {
+      if (rightTokens.has(token)) intersection += 1;
+    }
+
+    const union = leftTokens.size + rightTokens.size - intersection;
+    return union > 0 ? intersection / union : 0;
+  }
+
+  private tokens(value: string): Set<string> {
+    return new Set(
+      this.toComparable(value)
+        .split(' ')
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2),
+    );
+  }
+
   private sanitizeContent(value: string): string {
     return value.replace(/\s+/g, ' ').trim();
   }
@@ -213,5 +296,17 @@ export class UpsertUserMemoriesUseCase {
     }
 
     return value.toLowerCase() === 'true';
+  }
+
+  private getNumber(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const value = Number(this.configService.get<string>(key) ?? fallback);
+    return Number.isFinite(value)
+      ? Math.min(max, Math.max(min, value))
+      : fallback;
   }
 }
