@@ -1,5 +1,6 @@
 import type {
   AdjacentChunkRequest,
+  SemanticIndexEvidenceType,
   SemanticIndexSearchFilters,
   SemanticIndexSearchRequest,
   SemanticIndexSearchResult,
@@ -15,9 +16,12 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/reel-indexing-client';
 import { randomUUID } from 'crypto';
-import { createHash } from 'crypto';
 
-type SemanticTable = 'ReelDocument' | 'ReelSection' | 'ReelChunk';
+type SemanticTable =
+  | 'ReelDocument'
+  | 'ReelSection'
+  | 'ReelChunk'
+  | 'ReelVisualScene';
 
 interface SearchRow {
   id: string;
@@ -26,6 +30,9 @@ interface SearchRow {
   ordinal: number;
   userId: string;
   text: string;
+  retrievalText: string;
+  evidenceText: string | null;
+  evidenceType: SemanticIndexEvidenceType;
   tags: string[];
   startTime: number | null;
   endTime: number | null;
@@ -77,6 +84,9 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     const chunks = input.documents.filter(
       (document) => document.kind === 'CHUNK',
     );
+    const visualScenes = input.documents.filter(
+      (document) => document.kind === 'VISUAL_SCENE',
+    );
     if (reel.length !== 1) {
       throw new Error('Semantic index requires exactly one Reel document');
     }
@@ -85,6 +95,9 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     await this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.job.reelId}))`;
       await transaction.transcriptionSegment.deleteMany({
+        where: { indexAttemptId: input.job.indexAttemptId },
+      });
+      await transaction.reelVisualScene.deleteMany({
         where: { indexAttemptId: input.job.indexAttemptId },
       });
       await transaction.reelChunk.deleteMany({
@@ -110,6 +123,11 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
           this.insertDocuments('ReelChunk', chunks, input),
         );
       }
+      if (visualScenes.length) {
+        await transaction.$executeRaw(
+          this.insertDocuments('ReelVisualScene', visualScenes, input),
+        );
+      }
       if (input.transcriptSegments?.length) {
         await transaction.transcriptionSegment.createMany({
           data: input.transcriptSegments.map((segment, ordinal) => ({
@@ -132,6 +150,10 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
   ): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${reelId}))`;
+      await transaction.reelVisualScene.updateMany({
+        where: { reelId, isActive: true },
+        data: { isActive: false },
+      });
       await transaction.reelChunk.updateMany({
         where: { reelId, isActive: true },
         data: { isActive: false },
@@ -158,6 +180,13 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       await transaction.reelChunk.updateMany({
         where: { reelId, indexAttemptId },
         data: { isActive: true },
+      });
+      await transaction.reelVisualScene.updateMany({
+        where: { reelId, indexAttemptId },
+        data: { isActive: true },
+      });
+      await transaction.reelVisualScene.deleteMany({
+        where: { reelId, indexAttemptId: { not: indexAttemptId } },
       });
       await transaction.reelChunk.deleteMany({
         where: { reelId, indexAttemptId: { not: indexAttemptId } },
@@ -186,6 +215,9 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     indexAttemptId: string,
   ): Promise<void> {
     await this.prisma.$transaction([
+      this.prisma.reelVisualScene.deleteMany({
+        where: { reelId, indexAttemptId, isActive: false },
+      }),
       this.prisma.reelChunk.deleteMany({
         where: { reelId, indexAttemptId, isActive: false },
       }),
@@ -219,6 +251,12 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     return await this.search('ReelChunk', input);
   }
 
+  async searchVisualScenes(
+    input: SemanticIndexSearchRequest,
+  ): Promise<SemanticIndexSearchResult[]> {
+    return await this.search('ReelVisualScene', input);
+  }
+
   async getAdjacentChunks(
     input: AdjacentChunkRequest,
   ): Promise<SemanticIndexSearchResult[]> {
@@ -240,10 +278,12 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
         LIMIT 1
       )
       SELECT c."id", c."reelId", c."parentId", c."ordinal", c."userId",
-        c."retrievalText" AS "text", c."tags", c."startTime", c."endTime",
-        c."sourceDurationMs", c."sourceOrientation", c."sourceLengthClass",
-        0::double precision AS "rrfScore", NULL::double precision AS "vectorDistance",
-        NULL::bigint AS "vectorRank", NULL::bigint AS "keywordRank", NULL::bigint AS "metadataRank"
+        c."retrievalText" AS "text", c."retrievalText" AS "retrievalText",
+        c."evidenceText", 'TRANSCRIPT'::text AS "evidenceType", c."tags",
+        c."startTime", c."endTime", c."sourceDurationMs", c."sourceOrientation",
+        c."sourceLengthClass", 0::double precision AS "rrfScore",
+        NULL::double precision AS "vectorDistance", NULL::bigint AS "vectorRank",
+        NULL::bigint AS "keywordRank", NULL::bigint AS "metadataRank"
       FROM "ReelChunk" c, target
       WHERE c."reelId" = ${reelId}
         AND c."parentId" = ${parentId}
@@ -259,11 +299,10 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
   async getReelDocument(reelId: string): Promise<SemanticReelDocument | null> {
     const rows = await this.prisma.$queryRaw<ReelDocumentRow[]>(Prisma.sql`
       SELECT "id", "reelId", "userId", "title", "description",
-        "retrievalText" AS "text",
-        "tags", "sourceDurationMs", "sourceOrientation", "sourceLengthClass",
-        "indexAttemptId", "indexVersion", "embeddingProvider", "embeddingModel",
-        "embeddingDimensions", "embeddingVersion", "chunkingVersion",
-        "summaryVersion", "createdAt", "updatedAt"
+        "retrievalText" AS "text", "tags", "sourceDurationMs",
+        "sourceOrientation", "sourceLengthClass", "indexAttemptId", "indexVersion",
+        "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingVersion",
+        "chunkingVersion", "summaryVersion", "createdAt", "updatedAt"
       FROM "ReelDocument"
       WHERE "reelId" = ${reelId} AND "isActive" = true
       LIMIT 1
@@ -285,6 +324,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       const deleted = await transaction.reelDocument.deleteMany({
         where: { reelId },
       });
+      await transaction.reelVisualScene.deleteMany({ where: { reelId } });
       await transaction.reelSection.deleteMany({ where: { reelId } });
       await transaction.reelChunk.deleteMany({ where: { reelId } });
       await transaction.transcriptionSegment.deleteMany({ where: { reelId } });
@@ -307,6 +347,12 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
   ): Promise<SemanticIndexSearchResult[]> {
     const normalized = this.normalizeSearch(input);
     const table = Prisma.raw(`"${target}"`);
+    const evidenceType: SemanticIndexEvidenceType =
+      target === 'ReelVisualScene'
+        ? 'VISUAL'
+        : target === 'ReelDocument'
+          ? 'METADATA'
+          : 'TRANSCRIPT';
     const where = this.filters(
       normalized.filters,
       normalized.excludedIds,
@@ -360,7 +406,8 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
         UNION SELECT "rowId" FROM metadata_candidates
       )
       SELECT t."id", t."reelId", t."parentId", t."ordinal", t."userId",
-        t."retrievalText" AS "text", t."tags",
+        t."retrievalText" AS "text", t."retrievalText" AS "retrievalText",
+        t."evidenceText", ${evidenceType}::text AS "evidenceType", t."tags",
         t."startTime", t."endTime", t."sourceDurationMs", t."sourceOrientation",
         t."sourceLengthClass", v.distance AS "vectorDistance", v.rank AS "vectorRank",
         k.rank AS "keywordRank", m.rank AS "metadataRank",
@@ -553,6 +600,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     return {
       ...row,
       parentId: row.parentId ?? undefined,
+      evidenceText: row.evidenceText ?? undefined,
       startTime: row.startTime ?? undefined,
       endTime: row.endTime ?? undefined,
       vectorDistance: row.vectorDistance ?? undefined,
@@ -562,10 +610,6 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       metadataRank:
         row.metadataRank === null ? undefined : Number(row.metadataRank),
     };
-  }
-
-  private hash(value: string): string {
-    return createHash('sha256').update(value).digest('hex');
   }
 
   private cleanStrings(values?: string[]): string[] {
