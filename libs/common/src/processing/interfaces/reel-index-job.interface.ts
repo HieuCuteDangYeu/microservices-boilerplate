@@ -12,6 +12,7 @@ export interface ReelIndexJob {
   indexVersion: string;
   mediaKey: string;
   transcriptionAudioManifestKey?: string;
+  visualFrameManifestKey?: string;
   sourceDurationMs: number;
   sourceHasAudio?: boolean;
   sourceOrientation: ReelSourceOrientation;
@@ -50,6 +51,9 @@ export function isReelIndexJob(value: unknown): value is ReelIndexJob {
     (record['transcriptionAudioManifestKey'] === undefined ||
       (typeof record['transcriptionAudioManifestKey'] === 'string' &&
         record['transcriptionAudioManifestKey'].trim().length > 0)) &&
+    (record['visualFrameManifestKey'] === undefined ||
+      (typeof record['visualFrameManifestKey'] === 'string' &&
+        record['visualFrameManifestKey'].trim().length > 0)) &&
     typeof record['sourceDurationMs'] === 'number' &&
     Number.isFinite(record['sourceDurationMs']) &&
     record['sourceDurationMs'] > 0 &&
