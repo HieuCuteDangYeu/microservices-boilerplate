@@ -42,6 +42,13 @@ export class SemanticIndexController {
     return await this.semanticIndex.searchChunks(input ?? {});
   }
 
+  @MessagePattern(SEMANTIC_INDEX_PATTERNS.SEARCH_VISUAL_SCENES)
+  async searchVisualScenes(
+    @Payload() input: SemanticIndexSearchRequest,
+  ): Promise<SemanticIndexSearchResult[]> {
+    return await this.semanticIndex.searchVisualScenes(input ?? {});
+  }
+
   @MessagePattern(SEMANTIC_INDEX_PATTERNS.GET_ADJACENT_CHUNKS)
   async getAdjacentChunks(
     @Payload() input: AdjacentChunkRequest,
