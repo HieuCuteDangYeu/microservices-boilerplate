@@ -39,6 +39,7 @@ export class AiServiceAdapter implements IAiService {
 
       return {
         answer: response.answer ?? null,
+        citations: response.citations ?? [],
         recommendedReels: response.recommendedReels ?? [],
         suggestedQueries: response.suggestedQueries ?? [],
       };
