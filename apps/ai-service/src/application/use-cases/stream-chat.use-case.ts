@@ -1,6 +1,7 @@
 import type {
   IRagChatWorkflow,
   RagChatWorkflowInput,
+  RagCitation,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
@@ -8,6 +9,7 @@ import { Inject, Injectable } from '@nestjs/common';
 
 export interface StreamChatResult {
   answer: string;
+  citations?: RagCitation[];
   recommendedReels?: AiRecommendedReel[];
   suggestedQueries?: string[];
 }
@@ -34,6 +36,7 @@ export class StreamChatUseCase {
 
     return {
       answer: result.answer,
+      citations: result.citations ?? [],
       recommendedReels: result.recommendedReels ?? [],
       suggestedQueries: result.suggestedQueries ?? [],
     };
