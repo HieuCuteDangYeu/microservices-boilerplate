@@ -6,12 +6,14 @@ export interface ReelMediaChecksums {
   hlsMasterSha256: string;
   thumbnailSha256: string;
   transcriptionAudioManifestSha256: string;
+  visualFrameManifestSha256?: string;
 }
 
 export interface ReelMediaOutput {
   hlsMasterKey: string;
   thumbnailKey: string;
   transcriptionAudioManifestKey: string;
+  visualFrameManifestKey?: string;
   sourceHasAudio: boolean;
   sourceLengthClass: ReelSourceLengthClass;
   variants: ReelEncodingVariantOutput[];
