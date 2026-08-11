@@ -7,6 +7,7 @@ export const SEMANTIC_INDEX_PATTERNS = {
   SEARCH_REELS: 'index.search_reels',
   SEARCH_SECTIONS: 'index.search_sections',
   SEARCH_CHUNKS: 'index.search_chunks',
+  SEARCH_VISUAL_SCENES: 'index.search_visual_scenes',
   GET_ADJACENT_CHUNKS: 'index.get_adjacent_chunks',
   GET_REEL_DOCUMENT: 'index.get_reel_document',
   DELETE_REEL: 'index.delete_reel',
@@ -15,6 +16,8 @@ export const SEMANTIC_INDEX_PATTERNS = {
 
 export const REEL_INDEX_QUERY_QUEUE = 'reel_index_query';
 export const SEMANTIC_INDEX_EMBEDDING_DIMENSIONS = 384;
+
+export type SemanticIndexEvidenceType = 'TRANSCRIPT' | 'VISUAL' | 'METADATA';
 
 export interface SemanticIndexSearchFilters {
   reelIds?: string[];
@@ -41,7 +44,11 @@ export interface SemanticIndexSearchResult {
   parentId?: string;
   ordinal: number;
   userId: string;
+  /** Backward-compatible alias of retrievalText. */
   text: string;
+  retrievalText: string;
+  evidenceText?: string;
+  evidenceType: SemanticIndexEvidenceType;
   tags: string[];
   startTime?: number;
   endTime?: number;
