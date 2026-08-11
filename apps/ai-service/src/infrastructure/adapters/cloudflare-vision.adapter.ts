@@ -42,9 +42,10 @@ export class CloudflareVisionAdapter implements IVisionService {
   }
 
   async analyzeImage(input: {
-    image: Buffer;
+    image: Uint8Array;
     mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
   }): Promise<VisualFrameAnalysis> {
+    const imageBase64 = Buffer.from(input.image).toString('base64');
     const response = await fetch(this.endpoint, {
       method: 'POST',
       headers: {
@@ -53,7 +54,7 @@ export class CloudflareVisionAdapter implements IVisionService {
       },
       body: JSON.stringify({
         task: 'query',
-        image: `data:${input.mimeType};base64,${input.image.toString('base64')}`,
+        image: `data:${input.mimeType};base64,${imageBase64}`,
         question: this.buildQuestion(),
         reasoning: false,
         temperature: 0,
