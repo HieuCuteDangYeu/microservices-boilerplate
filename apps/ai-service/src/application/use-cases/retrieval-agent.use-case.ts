@@ -5,6 +5,7 @@ import type {
 import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type {
   RagChatRouteDecision,
+  RagRetrievalMode,
   RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
@@ -13,12 +14,13 @@ import type {
   IStructuredLlmService,
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type {
+  SemanticIndexSearchRequest,
   SemanticIndexSearchResult,
   SemanticReelDocument,
 } from '@common/processing/interfaces/semantic-index.interface';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 interface RawRetrievalPlan {
   mode?: unknown;
@@ -29,6 +31,14 @@ interface RawRetrievalPlan {
   rerankLimit?: unknown;
   shouldRerank?: unknown;
   reason?: unknown;
+}
+
+interface RetrievalExecutionInput {
+  mode: Exclude<RagRetrievalMode, 'NONE'>;
+  queryText: string;
+  queryEmbedding: number[];
+  accessibleReelIds: string[];
+  limit: number;
 }
 
 @Injectable()
@@ -96,14 +106,14 @@ export class RetrievalAgentUseCase {
         taskType: 'RETRIEVAL_QUERY',
       });
 
-      const retrievalInput = {
-        queryText,
-        queryEmbedding: queryEmbedding.values,
-        accessibleReelIds,
-        limit: plan.searchLimit,
-      };
       allCandidates.push(
-        ...(await this.retrieveHierarchically(retrievalInput)),
+        ...(await this.retrieveForQuery({
+          mode: plan.mode,
+          queryText,
+          queryEmbedding: queryEmbedding.values,
+          accessibleReelIds,
+          limit: plan.searchLimit,
+        })),
       );
     }
 
@@ -124,18 +134,45 @@ export class RetrievalAgentUseCase {
     };
   }
 
-  private async retrieveHierarchically(input: {
-    queryText: string;
-    queryEmbedding: number[];
-    accessibleReelIds: string[];
-    limit: number;
-  }): Promise<TranscriptMatch[]> {
-    if (!this.hierarchicalRetrievalEnabled()) {
-      return await this.retrieveDirectly(input);
+  private async retrieveForQuery(
+    input: RetrievalExecutionInput,
+  ): Promise<TranscriptMatch[]> {
+    const hierarchicalEnabled = this.hierarchicalRetrievalEnabled();
+    const shadowEnabled = this.readBoolean(
+      'RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED',
+      false,
+    );
+
+    if (hierarchicalEnabled) {
+      return await this.retrieveHierarchically(input);
     }
+
+    const startedAt = Date.now();
+    const direct = await this.retrieveDirectly(input);
+    const directMs = Date.now() - startedAt;
+
+    if (shadowEnabled) {
+      const shadowStartedAt = Date.now();
+      const hierarchical = await this.retrieveHierarchically(input);
+      const hierarchicalMs = Date.now() - shadowStartedAt;
+      this.logHierarchyShadowComparison({
+        queryText: input.queryText,
+        direct,
+        hierarchical,
+        directMs,
+        hierarchicalMs,
+      });
+    }
+
+    return direct;
+  }
+
+  private async retrieveHierarchically(
+    input: RetrievalExecutionInput,
+  ): Promise<TranscriptMatch[]> {
+    const search = this.buildSearchRequest(input);
     const reelCandidates = await this.semanticIndexService.searchReels({
-      queryText: input.queryText,
-      queryEmbedding: input.queryEmbedding,
+      ...search,
       filters: { reelIds: input.accessibleReelIds },
       limit: Math.min(Math.max(input.limit * 2, 8), 40),
     });
@@ -151,8 +188,7 @@ export class RetrievalAgentUseCase {
     const sectionCandidates =
       longReelIds.length > 0
         ? await this.semanticIndexService.searchSections({
-            queryText: input.queryText,
-            queryEmbedding: input.queryEmbedding,
+            ...search,
             filters: {
               reelIds: longReelIds,
               sourceLengthClasses: ['LONG'],
@@ -173,8 +209,7 @@ export class RetrievalAgentUseCase {
     }
 
     const chunkCandidates = await this.semanticIndexService.searchChunks({
-      queryText: input.queryText,
-      queryEmbedding: input.queryEmbedding,
+      ...search,
       filters: {
         reelIds: reelCandidates.map((candidate) => candidate.reelId),
         parentIds,
@@ -183,48 +218,30 @@ export class RetrievalAgentUseCase {
       candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
     });
 
-    const expandedChunks = await this.expandNeighbours(
+    return await this.hydrateAndExpand(
       chunkCandidates,
       input.accessibleReelIds,
     );
-    const documents = await Promise.all(
-      [...new Set(expandedChunks.map((candidate) => candidate.reelId))].map(
-        async (reelId) =>
-          [
-            reelId,
-            await this.semanticIndexService.getReelDocument(reelId),
-          ] as const,
-      ),
-    );
-    const documentByReelId = new Map<string, SemanticReelDocument | null>(
-      documents,
-    );
-
-    return expandedChunks.map((candidate) =>
-      this.toTranscriptMatch(
-        candidate,
-        documentByReelId.get(candidate.reelId) ?? null,
-      ),
-    );
   }
 
-  private async retrieveDirectly(input: {
-    queryText: string;
-    queryEmbedding: number[];
-    accessibleReelIds: string[];
-    limit: number;
-  }): Promise<TranscriptMatch[]> {
+  private async retrieveDirectly(
+    input: RetrievalExecutionInput,
+  ): Promise<TranscriptMatch[]> {
     const chunks = await this.semanticIndexService.searchChunks({
-      queryText: input.queryText,
-      queryEmbedding: input.queryEmbedding,
+      ...this.buildSearchRequest(input),
       filters: { reelIds: input.accessibleReelIds },
       limit: input.limit,
       candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
     });
-    const expanded = await this.expandNeighbours(
-      chunks,
-      input.accessibleReelIds,
-    );
+
+    return await this.hydrateAndExpand(chunks, input.accessibleReelIds);
+  }
+
+  private async hydrateAndExpand(
+    chunks: SemanticIndexSearchResult[],
+    accessibleReelIds: string[],
+  ): Promise<TranscriptMatch[]> {
+    const expanded = await this.expandNeighbours(chunks, accessibleReelIds);
     const documents = await Promise.all(
       [...new Set(expanded.map((candidate) => candidate.reelId))].map(
         async (reelId) =>
@@ -237,11 +254,39 @@ export class RetrievalAgentUseCase {
     const documentByReelId = new Map<string, SemanticReelDocument | null>(
       documents,
     );
+
     return expanded.map((candidate) =>
       this.toTranscriptMatch(
         candidate,
         documentByReelId.get(candidate.reelId) ?? null,
       ),
+    );
+  }
+
+  private buildSearchRequest(
+    input: RetrievalExecutionInput,
+  ): Pick<
+    SemanticIndexSearchRequest,
+    'queryText' | 'queryEmbedding' | 'queryTags'
+  > {
+    if (input.mode === 'REEL_VECTOR') {
+      return {
+        queryEmbedding: input.queryEmbedding,
+      };
+    }
+
+    return {
+      queryText: input.queryText,
+      queryEmbedding: input.queryEmbedding,
+      queryTags: this.extractExplicitQueryTags(input.queryText),
+    };
+  }
+
+  private extractExplicitQueryTags(queryText: string): string[] {
+    const tags = queryText.match(/#[\p{L}\p{N}_-]+/gu) ?? [];
+    return [...new Set(tags.map((tag) => tag.slice(1).toLowerCase()))].slice(
+      0,
+      8,
     );
   }
 
@@ -251,7 +296,7 @@ export class RetrievalAgentUseCase {
   ): Promise<SemanticIndexSearchResult[]> {
     const neighbours = await Promise.all(
       chunks.slice(0, 10).map(async (chunk) => {
-        if (!chunk.parentId) return [];
+        if (!chunk.parentId || chunk.evidenceType === 'VISUAL') return [];
         return await this.semanticIndexService.getAdjacentChunks({
           chunkId: chunk.id,
           reelId: chunk.reelId,
@@ -295,6 +340,8 @@ export class RetrievalAgentUseCase {
     const hasLexical =
       candidate.keywordRank !== undefined ||
       candidate.metadataRank !== undefined;
+    const retrievalText = candidate.retrievalText || candidate.text;
+    const evidenceText = candidate.evidenceText?.trim() || undefined;
 
     return {
       chunkId: candidate.id,
@@ -302,7 +349,10 @@ export class RetrievalAgentUseCase {
       title: document?.title,
       description: document?.description,
       tags: candidate.tags,
-      chunkText: candidate.text,
+      chunkText: evidenceText ?? retrievalText,
+      retrievalText,
+      evidenceText,
+      evidenceType: candidate.evidenceType,
       startTime: candidate.startTime,
       endTime: candidate.endTime,
       distance: candidate.vectorDistance ?? null,
@@ -313,6 +363,28 @@ export class RetrievalAgentUseCase {
       matchedBy:
         hasVector && hasLexical ? 'HYBRID' : hasVector ? 'VECTOR' : 'KEYWORD',
     };
+  }
+
+  private logHierarchyShadowComparison(input: {
+    queryText: string;
+    direct: TranscriptMatch[];
+    hierarchical: TranscriptMatch[];
+    directMs: number;
+    hierarchicalMs: number;
+  }): void {
+    const limit = Math.max(input.direct.length, input.hierarchical.length, 1);
+    const directIds = new Set(input.direct.map((item) => item.chunkId));
+    const hierarchicalIds = new Set(
+      input.hierarchical.map((item) => item.chunkId),
+    );
+    const intersection = [...directIds].filter((id) => hierarchicalIds.has(id));
+    const union = new Set([...directIds, ...hierarchicalIds]);
+    const overlap = intersection.length / limit;
+    const jaccard = union.size ? intersection.length / union.size : 1;
+
+    this.logger.log(
+      `[HierarchicalRetrievalShadow] query=${JSON.stringify(input.queryText)} directMs=${input.directMs} hierarchicalMs=${input.hierarchicalMs} direct=${input.direct.length} hierarchical=${input.hierarchical.length} overlapAtK=${overlap.toFixed(3)} jaccard=${jaccard.toFixed(3)}`,
+    );
   }
 
   private async planRetrieval(input: {
@@ -374,6 +446,8 @@ Rules:
 6. Retrieval is scoped to reels shared into the current conversation.
 7. For complex questions, produce up to 3 focused queries.
 8. For simple questions, produce 1 query.
+9. REEL_VECTOR means semantic vector search only. Use it when lexical wording is likely noisy or paraphrased.
+10. REEL_HYBRID means semantic vector + full-text search, with explicit #hashtags also eligible for tag matching. Prefer it for normal factual reel questions.
 `.trim();
   }
 
