@@ -2,7 +2,7 @@ import type { VisualFrameAnalysis } from '@common/ai/interfaces/visual-analysis.
 
 export interface IVisionService {
   analyzeImage(input: {
-    image: Buffer;
+    image: Uint8Array;
     mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
   }): Promise<VisualFrameAnalysis>;
 }
