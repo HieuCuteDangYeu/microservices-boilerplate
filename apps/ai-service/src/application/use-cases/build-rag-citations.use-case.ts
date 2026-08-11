@@ -23,13 +23,16 @@ export class BuildRagCitationsUseCase {
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const evidence = chunk.evidenceText?.trim() || chunk.chunkText.trim();
+      const evidenceType = chunk.evidenceType ?? 'TRANSCRIPT';
+      const evidence =
+        chunk.evidenceText?.trim() ||
+        (evidenceType === 'METADATA' ? chunk.chunkText.trim() : '');
       if (!evidence) continue;
 
       citations.push({
         sourceType: 'REEL',
         reelId: chunk.reelId,
-        evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
+        evidenceType,
         title: chunk.title ?? undefined,
         startTime: this.toOptionalNumber(chunk.startTime),
         endTime: this.toOptionalNumber(chunk.endTime),
