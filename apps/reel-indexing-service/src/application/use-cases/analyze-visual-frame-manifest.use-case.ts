@@ -43,14 +43,14 @@ export class AnalyzeVisualFrameManifestUseCase {
       this.getPositiveInt('INDEX_VISUAL_ANALYSIS_CONCURRENCY', 2, 1, 8),
       async (artifact, index) => {
         try {
-          const image = await this.storage.getArtifactBuffer(artifact.key);
+          const image = await this.storage.getArtifactBytes(artifact.key);
           const checksum = createHash('sha256').update(image).digest('hex');
           if (checksum !== artifact.checksum) {
             throw new Error('frame checksum mismatch');
           }
 
           const analysis = await this.ai.analyzeVisualFrame({
-            imageBase64: image.toString('base64'),
+            imageBase64: Buffer.from(image).toString('base64'),
             mimeType: 'image/jpeg',
             timestampMs: artifact.timestampMs,
           });
