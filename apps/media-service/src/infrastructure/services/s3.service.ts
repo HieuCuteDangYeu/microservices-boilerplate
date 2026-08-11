@@ -25,13 +25,10 @@ export class S3Service {
       .getOrThrow<string>('R2_PUBLIC_DOMAIN')
       .replace(/\/+$/, '');
     const accountId = this.configService.getOrThrow<string>('R2_ACCOUNT_ID');
-    const endpoint =
-      this.configService.get<string>('R2_ENDPOINT')?.trim() ||
-      `https://${accountId}.r2.cloudflarestorage.com`;
 
     this.s3Client = new S3Client({
       region: 'auto',
-      endpoint,
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       forcePathStyle: true,
       credentials: {
         accessKeyId: this.configService.getOrThrow<string>('R2_ACCESS_KEY_ID'),
