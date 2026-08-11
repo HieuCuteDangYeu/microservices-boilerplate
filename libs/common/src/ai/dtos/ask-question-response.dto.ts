@@ -31,8 +31,19 @@ export const AiRecommendedReelSchema = z.object({
   author: AiRecommendedReelAuthorSchema.optional(),
 });
 
+export const AiRagCitationSchema = z.object({
+  sourceType: z.literal('REEL'),
+  reelId: z.string().min(1),
+  evidenceType: z.enum(['TRANSCRIPT', 'VISUAL', 'METADATA']),
+  title: z.string().optional(),
+  startTime: z.number().nonnegative().optional(),
+  endTime: z.number().nonnegative().optional(),
+  quote: z.string().min(1).optional(),
+});
+
 export const AskQuestionResponseSchema = z.object({
   answer: z.string().optional(),
+  citations: z.array(AiRagCitationSchema).optional(),
   recommendedReels: z.array(AiRecommendedReelSchema).optional(),
   suggestedQueries: z.array(z.string()).optional(),
   error: z
@@ -45,3 +56,4 @@ export const AskQuestionResponseSchema = z.object({
 
 export type AskQuestionResponse = z.infer<typeof AskQuestionResponseSchema>;
 export type AiRecommendedReel = z.infer<typeof AiRecommendedReelSchema>;
+export type AiRagCitation = z.infer<typeof AiRagCitationSchema>;
