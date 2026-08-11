@@ -102,7 +102,18 @@ export class ValidateEvidenceIndexCandidateUseCase {
       }
       if (document.evidenceText) {
         const normalizedEvidence = this.normalize(document.evidenceText);
-        if (document.evidenceHash !== this.hash(document.evidenceText)) {
+        if (
+          document.kind === 'VISUAL_SCENE' &&
+          !document.evidenceHash?.trim()
+        ) {
+          throw new Error(
+            `Visual scene ${document.id} has no provenance evidence hash`,
+          );
+        }
+        if (
+          document.kind !== 'VISUAL_SCENE' &&
+          document.evidenceHash !== this.hash(document.evidenceText)
+        ) {
           throw new Error(
             `Document ${document.id} has an invalid evidence hash`,
           );
@@ -143,6 +154,7 @@ export class ValidateEvidenceIndexCandidateUseCase {
         visualScene.parentId !== reelDocumentId ||
         visualScene.evidenceQuality !== 'VERIFIED' ||
         !visualScene.evidenceText?.trim() ||
+        !visualScene.evidenceHash?.trim() ||
         visualScene.startTime === undefined
       ) {
         throw new Error(
