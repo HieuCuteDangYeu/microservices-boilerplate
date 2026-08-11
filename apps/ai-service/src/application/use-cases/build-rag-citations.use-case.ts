@@ -15,19 +15,37 @@ export class BuildRagCitationsUseCase {
       return [];
     }
 
-    return state.rerankedChunks.slice(0, 3).map((chunk) => ({
-      sourceType: 'REEL',
-      title: chunk.title ?? undefined,
-      startTime: this.toOptionalNumber(chunk.startTime),
-      endTime: this.toOptionalNumber(chunk.endTime),
-      quote: this.exactQuote(chunk.chunkText, 240),
-    }));
+    const seen = new Set<string>();
+    const citations: RagCitation[] = [];
+
+    for (const chunk of state.rerankedChunks) {
+      const key = `${chunk.reelId}:${chunk.chunkId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const evidence = chunk.evidenceText?.trim() || chunk.chunkText.trim();
+      if (!evidence) continue;
+
+      citations.push({
+        sourceType: 'REEL',
+        reelId: chunk.reelId,
+        evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
+        title: chunk.title ?? undefined,
+        startTime: this.toOptionalNumber(chunk.startTime),
+        endTime: this.toOptionalNumber(chunk.endTime),
+        quote: this.exactQuote(evidence, 240),
+      });
+
+      if (citations.length >= 3) break;
+    }
+
+    return citations;
   }
 
   private toOptionalNumber(
     value: number | null | undefined,
   ): number | undefined {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
       return undefined;
     }
 
