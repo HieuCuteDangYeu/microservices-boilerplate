@@ -56,7 +56,7 @@ export class R2ArtifactStorageAdapter implements IArtifactStorage {
     return value;
   }
 
-  async getArtifactBuffer(key: string): Promise<Buffer> {
+  async getArtifactBytes(key: string): Promise<Uint8Array> {
     const response = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
     );
@@ -64,7 +64,7 @@ export class R2ArtifactStorageAdapter implements IArtifactStorage {
       throw new Error(`Artifact ${key} was not found`);
     }
 
-    return Buffer.from(await response.Body.transformToByteArray());
+    return await response.Body.transformToByteArray();
   }
 
   async artifactExists(key: string): Promise<boolean> {
@@ -74,16 +74,11 @@ export class R2ArtifactStorageAdapter implements IArtifactStorage {
       );
       return true;
     } catch (error: unknown) {
-      const statusCode =
-        typeof error === 'object' &&
-        error !== null &&
-        '$metadata' in error &&
-        typeof error.$metadata === 'object' &&
-        error.$metadata !== null &&
-        'httpStatusCode' in error.$metadata
-          ? Number(error.$metadata.httpStatusCode)
+      const metadata =
+        typeof error === 'object' && error !== null && '$metadata' in error
+          ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata
           : undefined;
-      if (statusCode === 404) return false;
+      if (metadata?.httpStatusCode === 404) return false;
       throw error;
     }
   }
