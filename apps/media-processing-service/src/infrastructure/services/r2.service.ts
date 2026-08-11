@@ -92,14 +92,11 @@ export class R2Service implements IMediaStorageService {
   );
 
   constructor() {
-    const endpoint =
-      process.env.R2_ENDPOINT?.trim() ||
-      `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+    const endpoint = `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
 
     this.s3Client = new S3Client({
       region: 'auto',
       endpoint,
-      forcePathStyle: Boolean(process.env.R2_ENDPOINT?.trim()),
       credentials: {
         accessKeyId: process.env.R2_ACCESS_KEY_ID!,
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
