@@ -37,6 +37,12 @@ export class ReelSemanticIndexAdapter implements IReelSemanticIndexService {
     return this.search(SEMANTIC_INDEX_PATTERNS.SEARCH_CHUNKS, input);
   }
 
+  searchVisualScenes(
+    input: SemanticIndexSearchRequest,
+  ): Promise<SemanticIndexSearchResult[]> {
+    return this.search(SEMANTIC_INDEX_PATTERNS.SEARCH_VISUAL_SCENES, input);
+  }
+
   getAdjacentChunks(
     input: AdjacentChunkRequest,
   ): Promise<SemanticIndexSearchResult[]> {
