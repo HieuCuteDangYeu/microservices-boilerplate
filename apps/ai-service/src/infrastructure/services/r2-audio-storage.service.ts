@@ -13,13 +13,10 @@ export class R2AudioStorageService implements IAudioStorageService {
   constructor(private readonly configService: ConfigService) {
     this.bucketName = this.configService.getOrThrow<string>('R2_BUCKET_NAME');
     const accountId = this.configService.getOrThrow<string>('R2_ACCOUNT_ID');
-    const endpoint =
-      this.configService.get<string>('R2_ENDPOINT')?.trim() ||
-      `https://${accountId}.r2.cloudflarestorage.com`;
 
     this.s3Client = new S3Client({
       region: 'auto',
-      endpoint,
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: this.configService.getOrThrow<string>('R2_ACCESS_KEY_ID'),
         secretAccessKey: this.configService.getOrThrow<string>(
