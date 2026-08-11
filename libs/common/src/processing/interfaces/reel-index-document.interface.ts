@@ -1,4 +1,8 @@
-export type ReelIndexDocumentKind = 'REEL' | 'SECTION' | 'CHUNK';
+export type ReelIndexDocumentKind =
+  | 'REEL'
+  | 'SECTION'
+  | 'CHUNK'
+  | 'VISUAL_SCENE';
 export type ReelEvidenceQuality =
   | 'VERIFIED'
   | 'LOW_CONFIDENCE'
