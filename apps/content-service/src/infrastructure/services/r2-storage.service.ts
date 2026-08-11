@@ -20,13 +20,10 @@ export class R2StorageService implements IStorageService {
     const secretAccessKey = this.configService
       .get<string>('R2_SECRET_ACCESS_KEY')
       ?.trim();
-    const endpoint =
-      this.configService.get<string>('R2_ENDPOINT')?.trim() ||
-      `https://${accountId}.r2.cloudflarestorage.com`;
 
     this.s3Client = new S3Client({
       region: 'auto',
-      endpoint: endpoint,
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: accessKeyId!,
         secretAccessKey: secretAccessKey!,
