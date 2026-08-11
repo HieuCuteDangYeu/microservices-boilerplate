@@ -20,6 +20,9 @@ export class ValidateEvidenceIndexCandidateUseCase {
       (document) => document.kind === 'SECTION',
     );
     const chunks = documents.filter((document) => document.kind === 'CHUNK');
+    const visualScenes = documents.filter(
+      (document) => document.kind === 'VISUAL_SCENE',
+    );
     if (reels.length !== 1) {
       throw new Error('Index candidate must contain exactly one Reel document');
     }
@@ -104,7 +107,11 @@ export class ValidateEvidenceIndexCandidateUseCase {
             `Document ${document.id} has an invalid evidence hash`,
           );
         }
-        if (sourceEvidence && !sourceEvidence.includes(normalizedEvidence)) {
+        if (
+          document.kind !== 'VISUAL_SCENE' &&
+          sourceEvidence &&
+          !sourceEvidence.includes(normalizedEvidence)
+        ) {
           throw new Error(
             `Document ${document.id} contains evidence outside the transcript`,
           );
@@ -127,6 +134,20 @@ export class ValidateEvidenceIndexCandidateUseCase {
         ) {
           throw new Error(`Chunk ${document.id} is outside its parent section`);
         }
+      }
+    }
+
+    const reelDocumentId = reels[0]?.id;
+    for (const visualScene of visualScenes) {
+      if (
+        visualScene.parentId !== reelDocumentId ||
+        visualScene.evidenceQuality !== 'VERIFIED' ||
+        !visualScene.evidenceText?.trim() ||
+        visualScene.startTime === undefined
+      ) {
+        throw new Error(
+          `Visual scene ${visualScene.id} has incomplete grounded provenance`,
+        );
       }
     }
 
