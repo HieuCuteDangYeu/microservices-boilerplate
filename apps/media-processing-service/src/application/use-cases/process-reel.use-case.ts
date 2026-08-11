@@ -3,6 +3,7 @@ import type { ReelPipelineMetricContext } from '@common/processing/interfaces/re
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IProcessingMetrics } from '@processing/domain/interfaces/processing-metrics.interface';
+import * as path from 'node:path';
 import type {
   IContentService,
   ReelProcessingMediaMetadata,
@@ -10,6 +11,7 @@ import type {
 import type { IJobConcurrencyLimiterService } from '../../domain/interfaces/job-concurrency-limiter.service.interface';
 import type { ITempFileService } from '../../domain/interfaces/temp-file.service.interface';
 import { formatProcessingError } from '../utils/format-processing-error';
+import { BuildVisualFrameManifestUseCase } from './build-visual-frame-manifest.use-case';
 import {
   PrepareReelMediaError,
   PrepareReelMediaUseCase,
@@ -32,6 +34,7 @@ export class ProcessReelUseCase {
   constructor(
     private readonly configService: ConfigService,
     private readonly prepareReelMediaUseCase: PrepareReelMediaUseCase,
+    private readonly buildVisualFrameManifestUseCase: BuildVisualFrameManifestUseCase,
     @Inject('IContentService')
     private readonly contentService: IContentService,
     @Inject('ITempFileService')
@@ -134,12 +137,50 @@ export class ProcessReelUseCase {
           metricsContext,
         });
 
+        currentProgress = 96;
+        failedStage = 'BUILDING_VISUAL_MANIFEST';
+        failedMessage = 'Visual reel indexing artifacts could not be prepared';
+        await this.contentService.emitProcessingProgress({
+          reelId,
+          status: 'PROCESSING',
+          processingAttemptId,
+          stage: failedStage,
+          message: 'Sampling visual scenes for search',
+          progress: currentProgress,
+        });
+        const visualTimer = this.processingMetrics.startStage(
+          metricsContext,
+          'VISUAL_FRAME_ARTIFACTS',
+        );
+        const visualResult = await this.buildVisualFrameManifestUseCase.execute({
+          reelId,
+          mediaAttemptId: processingAttemptId,
+          inputPath: workspace.inputPath,
+          outputDir: path.join(workspace.workDir, 'visual-frames'),
+          storagePrefix: mediaKey.replace(/\.[^.]+$/, ''),
+          metadata: {
+            durationMs: mediaResult.mediaMetadata.sourceDurationMs,
+          },
+        });
+        visualTimer.succeed({
+          visualFrameCount: visualResult.manifest.artifacts.length,
+          visualFrameBytes: visualResult.totalFrameBytes,
+        });
+        const mediaOutput = {
+          ...mediaResult.mediaOutput,
+          visualFrameManifestKey: visualResult.manifestKey,
+          checksums: {
+            ...mediaResult.mediaOutput.checksums,
+            visualFrameManifestSha256: visualResult.manifestChecksum,
+          },
+        };
+
         currentProgress = 100;
         const applied = await this.contentService.persistMediaCompleted({
           reelId,
           processingAttemptId,
           mediaMetadata: mediaResult.mediaMetadata,
-          mediaOutput: mediaResult.mediaOutput,
+          mediaOutput,
         });
 
         if (!applied) {
@@ -148,9 +189,12 @@ export class ProcessReelUseCase {
         }
 
         totalPipelineTimer.succeed({
-          rabbitMqPayloadBytesEstimate:
-            this.processingMetrics.estimatePayloadBytes(mediaResult),
+          rabbitMqPayloadBytesEstimate: this.processingMetrics.estimatePayloadBytes({
+            ...mediaResult,
+            mediaOutput,
+          }),
           mediaOnlyWorker: true,
+          visualFrameCount: visualResult.manifest.artifacts.length,
         });
         this.logger.log(
           `[Reel ${reelId}] Media attempt ${processingAttemptId} completed`,
