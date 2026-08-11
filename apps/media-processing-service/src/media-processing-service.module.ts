@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { BuildVisualFrameManifestUseCase } from '@processing/application/use-cases/build-visual-frame-manifest.use-case';
 import { ClassifyReelMediaUseCase } from '@processing/application/use-cases/classify-reel-media.use-case';
 import { SelectReelEncodingProfileUseCase } from '@processing/application/use-cases/select-reel-encoding-profile.use-case';
 import { ValidateReelSourceMediaUseCase } from '@processing/application/use-cases/validate-reel-source-media.use-case';
@@ -13,6 +14,7 @@ import { PrepareReelMediaUseCase } from './application/use-cases/prepare-reel-me
 import { ProcessChatVideoUseCase } from './application/use-cases/process-chat-video.use-case';
 import { ProcessReelUseCase } from './application/use-cases/process-reel.use-case';
 import { MediaProcessingController } from './infrastructure/controllers/media-processing.controller';
+import { FfmpegVisualFrameExtractionService } from './infrastructure/services/ffmpeg-visual-frame-extraction.service';
 import { FfmpegService } from './infrastructure/services/ffmpeg.service';
 import { JobConcurrencyLimiterService } from './infrastructure/services/job-concurrency-limiter.service';
 import { ProcessingMetricsService } from './infrastructure/services/processing-metrics.service';
@@ -81,9 +83,11 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     ProcessChatVideoUseCase,
     ProcessReelUseCase,
     BuildTranscriptionAudioManifestUseCase,
+    BuildVisualFrameManifestUseCase,
     PrepareReelMediaUseCase,
     ValidateReelStreamUseCase,
     FfmpegService,
+    FfmpegVisualFrameExtractionService,
     JobConcurrencyLimiterService,
     R2Service,
     TempFileService,
@@ -103,6 +107,10 @@ import { TempFileService } from './infrastructure/services/temp-file.service';
     {
       provide: 'IVideoProcessingService',
       useExisting: FfmpegService,
+    },
+    {
+      provide: 'IVisualFrameExtractionService',
+      useExisting: FfmpegVisualFrameExtractionService,
     },
     {
       provide: 'ITempFileService',
