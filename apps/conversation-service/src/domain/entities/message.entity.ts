@@ -1,4 +1,7 @@
-import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
+import type {
+  AiRagCitation,
+  AiRecommendedReel,
+} from '@common/ai/dtos/ask-question-response.dto';
 import { ReadStatus } from './read-status.entity';
 
 export const RECALLED_MESSAGE_CONTENT = 'Tin nhắn đã thu hồi';
@@ -48,7 +51,8 @@ export interface MessageMedia {
 }
 
 export interface MessageMetadata {
-  kind?: 'velora_ai_reel_recommendations';
+  kind?: 'velora_ai_response' | 'velora_ai_reel_recommendations';
+  citations?: AiRagCitation[];
   recommendedReels?: AiRecommendedReel[];
   suggestedQueries?: string[];
 }
