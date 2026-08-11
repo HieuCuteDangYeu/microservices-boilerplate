@@ -29,6 +29,9 @@ export interface ISemanticIndexRepository {
   searchChunks(
     input: SemanticIndexSearchRequest,
   ): Promise<SemanticIndexSearchResult[]>;
+  searchVisualScenes(
+    input: SemanticIndexSearchRequest,
+  ): Promise<SemanticIndexSearchResult[]>;
   getAdjacentChunks(
     input: AdjacentChunkRequest,
   ): Promise<SemanticIndexSearchResult[]>;
