@@ -1,4 +1,7 @@
-import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
+import type {
+  AiRagCitation,
+  AiRecommendedReel,
+} from '@common/ai/dtos/ask-question-response.dto';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import type { ConversationMemoryContext } from '@common/ai/interfaces/conversation-memory.interface';
 import type { RelevantUserMemoriesContext } from '@common/ai/interfaces/user-memory.interface';
@@ -104,13 +107,7 @@ export interface RagContextSufficiencyResult {
   recommendedAction: 'ANSWER' | 'REFUSE_NO_CONTEXT' | 'REWRITE_AND_RETRY';
 }
 
-export interface RagCitation {
-  sourceType: 'REEL';
-  title?: string;
-  startTime?: number;
-  endTime?: number;
-  quote?: string;
-}
+export type RagCitation = AiRagCitation;
 
 export interface RagChatWorkflowInput {
   message: string;
