@@ -37,6 +37,7 @@ enum IndexDocumentKind {
   REEL
   SECTION
   CHUNK
+  VISUAL_SCENE
 }
 
 enum EvidenceQuality {
@@ -277,6 +278,56 @@ model ReelChunk {
   tags                   String[]
   startTime              Float?
   endTime                Float?
+  sourceDurationMs       Int
+  sourceOrientation      String
+  sourceLengthClass      String
+  embedding              Unsupported("vector(384)")
+  searchVector           Unsupported("tsvector")?
+  embeddingProvider      String
+  embeddingModel         String
+  embeddingDimensions    Int
+  embeddingVersion       String
+  embeddingInputHash     String
+  indexVersion           String
+  chunkingVersion        String
+  summaryVersion         String
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  @@unique([id, indexAttemptId])
+  @@index([reelId, isActive])
+  @@index([parentId, isActive])
+  @@index([userId, isActive])
+  @@index([parentId, isActive, ordinal])
+}
+
+model ReelVisualScene {
+  rowId                  String                     @id @default(uuid())
+  id                     String
+  reelId                 String
+  indexAttemptId         String
+  isActive               Boolean                    @default(false)
+  isLegacyImport         Boolean                    @default(false)
+  userId                 String
+  parentId               String
+  ordinal                Int
+  title                  String?
+  description            String?                    @db.Text
+  evidenceText           String?                    @db.Text
+  retrievalText          String                     @db.Text
+  derivedSummary         String?                    @db.Text
+  sourceSectionIds       String[]
+  sourceSegmentIds       String[]
+  sourceAudioArtifactIds String[]
+  evidenceHash           String?
+  retrievalHash          String
+  evidenceQuality        EvidenceQuality
+  transcriptVersion      String?
+  sectioningVersion      String
+  tokenCount             Int
+  tags                   String[]
+  startTime              Float
+  endTime                Float
   sourceDurationMs       Int
   sourceOrientation      String
   sourceLengthClass      String
