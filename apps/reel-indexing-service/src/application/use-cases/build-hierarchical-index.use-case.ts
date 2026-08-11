@@ -9,6 +9,7 @@ import type {
   ReelEvidenceQuality,
 } from '@common/processing/interfaces/reel-index-document.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
+import type { VisualSceneEvidence } from '@common/processing/interfaces/visual-scene-evidence.interface';
 import { BuildLongEvidenceChunksUseCase } from '@indexing/application/use-cases/build-long-evidence-chunks.use-case';
 import { BuildShortEvidenceChunksUseCase } from '@indexing/application/use-cases/build-short-evidence-chunks.use-case';
 import type { EvidenceChunk } from '@indexing/domain/entities/evidence-chunk.entity';
@@ -41,6 +42,7 @@ export class BuildHierarchicalIndexUseCase {
     sections: TranscriptSection[];
     transcript?: string;
     transcriptSegments?: TranscriptSegment[];
+    visualScenes?: VisualSceneEvidence[];
   }): Promise<{
     documents: ReelEvidenceDocument[];
     chunks: IndexChunkCheckpoint[];
@@ -59,6 +61,7 @@ export class BuildHierarchicalIndexUseCase {
     sections: TranscriptSection[];
     transcript?: string;
     transcriptSegments?: TranscriptSegment[];
+    visualScenes?: VisualSceneEvidence[];
   }): ReelEvidenceDocumentDraft[] {
     const hasTimedSegments = Boolean(input.transcriptSegments?.length);
     const normalizedTranscript = this.normalizeEvidence(input.transcript ?? '');
@@ -196,6 +199,37 @@ export class BuildHierarchicalIndexUseCase {
           tokenCount: 0,
         });
       }
+    }
+
+    for (const [ordinal, scene] of (input.visualScenes ?? []).entries()) {
+      const evidenceText = this.visualEvidenceText(scene);
+      if (!evidenceText) continue;
+      const timestamp = Math.max(0, scene.timestampMs / 1000);
+      drafts.push({
+        id: `${reelDocumentId}:visual:${ordinal}`,
+        reelId: input.job.reelId,
+        kind: 'VISUAL_SCENE',
+        ordinal,
+        parentId: reelDocumentId,
+        evidenceText,
+        retrievalText: this.visualRetrievalText({
+          metadata: input.metadata,
+          ordinal,
+          timestamp,
+          evidenceText,
+        }),
+        derivedSummary: this.normalizeEvidence(scene.caption),
+        sourceSectionIds: [],
+        startTime: timestamp,
+        endTime: timestamp,
+        sourceSegmentIds: [],
+        sourceAudioArtifactIds: [],
+        evidenceHash: this.hash(
+          `${scene.frameChecksum}:${scene.provider}:${scene.model}:${scene.version}:${evidenceText}`,
+        ),
+        evidenceQuality: 'VERIFIED',
+        tokenCount: 0,
+      });
     }
 
     return drafts.map((draft) => this.versionedDraft(draft, input.job));
@@ -486,6 +520,46 @@ export class BuildHierarchicalIndexUseCase {
       `${input.kind} ordinal: ${input.ordinal}`,
       `Time range: ${input.startTime.toFixed(3)}-${input.endTime.toFixed(3)} seconds`,
       `Exact evidence: ${input.evidenceText}`,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join('\n');
+  }
+
+  private visualEvidenceText(scene: VisualSceneEvidence): string {
+    return [
+      scene.caption.trim()
+        ? `Visual description: ${this.normalizeEvidence(scene.caption)}`
+        : undefined,
+      scene.ocrText?.trim()
+        ? `Visible text: ${this.normalizeEvidence(scene.ocrText)}`
+        : undefined,
+      scene.objects.length
+        ? `Visible objects: ${scene.objects
+            .map((value) => this.normalizeEvidence(value))
+            .filter(Boolean)
+            .join(', ')}`
+        : undefined,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join('\n')
+      .trim();
+  }
+
+  private visualRetrievalText(input: {
+    metadata: ExtractedReelMetadata;
+    ordinal: number;
+    timestamp: number;
+    evidenceText: string;
+  }): string {
+    return [
+      'Document type: Visual scene',
+      input.metadata.title ? `Reel title: ${input.metadata.title}` : undefined,
+      input.metadata.tags.length
+        ? `Trusted tags: ${input.metadata.tags.join(', ')}`
+        : undefined,
+      `Visual scene ordinal: ${input.ordinal}`,
+      `Frame timestamp: ${input.timestamp.toFixed(3)} seconds`,
+      `Grounded visual evidence: ${input.evidenceText}`,
     ]
       .filter((value): value is string => Boolean(value))
       .join('\n');
