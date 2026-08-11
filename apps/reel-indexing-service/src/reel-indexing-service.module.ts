@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { BuildHierarchicalIndexUseCase } from './application/use-cases/build-hierarchical-index.use-case';
+import { AnalyzeVisualFrameManifestUseCase } from './application/use-cases/analyze-visual-frame-manifest.use-case';
 import { BuildAdaptiveTranscriptSectionsUseCase } from './application/use-cases/build-adaptive-transcript-sections.use-case';
+import { BuildHierarchicalIndexUseCase } from './application/use-cases/build-hierarchical-index.use-case';
 import { BuildLongEvidenceChunksUseCase } from './application/use-cases/build-long-evidence-chunks.use-case';
 import { BuildShortEvidenceChunksUseCase } from './application/use-cases/build-short-evidence-chunks.use-case';
 import { BuildTranscriptSectionsUseCase } from './application/use-cases/build-transcript-sections.use-case';
@@ -60,6 +61,7 @@ const rabbitClient = (name: string, queue: string) => ({
   providers: [
     PrismaService,
     TranscribeAudioManifestUseCase,
+    AnalyzeVisualFrameManifestUseCase,
     MergeTranscriptSegmentsUseCase,
     BuildTranscriptSectionsUseCase,
     BuildAdaptiveTranscriptSectionsUseCase,
