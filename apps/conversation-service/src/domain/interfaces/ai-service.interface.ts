@@ -1,4 +1,7 @@
-import type { AiRecommendedReel } from '@common/ai/dtos/ask-question-response.dto';
+import type {
+  AiRagCitation,
+  AiRecommendedReel,
+} from '@common/ai/dtos/ask-question-response.dto';
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 
@@ -9,6 +12,7 @@ export interface BotError {
 
 export interface AskQuestionResult {
   answer: string | null;
+  citations?: AiRagCitation[];
   recommendedReels?: AiRecommendedReel[];
   suggestedQueries?: string[];
   error?: BotError;
