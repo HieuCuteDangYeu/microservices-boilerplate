@@ -39,6 +39,8 @@ interface RetrievalExecutionInput {
   queryEmbedding: number[];
   accessibleReelIds: string[];
   limit: number;
+  includeTranscript: boolean;
+  includeVisual: boolean;
 }
 
 @Injectable()
@@ -48,19 +50,14 @@ export class RetrievalAgentUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
-
     @Inject('IEmbeddingService')
     private readonly embeddingService: IEmbeddingService,
-
     @Inject('IContentService')
     private readonly contentService: IContentService,
-
     @Inject('IReelSemanticIndexService')
     private readonly semanticIndexService: IReelSemanticIndexService,
-
     @Inject('IRerankerService')
     private readonly rerankerService: IRerankerService,
-
     private readonly config: ConfigService,
   ) {}
 
@@ -75,13 +72,8 @@ export class RetrievalAgentUseCase {
     rerankedChunks: TranscriptMatch[];
   }> {
     const plan = await this.planRetrieval(input);
-
     if (plan.mode === 'NONE') {
-      return {
-        plan,
-        retrievedChunks: [],
-        rerankedChunks: [],
-      };
+      return { plan, retrievedChunks: [], rerankedChunks: [] };
     }
 
     const queries = this.getQueries(plan);
@@ -91,21 +83,21 @@ export class RetrievalAgentUseCase {
         userId: input.userId,
         conversationId: input.conversationId,
       });
-
     if (accessibleReelIds.length === 0) {
-      return {
-        plan,
-        retrievedChunks: [],
-        rerankedChunks: [],
-      };
+      return { plan, retrievedChunks: [], rerankedChunks: [] };
     }
+
+    const includeVisual = input.route.requiredEvidence.includes('VISUAL');
+    const includeTranscript =
+      !includeVisual ||
+      input.route.requiredEvidence.includes('TRANSCRIPT') ||
+      input.route.requiredEvidence.includes('AUDIO');
 
     for (const queryText of queries) {
       const queryEmbedding = await this.embeddingService.generateVector({
         text: queryText,
         taskType: 'RETRIEVAL_QUERY',
       });
-
       allCandidates.push(
         ...(await this.retrieveForQuery({
           mode: plan.mode,
@@ -113,12 +105,13 @@ export class RetrievalAgentUseCase {
           queryEmbedding: queryEmbedding.values,
           accessibleReelIds,
           limit: plan.searchLimit,
+          includeTranscript,
+          includeVisual,
         })),
       );
     }
 
     const retrievedChunks = this.dedupeByChunkId(allCandidates);
-
     const rerankedChunks = plan.shouldRerank
       ? await this.rerankerService.rerank({
           queryText: queries.join('\n'),
@@ -127,11 +120,7 @@ export class RetrievalAgentUseCase {
         })
       : retrievedChunks.slice(0, plan.rerankLimit);
 
-    return {
-      plan,
-      retrievedChunks,
-      rerankedChunks,
-    };
+    return { plan, retrievedChunks, rerankedChunks };
   }
 
   private async retrieveForQuery(
@@ -142,7 +131,6 @@ export class RetrievalAgentUseCase {
       'RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED',
       false,
     );
-
     if (hierarchicalEnabled) {
       return await this.retrieveHierarchically(input);
     }
@@ -150,8 +138,7 @@ export class RetrievalAgentUseCase {
     const startedAt = Date.now();
     const direct = await this.retrieveDirectly(input);
     const directMs = Date.now() - startedAt;
-
-    if (shadowEnabled) {
+    if (shadowEnabled && input.includeTranscript) {
       const shadowStartedAt = Date.now();
       const hierarchical = await this.retrieveHierarchically(input);
       const hierarchicalMs = Date.now() - shadowStartedAt;
@@ -163,28 +150,40 @@ export class RetrievalAgentUseCase {
         hierarchicalMs,
       });
     }
-
     return direct;
   }
 
   private async retrieveHierarchically(
     input: RetrievalExecutionInput,
   ): Promise<TranscriptMatch[]> {
+    const [transcriptCandidates, visualCandidates] = await Promise.all([
+      input.includeTranscript
+        ? this.retrieveTranscriptHierarchically(input)
+        : Promise.resolve([] as SemanticIndexSearchResult[]),
+      input.includeVisual
+        ? this.retrieveVisualScenes(input)
+        : Promise.resolve([] as SemanticIndexSearchResult[]),
+    ]);
+    return await this.hydrateAndExpand(
+      [...transcriptCandidates, ...visualCandidates],
+      input.accessibleReelIds,
+    );
+  }
+
+  private async retrieveTranscriptHierarchically(
+    input: RetrievalExecutionInput,
+  ): Promise<SemanticIndexSearchResult[]> {
     const search = this.buildSearchRequest(input);
     const reelCandidates = await this.semanticIndexService.searchReels({
       ...search,
       filters: { reelIds: input.accessibleReelIds },
       limit: Math.min(Math.max(input.limit * 2, 8), 40),
     });
-
-    if (reelCandidates.length === 0) {
-      return [];
-    }
+    if (reelCandidates.length === 0) return [];
 
     const longReelIds = reelCandidates
       .filter((candidate) => candidate.sourceLengthClass === 'LONG')
       .map((candidate) => candidate.reelId);
-
     const sectionCandidates =
       longReelIds.length > 0
         ? await this.semanticIndexService.searchSections({
@@ -196,19 +195,15 @@ export class RetrievalAgentUseCase {
             limit: Math.min(Math.max(input.limit * 2, 8), 40),
           })
         : [];
-
     const parentIds = [
       ...reelCandidates
         .filter((candidate) => candidate.sourceLengthClass === 'SHORT')
         .map((candidate) => candidate.id),
       ...sectionCandidates.map((candidate) => candidate.id),
     ];
+    if (parentIds.length === 0) return [];
 
-    if (parentIds.length === 0) {
-      return [];
-    }
-
-    const chunkCandidates = await this.semanticIndexService.searchChunks({
+    return await this.semanticIndexService.searchChunks({
       ...search,
       filters: {
         reelIds: reelCandidates.map((candidate) => candidate.reelId),
@@ -217,31 +212,47 @@ export class RetrievalAgentUseCase {
       limit: input.limit,
       candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
     });
-
-    return await this.hydrateAndExpand(
-      chunkCandidates,
-      input.accessibleReelIds,
-    );
   }
 
   private async retrieveDirectly(
     input: RetrievalExecutionInput,
   ): Promise<TranscriptMatch[]> {
-    const chunks = await this.semanticIndexService.searchChunks({
+    const search = this.buildSearchRequest(input);
+    const [chunks, visualScenes] = await Promise.all([
+      input.includeTranscript
+        ? this.semanticIndexService.searchChunks({
+            ...search,
+            filters: { reelIds: input.accessibleReelIds },
+            limit: input.limit,
+            candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
+          })
+        : Promise.resolve([] as SemanticIndexSearchResult[]),
+      input.includeVisual
+        ? this.retrieveVisualScenes(input)
+        : Promise.resolve([] as SemanticIndexSearchResult[]),
+    ]);
+    return await this.hydrateAndExpand(
+      [...chunks, ...visualScenes],
+      input.accessibleReelIds,
+    );
+  }
+
+  private async retrieveVisualScenes(
+    input: RetrievalExecutionInput,
+  ): Promise<SemanticIndexSearchResult[]> {
+    return await this.semanticIndexService.searchVisualScenes({
       ...this.buildSearchRequest(input),
       filters: { reelIds: input.accessibleReelIds },
       limit: input.limit,
       candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
     });
-
-    return await this.hydrateAndExpand(chunks, input.accessibleReelIds);
   }
 
   private async hydrateAndExpand(
-    chunks: SemanticIndexSearchResult[],
+    candidates: SemanticIndexSearchResult[],
     accessibleReelIds: string[],
   ): Promise<TranscriptMatch[]> {
-    const expanded = await this.expandNeighbours(chunks, accessibleReelIds);
+    const expanded = await this.expandNeighbours(candidates, accessibleReelIds);
     const documents = await Promise.all(
       [...new Set(expanded.map((candidate) => candidate.reelId))].map(
         async (reelId) =>
@@ -254,7 +265,6 @@ export class RetrievalAgentUseCase {
     const documentByReelId = new Map<string, SemanticReelDocument | null>(
       documents,
     );
-
     return expanded.map((candidate) =>
       this.toTranscriptMatch(
         candidate,
@@ -270,11 +280,8 @@ export class RetrievalAgentUseCase {
     'queryText' | 'queryEmbedding' | 'queryTags'
   > {
     if (input.mode === 'REEL_VECTOR') {
-      return {
-        queryEmbedding: input.queryEmbedding,
-      };
+      return { queryEmbedding: input.queryEmbedding };
     }
-
     return {
       queryText: input.queryText,
       queryEmbedding: input.queryEmbedding,
@@ -342,7 +349,6 @@ export class RetrievalAgentUseCase {
       candidate.metadataRank !== undefined;
     const retrievalText = candidate.retrievalText || candidate.text;
     const evidenceText = candidate.evidenceText?.trim() || undefined;
-
     return {
       chunkId: candidate.id,
       reelId: candidate.reelId,
@@ -381,7 +387,6 @@ export class RetrievalAgentUseCase {
     const union = new Set([...directIds, ...hierarchicalIds]);
     const overlap = intersection.length / limit;
     const jaccard = union.size ? intersection.length / union.size : 1;
-
     this.logger.log(
       `[HierarchicalRetrievalShadow] query=${JSON.stringify(input.queryText)} directMs=${input.directMs} hierarchicalMs=${input.hierarchicalMs} direct=${input.direct.length} hierarchical=${input.hierarchical.length} overlapAtK=${overlap.toFixed(3)} jaccard=${jaccard.toFixed(3)}`,
     );
@@ -402,23 +407,19 @@ export class RetrievalAgentUseCase {
         reason: 'Router decided retrieval is not needed.',
       };
     }
-
     try {
       const raw =
         await this.structuredLlmService.generateObject<RawRetrievalPlan>({
           systemPrompt: this.buildSystemPrompt(),
-          userPrompt: this.buildUserPrompt(input.message),
+          userPrompt: this.buildUserPrompt(input.message, input.route),
           jsonSchema: this.getJsonSchema(),
           maxTokens: 450,
           temperature: 0.1,
         });
-
       return this.normalize(raw, input.message);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-
       this.logger.warn(`[RetrievalAgent] fallback default plan: ${message}`);
-
       return {
         mode: 'REEL_HYBRID',
         query: input.message,
@@ -440,7 +441,7 @@ Decide the best retrieval queries and retrieval settings.
 Rules:
 1. Return only structured JSON matching the schema.
 2. Do not answer the user.
-3. Keep each query focused on reel/video/transcript search.
+3. Keep each query focused on the requested reel evidence.
 4. Rewrite only when the user message is conversational, ambiguous, or contains references.
 5. Do not invent facts not present in the user message.
 6. Retrieval is scoped to reels shared into the current conversation.
@@ -448,13 +449,20 @@ Rules:
 8. For simple questions, produce 1 query.
 9. REEL_VECTOR means semantic vector search only. Use it when lexical wording is likely noisy or paraphrased.
 10. REEL_HYBRID means semantic vector + full-text search, with explicit #hashtags also eligible for tag matching. Prefer it for normal factual reel questions.
+11. The execution layer selects transcript and/or sampled visual-scene evidence from the router's required-evidence decision. Do not try to change that evidence policy.
 `.trim();
   }
 
-  private buildUserPrompt(message: string): string {
+  private buildUserPrompt(
+    message: string,
+    route: RagChatRouteDecision,
+  ): string {
     return `
 User message:
 ${message}
+
+Required evidence:
+${route.requiredEvidence.join(', ')}
 `.trim();
   }
 
@@ -479,10 +487,7 @@ ${message}
         },
         query: { type: 'string' },
         rewrittenQuery: { type: 'string' },
-        queries: {
-          type: 'array',
-          items: { type: 'string' },
-        },
+        queries: { type: 'array', items: { type: 'string' } },
         searchLimit: { type: 'number' },
         rerankLimit: { type: 'number' },
         shouldRerank: { type: 'boolean' },
@@ -499,19 +504,15 @@ ${message}
       raw.mode === 'REEL_VECTOR' || raw.mode === 'REEL_HYBRID'
         ? raw.mode
         : 'REEL_HYBRID';
-
     const query =
       typeof raw.query === 'string' && raw.query.trim()
         ? raw.query.trim()
         : fallbackQuery;
-
     const rewrittenQuery =
       typeof raw.rewrittenQuery === 'string' && raw.rewrittenQuery.trim()
         ? raw.rewrittenQuery.trim()
         : undefined;
-
     const queries = this.normalizeQueries(raw.queries, rewrittenQuery || query);
-
     return {
       mode,
       query,
@@ -529,54 +530,33 @@ ${message}
   }
 
   private normalizeQueries(value: unknown, fallbackQuery: string): string[] {
-    if (!Array.isArray(value)) {
-      return [fallbackQuery];
-    }
-
+    if (!Array.isArray(value)) return [fallbackQuery];
     const seen = new Set<string>();
     const queries: string[] = [];
-
     for (const item of value) {
-      if (typeof item !== 'string') {
-        continue;
-      }
-
+      if (typeof item !== 'string') continue;
       const query = item.replace(/\s+/g, ' ').trim();
-
-      if (!query || seen.has(query.toLowerCase())) {
-        continue;
-      }
-
+      if (!query || seen.has(query.toLowerCase())) continue;
       seen.add(query.toLowerCase());
       queries.push(query);
-
-      if (queries.length >= 3) {
-        break;
-      }
+      if (queries.length >= 3) break;
     }
-
     return queries.length > 0 ? queries : [fallbackQuery];
   }
 
   private getQueries(plan: RagRetrievalPlan): string[] {
-    if (plan.queries && plan.queries.length > 0) {
-      return plan.queries;
-    }
-
+    if (plan.queries && plan.queries.length > 0) return plan.queries;
     return [plan.rewrittenQuery?.trim() || plan.query];
   }
 
   private dedupeByChunkId(chunks: TranscriptMatch[]): TranscriptMatch[] {
     const map = new Map<string, TranscriptMatch>();
-
     for (const chunk of chunks) {
       const existing = map.get(chunk.chunkId);
-
       if (!existing || (chunk.score ?? 0) > (existing.score ?? 0)) {
         map.set(chunk.chunkId, chunk);
       }
     }
-
     return [...map.values()];
   }
 
@@ -586,10 +566,7 @@ ${message}
     min: number,
     max: number,
   ): number {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      return fallback;
-    }
-
+    if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
     return Math.min(Math.max(Math.floor(value), min), max);
   }
 }
