@@ -5,7 +5,6 @@ import type {
   ExtractedVisualFrame,
   IVisualFrameExtractionService,
 } from '@processing/domain/interfaces/visual-frame-extraction.service.interface';
-import type { VideoMetadata } from '@processing/domain/interfaces/video-processing.service.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -34,7 +33,7 @@ export class BuildVisualFrameManifestUseCase {
     inputPath: string;
     outputDir: string;
     storagePrefix: string;
-    metadata: VideoMetadata;
+    metadata: { durationMs?: number };
   }): Promise<VisualFrameManifestResult> {
     const totalDurationMs = Math.max(0, input.metadata.durationMs ?? 0);
     const periodicIntervalMs =
@@ -132,7 +131,11 @@ export class BuildVisualFrameManifestUseCase {
   private dedupeFrames(
     candidates: ExtractedVisualFrame[],
     dedupeWindowMs: number,
-  ): Array<ExtractedVisualFrame & { reason: VisualFrameManifest['artifacts'][number]['reason'] }> {
+  ): Array<
+    ExtractedVisualFrame & {
+      reason: VisualFrameManifest['artifacts'][number]['reason'];
+    }
+  > {
     const ordered = [...candidates].sort(
       (left, right) => left.timestampMs - right.timestampMs,
     );
@@ -148,13 +151,13 @@ export class BuildVisualFrameManifestUseCase {
         previous &&
         Math.abs(candidate.timestampMs - previous.timestampMs) <= dedupeWindowMs
       ) {
+        const shouldPreferSceneFrame =
+          candidate.reason === 'SCENE_CHANGE' &&
+          previous.reason === 'PERIODIC';
         if (previous.reason !== candidate.reason) {
           previous.reason = 'PERIODIC_AND_SCENE_CHANGE';
         }
-        if (
-          candidate.reason === 'SCENE_CHANGE' &&
-          previous.reason !== 'SCENE_CHANGE'
-        ) {
+        if (shouldPreferSceneFrame) {
           previous.outputPath = candidate.outputPath;
           previous.timestampMs = candidate.timestampMs;
         }
