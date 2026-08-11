@@ -1,6 +1,7 @@
-import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import type { CompleteReelIndexCommand } from '@common/processing/interfaces/complete-reel-index.interface';
 import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
+import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
+import { AnalyzeVisualFrameManifestUseCase } from '@indexing/application/use-cases/analyze-visual-frame-manifest.use-case';
 import { BuildAdaptiveTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-adaptive-transcript-sections.use-case';
 import { BuildHierarchicalIndexUseCase } from '@indexing/application/use-cases/build-hierarchical-index.use-case';
 import { BuildTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-transcript-sections.use-case';
@@ -90,6 +91,7 @@ export class ReelIndexLangGraphWorkflow {
   constructor(
     private readonly config: ConfigService,
     private readonly transcribeAudio: TranscribeAudioManifestUseCase,
+    private readonly analyzeVisualFrames: AnalyzeVisualFrameManifestUseCase,
     private readonly mergeTranscript: MergeTranscriptSegmentsUseCase,
     private readonly buildSections: BuildTranscriptSectionsUseCase,
     private readonly buildAdaptiveSections: BuildAdaptiveTranscriptSectionsUseCase,
@@ -411,8 +413,8 @@ export class ReelIndexLangGraphWorkflow {
   ): Partial<ReelIndexGraphState> {
     const strong = Boolean(
       (state.job.title?.trim().length ?? 0) >= 8 &&
-      (state.job.description?.trim().length ?? 0) >= 40 &&
-      state.job.tags.filter((tag) => tag.trim()).length >= 3,
+        (state.job.description?.trim().length ?? 0) >= 40 &&
+        state.job.tags.filter((tag) => tag.trim()).length >= 3,
     );
     return {
       metadataQuality: strong ? 'strong' : 'weak',
@@ -484,12 +486,14 @@ export class ReelIndexLangGraphWorkflow {
   ): Promise<Partial<ReelIndexGraphState>> {
     const checkpoint = await this.requireCheckpoint(state);
     const metadata = this.requireMetadata(checkpoint.extractedMetadata);
+    const visualScenes = await this.analyzeVisualFrames.execute(state.job);
     const drafts = this.buildIndex.buildDocumentDrafts({
       job: state.job,
       transcript: checkpoint.mergedTranscript,
       transcriptSegments: checkpoint.mergedSegments,
       metadata,
       sections,
+      visualScenes,
     });
     await this.checkpoints.setStage(
       state.job.indexAttemptId,
@@ -525,12 +529,14 @@ export class ReelIndexLangGraphWorkflow {
   ): Promise<Partial<ReelIndexGraphState>> {
     const checkpoint = await this.requireCheckpoint(state);
     const sections = checkpoint.sections ?? [];
+    const visualScenes = await this.analyzeVisualFrames.execute(state.job);
     const drafts = this.buildIndex.buildDocumentDrafts({
       job: state.job,
       transcript: checkpoint.mergedTranscript,
       transcriptSegments: checkpoint.mergedSegments,
       metadata: this.requireMetadata(checkpoint.extractedMetadata),
       sections,
+      visualScenes,
     });
     await this.checkpoints.setStage(
       state.job.indexAttemptId,
@@ -629,8 +635,10 @@ export class ReelIndexLangGraphWorkflow {
       indexVersion: job.indexVersion,
       reelDocumentCount: documents.filter((document) => document.kind === 'REEL')
         .length,
-      sectionCount: documents.filter((document) => document.kind === 'SECTION').length,
-      chunkCount: documents.filter((document) => document.kind === 'CHUNK').length,
+      sectionCount: documents.filter((document) => document.kind === 'SECTION')
+        .length,
+      chunkCount: documents.filter((document) => document.kind === 'CHUNK')
+        .length,
       embeddingProvider: reelDocument.embeddingProvider,
       embeddingModel: reelDocument.embeddingModel,
       embeddingDimensions: reelDocument.embeddingDimensions,
