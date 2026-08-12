@@ -1,11 +1,14 @@
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
 import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-context-sufficiency.use-case';
 import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
+import { GenerateDraftAnswerUseCase } from '@ai/application/use-cases/generate-draft-answer.use-case';
 import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-case';
 import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
 import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
+import { RewriteRetrievalQueryUseCase } from '@ai/application/use-cases/rewrite-retrieval-query.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
+import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.use-case';
 import type { IContentService } from '@ai/domain/interfaces/content-service.interface';
 import type {
   IRagChatWorkflow,
@@ -15,6 +18,7 @@ import type {
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { END, START, StateGraph, StateSchema } from '@langchain/langgraph';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { z } from 'zod/v4';
 
 const RagChatStateSchema = new StateSchema({
@@ -25,6 +29,7 @@ const RagChatStateSchema = new StateSchema({
 
   route: z.any().optional(),
   retrievalPlan: z.any().optional(),
+  retrievalRepairQuery: z.string().optional(),
 
   retrievedChunks: z.array(z.any()).default([]),
   rerankedChunks: z.array(z.any()).default([]),
@@ -41,9 +46,11 @@ const RagChatStateSchema = new StateSchema({
   answer: z.string().optional(),
   verification: z.any().optional(),
   citations: z.array(z.any()).default([]),
+  citationCoverage: z.any().optional(),
 
   retryCount: z.number().default(0),
   retrievalRetryCount: z.number().default(0),
+  citationRetryCount: z.number().default(0),
 });
 
 @Injectable()
@@ -53,12 +60,16 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
   constructor(
     private readonly queryRouterAgentUseCase: QueryRouterAgentUseCase,
     private readonly retrievalAgentUseCase: RetrievalAgentUseCase,
+    private readonly rewriteRetrievalQueryUseCase: RewriteRetrievalQueryUseCase,
     private readonly checkContextSufficiencyUseCase: CheckContextSufficiencyUseCase,
     private readonly memoryAgentUseCase: MemoryAgentUseCase,
+    private readonly generateDraftAnswerUseCase: GenerateDraftAnswerUseCase,
+    private readonly verifierAgentUseCase: VerifierAgentUseCase,
     private readonly streamFinalAnswerUseCase: StreamFinalAnswerUseCase,
     private readonly createNoContextAnswerUseCase: CreateNoContextAnswerUseCase,
     private readonly buildRagCitationsUseCase: BuildRagCitationsUseCase,
     private readonly saveRagTraceUseCase: SaveRagTraceUseCase,
+    private readonly config: ConfigService,
 
     @Inject('IContentService')
     private readonly contentService: IContentService,
@@ -81,6 +92,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       citations: [],
       retryCount: 0,
       retrievalRetryCount: 0,
+      citationRetryCount: 0,
     };
 
     let result: RagChatWorkflowState = initialState;
@@ -111,39 +123,75 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         'contextSufficiencyNode',
         this.createContextSufficiencyNode(nodeTimings),
       )
+      .addNode(
+        'retrievalRepairNode',
+        this.createRetrievalRepairNode(nodeTimings),
+      )
       .addNode('memorySelectorNode', this.createMemoryNode(nodeTimings))
-      .addNode('finalAnswerNode', this.createFinalAnswerNode(nodeTimings))
+      .addNode('draftAnswerNode', this.createDraftAnswerNode(nodeTimings))
+      .addNode('verifierNode', this.createVerifierNode(nodeTimings))
+      .addNode(
+        'prepareAnswerRevisionNode',
+        this.createPrepareAnswerRevisionNode(),
+      )
+      .addNode('citationNode', this.createCitationNode(nodeTimings))
+      .addNode(
+        'citationCoverageGateNode',
+        this.createCitationCoverageGateNode(nodeTimings),
+      )
+      .addNode(
+        'prepareCitationRevisionNode',
+        this.createPrepareCitationRevisionNode(),
+      )
+      .addNode(
+        'verificationFailureNode',
+        this.createVerificationFailureNode(),
+      )
       .addNode(
         'noContextAnswerNode',
         this.createNoContextAnswerNode(nodeTimings),
       )
+      .addNode('finalAnswerNode', this.createFinalAnswerNode(nodeTimings))
       .addNode(
         'reelRecommendationNode',
         this.createReelRecommendationNode(nodeTimings),
       )
-      .addNode('citationNode', this.createCitationNode(nodeTimings))
 
       .addEdge(START, 'queryRouterNode')
-
       .addConditionalEdges('queryRouterNode', this.routeAfterQueryRouter, [
         'retrievalNode',
         'memorySelectorNode',
       ])
-
       .addEdge('retrievalNode', 'contextSufficiencyNode')
-
       .addConditionalEdges(
         'contextSufficiencyNode',
         this.routeAfterContextSufficiency,
-        ['memorySelectorNode', 'noContextAnswerNode'],
+        ['memorySelectorNode', 'retrievalRepairNode', 'noContextAnswerNode'],
       )
-
-      .addEdge('memorySelectorNode', 'finalAnswerNode')
+      .addEdge('retrievalRepairNode', 'retrievalNode')
+      .addEdge('memorySelectorNode', 'draftAnswerNode')
+      .addEdge('draftAnswerNode', 'verifierNode')
+      .addConditionalEdges('verifierNode', this.routeAfterVerifier, [
+        'citationNode',
+        'prepareAnswerRevisionNode',
+        'verificationFailureNode',
+      ])
+      .addEdge('prepareAnswerRevisionNode', 'draftAnswerNode')
+      .addEdge('citationNode', 'citationCoverageGateNode')
+      .addConditionalEdges(
+        'citationCoverageGateNode',
+        this.routeAfterCitationCoverage,
+        [
+          'finalAnswerNode',
+          'prepareCitationRevisionNode',
+          'verificationFailureNode',
+        ],
+      )
+      .addEdge('prepareCitationRevisionNode', 'draftAnswerNode')
+      .addEdge('verificationFailureNode', 'finalAnswerNode')
+      .addEdge('noContextAnswerNode', 'finalAnswerNode')
       .addEdge('finalAnswerNode', 'reelRecommendationNode')
-      .addEdge('noContextAnswerNode', 'reelRecommendationNode')
-      .addEdge('reelRecommendationNode', 'citationNode')
-      .addEdge('citationNode', END)
-
+      .addEdge('reelRecommendationNode', END)
       .compile();
   }
 
@@ -176,17 +224,19 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         return {};
       }
 
+      const retrievalMessage =
+        state.retrievalRepairQuery?.trim() || state.userMessage;
       const result = await this.timed('retrievalNode', nodeTimings, () =>
         this.retrievalAgentUseCase.execute({
           userId: state.userId,
           conversationId: state.conversationId,
-          message: state.userMessage,
+          message: retrievalMessage,
           route,
         }),
       );
 
       this.logger.log(
-        `[RagGraph] retrieved=${result.retrievedChunks.length} reranked=${result.rerankedChunks.length}`,
+        `[RagGraph] retrieved=${result.retrievedChunks.length} reranked=${result.rerankedChunks.length} retry=${state.retrievalRetryCount}`,
       );
 
       return {
@@ -212,6 +262,27 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       );
 
       return { contextSufficiency };
+    };
+  }
+
+  private createRetrievalRepairNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const query = await this.timed('retrievalRepairNode', nodeTimings, () =>
+        this.rewriteRetrievalQueryUseCase.execute(state),
+      );
+
+      this.logger.debug(
+        `[RagGraph] retrieval repair retry=${state.retrievalRetryCount + 1} query=${JSON.stringify(query)}`,
+      );
+
+      return {
+        retrievalRepairQuery: query,
+        retrievalRetryCount: state.retrievalRetryCount + 1,
+        retrievedChunks: [],
+        rerankedChunks: [],
+      };
     };
   }
 
@@ -243,6 +314,121 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     };
   }
 
+  private createDraftAnswerNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const answer = await this.timed('draftAnswerNode', nodeTimings, () =>
+        this.generateDraftAnswerUseCase.execute(state),
+      );
+
+      return {
+        answer,
+        citations: [],
+        citationCoverage: undefined,
+      };
+    };
+  }
+
+  private createVerifierNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const verification = await this.timed('verifierNode', nodeTimings, () =>
+        this.verifierAgentUseCase.execute(state),
+      );
+
+      this.logger.debug(
+        `[RagGraph] verification passed=${verification.passed} confidence=${verification.confidence.toFixed(2)} revision=${verification.requiresRevision}`,
+      );
+
+      return { verification };
+    };
+  }
+
+  private createPrepareAnswerRevisionNode() {
+    return (
+      state: RagChatWorkflowState,
+    ): Partial<RagChatWorkflowState> => ({
+      retryCount: state.retryCount + 1,
+      citations: [],
+      citationCoverage: undefined,
+    });
+  }
+
+  private createCitationNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      const assessment = await this.timed('citationNode', nodeTimings, () =>
+        this.buildRagCitationsUseCase.assess(state),
+      );
+
+      return {
+        citations: assessment.citations,
+        citationCoverage: assessment.coverage,
+      };
+    };
+  }
+
+  private createCitationCoverageGateNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      await this.timed('citationCoverageGateNode', nodeTimings, async () => {
+        const coverage = state.citationCoverage;
+        this.logger.debug(
+          `[RagGraph] citation coverage mode=${coverage?.mode ?? 'NONE'} coverage=${coverage?.coverage ?? 1} claims=${coverage?.supportedClaimCount ?? 0}/${coverage?.factualClaimCount ?? 0}`,
+        );
+      });
+      return {};
+    };
+  }
+
+  private createPrepareCitationRevisionNode() {
+    return (
+      state: RagChatWorkflowState,
+    ): Partial<RagChatWorkflowState> => {
+      const unsupported = state.citationCoverage?.unsupportedClaims ?? [];
+      const detail = unsupported.length
+        ? ` Unsupported claims: ${unsupported.join(' | ')}`
+        : '';
+
+      return {
+        citationRetryCount: state.citationRetryCount + 1,
+        citations: [],
+        citationCoverage: undefined,
+        verification: {
+          passed: false,
+          confidence: state.citationCoverage?.coverage ?? 0,
+          issues: ['Citation coverage is below the production threshold.'],
+          requiresRevision: true,
+          revisedInstruction:
+            `Remove, qualify, or rewrite factual reel claims that are not directly supported by the supplied grounded evidence. Do not add new facts.${detail}`,
+        },
+      };
+    };
+  }
+
+  private createVerificationFailureNode() {
+    return (
+      state: RagChatWorkflowState,
+    ): Partial<RagChatWorkflowState> => ({
+      answer:
+        state.route?.intent === 'REEL_VIDEO_QUESTION'
+          ? 'I do not have enough verified shared reel evidence to answer that reliably.'
+          : 'I could not verify that answer reliably from the available context.',
+      citations: [],
+      citationCoverage: {
+        mode: 'NOT_REQUIRED',
+        coverage: 1,
+        factualClaimCount: 0,
+        supportedClaimCount: 0,
+        unsupportedClaims: [],
+      },
+    });
+  }
+
   private createFinalAnswerNode(nodeTimings: Record<string, number>) {
     return async (
       state: RagChatWorkflowState,
@@ -263,7 +449,17 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         Promise.resolve(this.createNoContextAnswerUseCase.execute(state)),
       );
 
-      return { answer };
+      return {
+        answer,
+        citations: [],
+        citationCoverage: {
+          mode: 'NOT_REQUIRED',
+          coverage: 1,
+          factualClaimCount: 0,
+          supportedClaimCount: 0,
+          unsupportedClaims: [],
+        },
+      };
     };
   }
 
@@ -330,18 +526,6 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     };
   }
 
-  private createCitationNode(nodeTimings: Record<string, number>) {
-    return async (
-      state: RagChatWorkflowState,
-    ): Promise<Partial<RagChatWorkflowState>> => {
-      const citations = await this.timed('citationNode', nodeTimings, () =>
-        Promise.resolve(this.buildRagCitationsUseCase.execute(state)),
-      );
-
-      return { citations };
-    };
-  }
-
   private dedupeRecommendedReels(
     reels: NonNullable<RagChatWorkflowState['recommendedReels']>,
   ): NonNullable<RagChatWorkflowState['recommendedReels']> {
@@ -366,19 +550,74 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
   private routeAfterContextSufficiency = (
     state: RagChatWorkflowState,
-  ): 'memorySelectorNode' | 'noContextAnswerNode' => {
-    if (!state.contextSufficiency) {
+  ): 'memorySelectorNode' | 'retrievalRepairNode' | 'noContextAnswerNode' => {
+    const context = state.contextSufficiency;
+    if (!context) return 'memorySelectorNode';
+
+    if (context.sufficient && context.recommendedAction === 'ANSWER') {
       return 'memorySelectorNode';
     }
 
     if (
-      state.contextSufficiency.sufficient &&
-      state.contextSufficiency.recommendedAction === 'ANSWER'
+      context.recommendedAction === 'REWRITE_AND_RETRY' &&
+      state.retrievalRetryCount < this.integer(
+        'AI_RAG_MAX_RETRIEVAL_RETRIES',
+        1,
+        0,
+        2,
+      )
     ) {
-      return 'memorySelectorNode';
+      return 'retrievalRepairNode';
     }
 
     return 'noContextAnswerNode';
+  };
+
+  private routeAfterVerifier = (
+    state: RagChatWorkflowState,
+  ):
+    | 'citationNode'
+    | 'prepareAnswerRevisionNode'
+    | 'verificationFailureNode' => {
+    if (state.verification?.passed) return 'citationNode';
+
+    if (
+      state.verification?.requiresRevision &&
+      state.retryCount < this.integer('AI_RAG_MAX_ANSWER_REVISIONS', 1, 0, 2)
+    ) {
+      return 'prepareAnswerRevisionNode';
+    }
+
+    return 'verificationFailureNode';
+  };
+
+  private routeAfterCitationCoverage = (
+    state: RagChatWorkflowState,
+  ):
+    | 'finalAnswerNode'
+    | 'prepareCitationRevisionNode'
+    | 'verificationFailureNode' => {
+    const coverage = state.citationCoverage;
+    if (!coverage || coverage.mode !== 'LLM' || coverage.factualClaimCount === 0) {
+      return 'finalAnswerNode';
+    }
+
+    const threshold = this.number(
+      'AI_RAG_CITATION_COVERAGE_THRESHOLD',
+      0.8,
+      0,
+      1,
+    );
+    if (coverage.coverage >= threshold) return 'finalAnswerNode';
+
+    if (
+      state.citationRetryCount <
+      this.integer('AI_RAG_MAX_CITATION_REVISIONS', 1, 0, 2)
+    ) {
+      return 'prepareCitationRevisionNode';
+    }
+
+    return 'verificationFailureNode';
   };
 
   private async timed<T>(
@@ -392,7 +631,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       return await fn();
     } finally {
       const duration = Date.now() - startedAt;
-      nodeTimings[label] = duration;
+      nodeTimings[label] = (nodeTimings[label] ?? 0) + duration;
 
       this.logger.debug(`[RagGraphTiming] ${label}=${duration}ms`);
     }
@@ -408,5 +647,26 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     return messages
       .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
       .join('\n');
+  }
+
+  private number(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const parsed = Number(this.config.get<string>(key) ?? fallback);
+    return Number.isFinite(parsed)
+      ? Math.min(max, Math.max(min, parsed))
+      : fallback;
+  }
+
+  private integer(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    return Math.round(this.number(key, fallback, min, max));
   }
 }
