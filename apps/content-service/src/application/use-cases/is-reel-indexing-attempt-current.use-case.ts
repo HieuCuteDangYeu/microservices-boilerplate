@@ -1,11 +1,11 @@
-import type { IContentRepository } from '@content/domain/interfaces/content.repository.interface';
+import type { IIndexAttemptReadRepository } from '@content/domain/interfaces/index-attempt-read.repository.interface';
 import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
 export class IsReelIndexingAttemptCurrentUseCase {
   constructor(
-    @Inject('IContentRepository')
-    private readonly repository: IContentRepository,
+    @Inject('IIndexAttemptReadRepository')
+    private readonly repository: IIndexAttemptReadRepository,
   ) {}
 
   async execute(input: {
