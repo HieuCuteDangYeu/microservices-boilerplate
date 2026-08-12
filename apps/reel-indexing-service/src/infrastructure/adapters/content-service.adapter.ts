@@ -23,6 +23,17 @@ export class ContentServiceAdapter implements IIndexingContentService {
     );
   }
 
+  async isIndexingAttemptCurrent(input: {
+    reelId: string;
+    indexAttemptId: string;
+  }): Promise<boolean> {
+    return await firstValueFrom(
+      this.client
+        .send<boolean>('content.is_reel_indexing_attempt_current', input)
+        .pipe(timeout(30_000)),
+    );
+  }
+
   async reportProgress(input: {
     reelId: string;
     indexAttemptId: string;
