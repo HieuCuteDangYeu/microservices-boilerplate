@@ -184,21 +184,21 @@ export class PrismaSemanticCandidateLifecycle
     reelId: string;
     indexAttemptId: string;
   }): Promise<void> {
-    await this.prisma.$transaction([
-      this.prisma.reelVisualScene.deleteMany({
-        where: { ...input, isActive: false },
-      }),
-      this.prisma.reelChunk.deleteMany({
-        where: { ...input, isActive: false },
-      }),
-      this.prisma.reelSection.deleteMany({
-        where: { ...input, isActive: false },
-      }),
-      this.prisma.reelDocument.deleteMany({
-        where: { ...input, isActive: false },
-      }),
-      this.prisma.transcriptionSegment.deleteMany({ where: input }),
-    ]);
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.reelId}))`;
+      const active = await transaction.reelDocument.count({
+        where: { ...input, isActive: true },
+      });
+      if (active > 0) {
+        return;
+      }
+
+      await transaction.reelVisualScene.deleteMany({ where: input });
+      await transaction.reelChunk.deleteMany({ where: input });
+      await transaction.reelSection.deleteMany({ where: input });
+      await transaction.reelDocument.deleteMany({ where: input });
+      await transaction.transcriptionSegment.deleteMany({ where: input });
+    });
   }
 
   private async setActive(
