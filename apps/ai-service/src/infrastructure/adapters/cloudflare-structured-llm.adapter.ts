@@ -40,33 +40,50 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
       '@cf/meta/llama-3.1-8b-instruct';
 
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
+    const timeoutMs = this.resolveTimeout(input.timeoutMs);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    timeout.unref();
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: input.systemPrompt,
-          },
-          {
-            role: 'user',
-            content: input.userPrompt,
-          },
-        ],
-        max_tokens: input.maxTokens ?? 500,
-        temperature: input.temperature ?? 0.1,
-        response_format: {
-          type: 'json_schema',
-          json_schema: input.jsonSchema,
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: input.systemPrompt,
+            },
+            {
+              role: 'user',
+              content: input.userPrompt,
+            },
+          ],
+          max_tokens: input.maxTokens ?? 500,
+          temperature: input.temperature ?? 0.1,
+          response_format: {
+            type: 'json_schema',
+            json_schema: input.jsonSchema,
+          },
+        }),
+        signal: controller.signal,
+      });
+    } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        throw new Error(
+          `Cloudflare structured LLM request timed out after ${timeoutMs}ms`,
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const json = (await response.json()) as CloudflareChatCompletionResponse;
 
@@ -98,5 +115,17 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
     } catch {
       throw new Error('Cloudflare structured LLM returned invalid JSON');
     }
+  }
+
+  private resolveTimeout(requestTimeoutMs?: number): number {
+    const configured = Number(
+      this.configService.get<string>('CLOUDFLARE_STRUCTURED_LLM_TIMEOUT_MS') ??
+        '8000',
+    );
+    const fallback = Number.isFinite(configured) ? configured : 8_000;
+    const requested = Number(requestTimeoutMs ?? fallback);
+    return Number.isFinite(requested)
+      ? Math.min(30_000, Math.max(500, Math.round(requested)))
+      : 8_000;
   }
 }
