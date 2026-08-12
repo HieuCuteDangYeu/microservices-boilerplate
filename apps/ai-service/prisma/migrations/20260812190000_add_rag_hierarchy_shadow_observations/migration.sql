@@ -4,7 +4,7 @@ CREATE TABLE "RagHierarchyShadowObservation" (
     "conversationId" TEXT NOT NULL,
     "queryText" TEXT NOT NULL,
     "retrievalMode" TEXT NOT NULL,
-    "requiredEvidence" TEXT[],
+    "requiredEvidence" TEXT[] NOT NULL,
     "directChunkIds" JSONB NOT NULL,
     "hierarchicalChunkIds" JSONB NOT NULL,
     "directCount" INTEGER NOT NULL,
