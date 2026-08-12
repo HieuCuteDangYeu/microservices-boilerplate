@@ -7,11 +7,15 @@ import { BuildHierarchicalIndexUseCase } from './application/use-cases/build-hie
 import { BuildLongEvidenceChunksUseCase } from './application/use-cases/build-long-evidence-chunks.use-case';
 import { BuildShortEvidenceChunksUseCase } from './application/use-cases/build-short-evidence-chunks.use-case';
 import { BuildTranscriptSectionsUseCase } from './application/use-cases/build-transcript-sections.use-case';
+import { CommitSemanticCandidateUseCase } from './application/use-cases/commit-semantic-candidate.use-case';
 import { ExtractHierarchicalMetadataUseCase } from './application/use-cases/extract-hierarchical-metadata.use-case';
 import { MergeTranscriptSegmentsUseCase } from './application/use-cases/merge-transcript-segments.use-case';
 import { ProcessReelIndexJobUseCase } from './application/use-cases/process-reel-index-job.use-case';
+import { SelectHealthyTranscriptSectionsUseCase } from './application/use-cases/select-healthy-transcript-sections.use-case';
 import { TranscribeAudioManifestUseCase } from './application/use-cases/transcribe-audio-manifest.use-case';
+import { ValidateEmbeddingQualityUseCase } from './application/use-cases/validate-embedding-quality.use-case';
 import { ValidateEvidenceIndexCandidateUseCase } from './application/use-cases/validate-evidence-index-candidate.use-case';
+import { ValidatePersistedSemanticCandidateUseCase } from './application/use-cases/validate-persisted-semantic-candidate.use-case';
 import { AiServiceAdapter } from './infrastructure/adapters/ai-service.adapter';
 import { ContentServiceAdapter } from './infrastructure/adapters/content-service.adapter';
 import { R2ArtifactStorageAdapter } from './infrastructure/adapters/r2-artifact-storage.adapter';
@@ -21,6 +25,8 @@ import { SemanticIndexController } from './infrastructure/controllers/semantic-i
 import { PrismaService } from './infrastructure/prisma/prisma.service';
 import { PrismaIndexCheckpointRepository } from './infrastructure/repositories/prisma-index-checkpoint.repository';
 import { PrismaLangGraphCheckpointSaver } from './infrastructure/repositories/prisma-langgraph-checkpoint-saver';
+import { PrismaSemanticCandidateInspector } from './infrastructure/repositories/prisma-semantic-candidate-inspector';
+import { PrismaSemanticCandidateLifecycle } from './infrastructure/repositories/prisma-semantic-candidate-lifecycle';
 import { PrismaSemanticIndexRepository } from './infrastructure/repositories/prisma-semantic-index.repository';
 import { ReelIndexLangGraphWorkflow } from './infrastructure/workflows/reel-index-langgraph.workflow';
 
@@ -65,11 +71,15 @@ const rabbitClient = (name: string, queue: string) => ({
     MergeTranscriptSegmentsUseCase,
     BuildTranscriptSectionsUseCase,
     BuildAdaptiveTranscriptSectionsUseCase,
+    SelectHealthyTranscriptSectionsUseCase,
     BuildShortEvidenceChunksUseCase,
     BuildLongEvidenceChunksUseCase,
     ExtractHierarchicalMetadataUseCase,
     BuildHierarchicalIndexUseCase,
+    ValidateEmbeddingQualityUseCase,
     ValidateEvidenceIndexCandidateUseCase,
+    ValidatePersistedSemanticCandidateUseCase,
+    CommitSemanticCandidateUseCase,
     PrismaLangGraphCheckpointSaver,
     ReelIndexLangGraphWorkflow,
     ProcessReelIndexJobUseCase,
@@ -79,6 +89,8 @@ const rabbitClient = (name: string, queue: string) => ({
     ReelIndexRetryPublisherAdapter,
     PrismaIndexCheckpointRepository,
     PrismaSemanticIndexRepository,
+    PrismaSemanticCandidateInspector,
+    PrismaSemanticCandidateLifecycle,
     { provide: 'IIndexingAiService', useExisting: AiServiceAdapter },
     { provide: 'IIndexingContentService', useExisting: ContentServiceAdapter },
     { provide: 'IArtifactStorage', useExisting: R2ArtifactStorageAdapter },
@@ -93,6 +105,18 @@ const rabbitClient = (name: string, queue: string) => ({
     {
       provide: 'ISemanticIndexRepository',
       useExisting: PrismaSemanticIndexRepository,
+    },
+    {
+      provide: 'ISemanticCandidateInspector',
+      useExisting: PrismaSemanticCandidateInspector,
+    },
+    {
+      provide: 'ISemanticCandidateLifecycle',
+      useExisting: PrismaSemanticCandidateLifecycle,
+    },
+    {
+      provide: 'IReelIndexWorkflow',
+      useExisting: ReelIndexLangGraphWorkflow,
     },
   ],
 })
