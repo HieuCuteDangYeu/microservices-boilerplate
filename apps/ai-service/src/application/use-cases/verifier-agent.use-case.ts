@@ -49,15 +49,14 @@ export class VerifierAgentUseCase {
       return this.normalize(raw);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      const groundedFallback = this.canDeterministicallyPass(state);
       this.logger.warn(
-        `[VerifierAgent] provider failed; deterministic fallback passed=${groundedFallback}: ${message}`,
+        `[VerifierAgent] provider failed; required verification is fail-closed: ${message}`,
       );
 
       return {
-        passed: groundedFallback,
-        confidence: groundedFallback ? 0.55 : 0.2,
-        issues: ['Verifier provider failed; deterministic grounding fallback was used.'],
+        passed: false,
+        confidence: 0,
+        issues: ['Required answer verification was unavailable.'],
         requiresRevision: false,
       };
     }
@@ -169,34 +168,5 @@ ${JSON.stringify(
           ? raw.revisedInstruction.trim()
           : undefined,
     };
-  }
-
-  private canDeterministicallyPass(state: RagChatWorkflowState): boolean {
-    if (!state.route?.needsVerification) return true;
-    if (!state.route.needsRetrieval) return true;
-    if (state.contextSufficiency?.sufficient !== true) return false;
-
-    const required = state.route.requiredEvidence.filter(
-      (value) => value !== 'NONE',
-    );
-    if (required.length === 0) return true;
-
-    return required.every((requiredEvidence) => {
-      if (requiredEvidence === 'AUDIO') return false;
-      if (
-        requiredEvidence === 'CONVERSATION_MEMORY' ||
-        requiredEvidence === 'USER_MEMORY'
-      ) {
-        return true;
-      }
-
-      return state.rerankedChunks.some((chunk) => {
-        const type = chunk.evidenceType ?? 'TRANSCRIPT';
-        const evidence =
-          chunk.evidenceText?.trim() ||
-          (type === 'METADATA' ? chunk.chunkText.trim() : '');
-        return type === requiredEvidence && Boolean(evidence);
-      });
-    });
   }
 }
