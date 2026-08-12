@@ -152,16 +152,18 @@ export class ProcessReelUseCase {
           metricsContext,
           'VISUAL_FRAME_ARTIFACTS',
         );
-        const visualResult = await this.buildVisualFrameManifestUseCase.execute({
-          reelId,
-          mediaAttemptId: processingAttemptId,
-          inputPath: workspace.inputPath,
-          outputDir: path.join(workspace.workDir, 'visual-frames'),
-          storagePrefix: mediaKey.replace(/\.[^.]+$/, ''),
-          metadata: {
-            durationMs: mediaResult.mediaMetadata.sourceDurationMs,
+        const visualResult = await this.buildVisualFrameManifestUseCase.execute(
+          {
+            reelId,
+            mediaAttemptId: processingAttemptId,
+            inputPath: workspace.inputPath,
+            outputDir: path.join(workspace.workDir, 'visual-frames'),
+            storagePrefix: mediaKey.replace(/\.[^.]+$/, ''),
+            metadata: {
+              durationMs: mediaResult.mediaMetadata.sourceDurationMs,
+            },
           },
-        });
+        );
         visualTimer.succeed({
           visualFrameCount: visualResult.manifest.artifacts.length,
           visualFrameBytes: visualResult.totalFrameBytes,
@@ -189,10 +191,11 @@ export class ProcessReelUseCase {
         }
 
         totalPipelineTimer.succeed({
-          rabbitMqPayloadBytesEstimate: this.processingMetrics.estimatePayloadBytes({
-            ...mediaResult,
-            mediaOutput,
-          }),
+          rabbitMqPayloadBytesEstimate:
+            this.processingMetrics.estimatePayloadBytes({
+              ...mediaResult,
+              mediaOutput,
+            }),
           mediaOnlyWorker: true,
           visualFrameCount: visualResult.manifest.artifacts.length,
         });

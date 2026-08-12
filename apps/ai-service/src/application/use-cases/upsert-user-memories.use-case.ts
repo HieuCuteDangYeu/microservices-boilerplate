@@ -103,9 +103,7 @@ export class UpsertUserMemoriesUseCase {
     return results;
   }
 
-  private async consolidateIfSimilar(
-    memory: UserMemoryUpsertInput,
-  ) {
+  private async consolidateIfSimilar(memory: UserMemoryUpsertInput) {
     if (!memory.embedding?.length) {
       return null;
     }

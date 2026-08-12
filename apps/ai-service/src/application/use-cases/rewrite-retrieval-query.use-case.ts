@@ -17,33 +17,34 @@ export class RewriteRetrievalQueryUseCase {
 
   async execute(state: RagChatWorkflowState): Promise<string> {
     try {
-      const result = await this.structuredLlmService.generateObject<RawRewriteResult>({
-        systemPrompt: [
-          'You rewrite a failed reel-RAG retrieval query.',
-          'Return one concise search query only through the requested JSON schema.',
-          'Preserve all entities, names, numbers, quoted text, and modality constraints from the user question.',
-          'Use the failure reason to make the query more explicit, but never invent new facts.',
-          'Do not answer the user.',
-        ].join(' '),
-        userPrompt: [
-          `USER QUESTION:\n${state.userMessage}`,
-          `REQUIRED EVIDENCE:\n${state.route?.requiredEvidence.join(', ') || 'UNKNOWN'}`,
-          `PREVIOUS QUERIES:\n${(state.retrievalPlan?.queries ?? [state.retrievalPlan?.rewrittenQuery, state.retrievalPlan?.query]).filter(Boolean).join(' | ')}`,
-          `SUFFICIENCY FAILURE:\n${state.contextSufficiency?.reason ?? 'Retrieved evidence was insufficient.'}`,
-          `MISSING EVIDENCE:\n${state.contextSufficiency?.missingEvidence.join(', ') || 'NONE'}`,
-        ].join('\n\n'),
-        jsonSchema: {
-          type: 'object',
-          properties: {
-            query: { type: 'string' },
+      const result =
+        await this.structuredLlmService.generateObject<RawRewriteResult>({
+          systemPrompt: [
+            'You rewrite a failed reel-RAG retrieval query.',
+            'Return one concise search query only through the requested JSON schema.',
+            'Preserve all entities, names, numbers, quoted text, and modality constraints from the user question.',
+            'Use the failure reason to make the query more explicit, but never invent new facts.',
+            'Do not answer the user.',
+          ].join(' '),
+          userPrompt: [
+            `USER QUESTION:\n${state.userMessage}`,
+            `REQUIRED EVIDENCE:\n${state.route?.requiredEvidence.join(', ') || 'UNKNOWN'}`,
+            `PREVIOUS QUERIES:\n${(state.retrievalPlan?.queries ?? [state.retrievalPlan?.rewrittenQuery, state.retrievalPlan?.query]).filter(Boolean).join(' | ')}`,
+            `SUFFICIENCY FAILURE:\n${state.contextSufficiency?.reason ?? 'Retrieved evidence was insufficient.'}`,
+            `MISSING EVIDENCE:\n${state.contextSufficiency?.missingEvidence.join(', ') || 'NONE'}`,
+          ].join('\n\n'),
+          jsonSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' },
+            },
+            required: ['query'],
+            additionalProperties: false,
           },
-          required: ['query'],
-          additionalProperties: false,
-        },
-        maxTokens: 120,
-        temperature: 0,
-        timeoutMs: 3_000,
-      });
+          maxTokens: 120,
+          temperature: 0,
+          timeoutMs: 3_000,
+        });
 
       if (typeof result.query === 'string' && result.query.trim()) {
         return result.query.replace(/\s+/g, ' ').trim().slice(0, 500);

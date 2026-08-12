@@ -56,4 +56,68 @@ describe('VerifierAgentUseCase', () => {
     });
     expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
   });
+
+  it('uses the verifier-specific model and configured timeout for valid verification', async () => {
+    const structuredLlmService: IStructuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue({
+        passed: true,
+        confidence: 0.9,
+        issues: [],
+        requiresRevision: false,
+        revisedInstruction: '',
+      }),
+    };
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'CLOUDFLARE_VERIFIER_MODEL'
+          ? '@cf/test/verifier'
+          : key === 'AI_RAG_VERIFIER_TIMEOUT_MS'
+            ? '9000'
+            : undefined,
+      ),
+    };
+    const useCase = new VerifierAgentUseCase(
+      structuredLlmService,
+      config as never,
+    );
+    const state = {
+      route: {
+        intent: 'REEL_VIDEO_QUESTION',
+        needsRetrieval: true,
+        needsUserMemory: false,
+        needsConversationSummary: false,
+        needsVerification: true,
+        reelQuestionType: 'VISUAL_CONTENT',
+        requiredEvidence: ['VISUAL'],
+        recommendationAction: { type: 'NONE', reason: 'none' },
+        reason: 'visual question',
+      },
+      rerankedChunks: [],
+    } as RagChatWorkflowState;
+
+    await expect(useCase.execute(state)).resolves.toMatchObject({
+      passed: true,
+      confidence: 0.9,
+      requiresRevision: false,
+    });
+    expect(structuredLlmService.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: '@cf/test/verifier',
+        timeoutMs: 9000,
+      }),
+    );
+  });
+
+  it('instructs the verifier not to require timestamps for direct visual facts', () => {
+    const useCase = new VerifierAgentUseCase({
+      generateObject: jest.fn(),
+    } as never);
+    const systemPrompt = (
+      useCase as unknown as { buildSystemPrompt: () => string }
+    ).buildSystemPrompt();
+
+    expect(systemPrompt).toContain(
+      'does not need to repeat the evidence timestamp',
+    );
+  });
 });

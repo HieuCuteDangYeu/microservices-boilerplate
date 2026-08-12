@@ -66,7 +66,8 @@ export class AnalyzeVisualFrameManifestUseCase {
             version: analysis.version,
           };
         } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           failures.push(`${artifact.timestampMs}ms: ${message}`);
           this.logger.warn(
             `[VisualIndex] frame analysis skipped reelId=${job.reelId} timestampMs=${artifact.timestampMs}: ${message}`,
@@ -81,8 +82,8 @@ export class AnalyzeVisualFrameManifestUseCase {
       );
     }
 
-    const completed = results.filter(
-      (result): result is VisualSceneEvidence => Boolean(result),
+    const completed = results.filter((result): result is VisualSceneEvidence =>
+      Boolean(result),
     );
     this.logger.log(
       `[VisualIndex] reelId=${job.reelId} completed=${completed.length} failed=${failures.length} sampled=${manifest.artifacts.length}`,

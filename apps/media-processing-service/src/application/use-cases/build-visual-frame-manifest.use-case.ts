@@ -148,8 +148,7 @@ export class BuildVisualFrameManifestUseCase {
         Math.abs(candidate.timestampMs - previous.timestampMs) <= dedupeWindowMs
       ) {
         const shouldPreferSceneFrame =
-          candidate.reason === 'SCENE_CHANGE' &&
-          previous.reason === 'PERIODIC';
+          candidate.reason === 'SCENE_CHANGE' && previous.reason === 'PERIODIC';
         if (previous.reason !== candidate.reason) {
           previous.reason = 'PERIODIC_AND_SCENE_CHANGE';
         }

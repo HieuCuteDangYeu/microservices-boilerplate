@@ -137,6 +137,9 @@ export interface RagChatWorkflowState {
   userMessage: string;
   memory?: AiChatMemoryContext;
 
+  accessibleReelIds?: string[];
+  hasSharedReelContext?: boolean;
+
   route?: RagChatRouteDecision;
   retrievalPlan?: RagRetrievalPlan;
   retrievalRepairQuery?: string;

@@ -39,7 +39,8 @@ export class SelectHealthyTranscriptSectionsUseCase {
     minimumSeconds: number;
     maximumSeconds: number;
   }): string | undefined {
-    if (input.candidate.length === 0) return 'no candidate sections were produced';
+    if (input.candidate.length === 0)
+      return 'no candidate sections were produced';
 
     const source = [...input.sourceSegments]
       .filter((segment) => segment.text.trim())
@@ -76,9 +77,7 @@ export class SelectHealthyTranscriptSectionsUseCase {
     if (Math.abs(input.candidate[0].startMs - sourceStartMs) > toleranceMs) {
       return 'candidate sections do not cover the beginning of the transcript';
     }
-    if (
-      Math.abs(input.candidate.at(-1)!.endMs - sourceEndMs) > toleranceMs
-    ) {
+    if (Math.abs(input.candidate.at(-1)!.endMs - sourceEndMs) > toleranceMs) {
       return 'candidate sections do not cover the end of the transcript';
     }
 

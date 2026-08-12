@@ -5,11 +5,13 @@ import type {
 import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type {
   RagChatRouteDecision,
+  RagRequiredEvidence,
   RagRetrievalMode,
   RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
-import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
+import type { IRagHierarchyShadowObservationRepository } from '@ai/domain/interfaces/rag-hierarchy-shadow-observation.repository.interface';
 import type { IReelSemanticIndexService } from '@ai/domain/interfaces/reel-semantic-index.service.interface';
+import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
 import type {
   IStructuredLlmService,
   StructuredLlmJsonSchema,
@@ -34,6 +36,8 @@ interface RawRetrievalPlan {
 }
 
 interface RetrievalExecutionInput {
+  userId: string;
+  conversationId: string;
   mode: Exclude<RagRetrievalMode, 'NONE'>;
   queryText: string;
   queryEmbedding: number[];
@@ -41,11 +45,13 @@ interface RetrievalExecutionInput {
   limit: number;
   includeTranscript: boolean;
   includeVisual: boolean;
+  requiredEvidence: RagRequiredEvidence[];
 }
 
 @Injectable()
 export class RetrievalAgentUseCase {
   private readonly logger = new Logger(RetrievalAgentUseCase.name);
+  private hasWarnedBlockedHierarchyPromotion = false;
 
   constructor(
     @Inject('IStructuredLlmService')
@@ -58,6 +64,8 @@ export class RetrievalAgentUseCase {
     private readonly semanticIndexService: IReelSemanticIndexService,
     @Inject('IRerankerService')
     private readonly rerankerService: IRerankerService,
+    @Inject('IRagHierarchyShadowObservationRepository')
+    private readonly hierarchyObservationRepository: IRagHierarchyShadowObservationRepository,
     private readonly config: ConfigService,
   ) {}
 
@@ -71,7 +79,10 @@ export class RetrievalAgentUseCase {
     retrievedChunks: TranscriptMatch[];
     rerankedChunks: TranscriptMatch[];
   }> {
-    const plan = await this.plan({ message: input.message, route: input.route });
+    const plan = await this.plan({
+      message: input.message,
+      route: input.route,
+    });
     const retrievedChunks = await this.retrieve({
       userId: input.userId,
       conversationId: input.conversationId,
@@ -95,6 +106,7 @@ export class RetrievalAgentUseCase {
     conversationId: string;
     route: RagChatRouteDecision;
     plan: RagRetrievalPlan;
+    accessibleReelIds?: string[];
   }): Promise<TranscriptMatch[]> {
     if (input.plan.mode === 'NONE') {
       return [];
@@ -103,10 +115,11 @@ export class RetrievalAgentUseCase {
     const queries = this.getQueries(input.plan);
     const allCandidates: TranscriptMatch[] = [];
     const accessibleReelIds =
-      await this.contentService.resolveReelContextAccess({
+      input.accessibleReelIds ??
+      (await this.contentService.resolveReelContextAccess({
         userId: input.userId,
         conversationId: input.conversationId,
-      });
+      }));
     if (accessibleReelIds.length === 0) {
       return [];
     }
@@ -124,6 +137,8 @@ export class RetrievalAgentUseCase {
       });
       allCandidates.push(
         ...(await this.retrieveForQuery({
+          userId: input.userId,
+          conversationId: input.conversationId,
           mode: input.plan.mode,
           queryText,
           queryEmbedding: queryEmbedding.values,
@@ -131,6 +146,7 @@ export class RetrievalAgentUseCase {
           limit: input.plan.searchLimit,
           includeTranscript,
           includeVisual,
+          requiredEvidence: input.route.requiredEvidence,
         })),
       );
     }
@@ -158,11 +174,17 @@ export class RetrievalAgentUseCase {
   private async retrieveForQuery(
     input: RetrievalExecutionInput,
   ): Promise<TranscriptMatch[]> {
-    const hierarchicalEnabled = this.hierarchicalRetrievalEnabled();
-    const shadowEnabled = this.readBoolean(
-      'RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED',
+    const hierarchyRequested = this.readBoolean(
+      'RAG_HIERARCHICAL_RETRIEVAL_ENABLED',
       false,
     );
+    const hierarchicalEnabled =
+      this.hierarchicalRetrievalEnabled(hierarchyRequested);
+    const shadowEnabled =
+      !hierarchicalEnabled &&
+      (hierarchyRequested ||
+        this.readBoolean('RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED', true));
+
     if (hierarchicalEnabled) {
       return await this.retrieveHierarchically(input);
     }
@@ -170,18 +192,20 @@ export class RetrievalAgentUseCase {
     const startedAt = Date.now();
     const direct = await this.retrieveDirectly(input);
     const directMs = Date.now() - startedAt;
+
     if (shadowEnabled && input.includeTranscript) {
       const shadowStartedAt = Date.now();
       const hierarchical = await this.retrieveHierarchically(input);
       const hierarchicalMs = Date.now() - shadowStartedAt;
-      this.logHierarchyShadowComparison({
-        queryText: input.queryText,
+      await this.recordHierarchyShadowComparison({
+        input,
         direct,
         hierarchical,
         directMs,
         hierarchicalMs,
       });
     }
+
     return direct;
   }
 
@@ -322,7 +346,9 @@ export class RetrievalAgentUseCase {
   }
 
   private extractExplicitQueryTags(queryText: string): string[] {
-    const tags = queryText.match(/#[\p{L}\p{N}_-]+/gu) ?? [];
+    const tags = queryText
+      .split(/[^#\p{L}\p{N}_-]+/u)
+      .filter((token) => /^#[\p{L}\p{N}_-]+$/u.test(token));
     return [...new Set(tags.map((tag) => tag.slice(1).toLowerCase()))].slice(
       0,
       8,
@@ -352,8 +378,33 @@ export class RetrievalAgentUseCase {
     return [...byId.values()];
   }
 
-  private hierarchicalRetrievalEnabled(): boolean {
-    return this.readBoolean('RAG_HIERARCHICAL_RETRIEVAL_ENABLED', false);
+  private hierarchicalRetrievalEnabled(requested: boolean): boolean {
+    if (!requested) {
+      return false;
+    }
+
+    const environment =
+      this.config.get<string>('NODE_ENV')?.trim().toLowerCase() ?? '';
+    if (environment !== 'production') {
+      return true;
+    }
+
+    const promotionApproved = this.readBoolean(
+      'RAG_HIERARCHICAL_RETRIEVAL_PROMOTION_APPROVED',
+      false,
+    );
+    if (promotionApproved) {
+      return true;
+    }
+
+    if (!this.hasWarnedBlockedHierarchyPromotion) {
+      this.hasWarnedBlockedHierarchyPromotion = true;
+      this.logger.warn(
+        '[HierarchyRollout] production hierarchy serving was requested but promotion is not approved; serving direct retrieval and forcing hierarchy shadow instead',
+      );
+    }
+
+    return false;
   }
 
   private readBoolean(name: string, fallback: boolean): boolean {
@@ -403,25 +454,57 @@ export class RetrievalAgentUseCase {
     };
   }
 
-  private logHierarchyShadowComparison(input: {
-    queryText: string;
+  private async recordHierarchyShadowComparison(input: {
+    input: RetrievalExecutionInput;
     direct: TranscriptMatch[];
     hierarchical: TranscriptMatch[];
     directMs: number;
     hierarchicalMs: number;
-  }): void {
+  }): Promise<void> {
     const limit = Math.max(input.direct.length, input.hierarchical.length, 1);
-    const directIds = new Set(input.direct.map((item) => item.chunkId));
-    const hierarchicalIds = new Set(
-      input.hierarchical.map((item) => item.chunkId),
+    const directIds = input.direct.map((item) => item.chunkId);
+    const hierarchicalIds = input.hierarchical.map((item) => item.chunkId);
+    const directIdSet = new Set(directIds);
+    const hierarchicalIdSet = new Set(hierarchicalIds);
+    const intersection = [...directIdSet].filter((id) =>
+      hierarchicalIdSet.has(id),
     );
-    const intersection = [...directIds].filter((id) => hierarchicalIds.has(id));
-    const union = new Set([...directIds, ...hierarchicalIds]);
-    const overlap = intersection.length / limit;
+    const union = new Set([...directIdSet, ...hierarchicalIdSet]);
+    const overlapAtK = intersection.length / limit;
     const jaccard = union.size ? intersection.length / union.size : 1;
+
     this.logger.log(
-      `[HierarchicalRetrievalShadow] query=${JSON.stringify(input.queryText)} directMs=${input.directMs} hierarchicalMs=${input.hierarchicalMs} direct=${input.direct.length} hierarchical=${input.hierarchical.length} overlapAtK=${overlap.toFixed(3)} jaccard=${jaccard.toFixed(3)}`,
+      `[HierarchicalRetrievalShadow] ${JSON.stringify({
+        query: input.input.queryText,
+        directMs: input.directMs,
+        hierarchicalMs: input.hierarchicalMs,
+        direct: directIds.length,
+        hierarchical: hierarchicalIds.length,
+        overlapAtK: Number(overlapAtK.toFixed(4)),
+        jaccard: Number(jaccard.toFixed(4)),
+      })}`,
     );
+
+    try {
+      await this.hierarchyObservationRepository.save({
+        userId: input.input.userId,
+        conversationId: input.input.conversationId,
+        queryText: input.input.queryText,
+        retrievalMode: input.input.mode,
+        requiredEvidence: input.input.requiredEvidence,
+        directChunkIds: directIds,
+        hierarchicalChunkIds: hierarchicalIds,
+        directMs: input.directMs,
+        hierarchicalMs: input.hierarchicalMs,
+        overlapAtK,
+        jaccard,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[HierarchyRollout] failed to persist shadow observation: ${message}`,
+      );
+    }
   }
 
   private async planRetrieval(input: {

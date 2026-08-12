@@ -1,163 +1,280 @@
 # RAG retrieval, citation, memory, and visual-index rollout
 
-This document describes how to evaluate and roll out the retrieval and visual-index changes without changing production behavior blindly.
+This document defines the production rollout contract for the RAG retrieval, neural reranking, citation, and visual-index changes. A feature being deployed or having an active code path is **not** evidence that it is production-proven.
 
-## 1. Verified answer and citation workflow
+## 1. Current rollout state
+
+Until fresh post-release evidence passes the readiness checks in this document, treat the features as follows:
+
+| Capability | Implementation | Production claim allowed? | Serving posture |
+| --- | --- | --- | --- |
+| Direct reel retrieval | Active baseline | Yes | Serving |
+| Hierarchical retrieval | Implemented | **No** until labelled + production gates pass | Shadow only |
+| Neural cross-encoder reranking | Implemented with fallback | Only after fresh workflow telemetry exists | Serving with deterministic fallback |
+| Claim-level LLM citations | Implemented with verification/repair | Only for responses that pass the runtime gates | Serving |
+| Visual/OCR indexing | Implemented | **No end-to-end claim** until a fresh reel is indexed and visually cited | Canary/evidence collection |
+
+Historical traces or index rows created before the release boundary do not satisfy promotion criteria.
+
+## 2. Mandatory hierarchy rollout state
+
+Production must start with direct retrieval serving and hierarchy running in shadow:
+
+```env
+RAG_HIERARCHICAL_RETRIEVAL_ENABLED=false
+RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED=true
+RAG_HIERARCHICAL_RETRIEVAL_PROMOTION_APPROVED=false
+```
+
+There is also a code-level production guard. In `NODE_ENV=production`, setting only:
+
+```env
+RAG_HIERARCHICAL_RETRIEVAL_ENABLED=true
+```
+
+is no longer enough to serve hierarchical retrieval. Serving hierarchy also requires:
+
+```env
+RAG_HIERARCHICAL_RETRIEVAL_PROMOTION_APPROVED=true
+```
+
+If production requests hierarchy without the promotion flag, the AI service serves **direct retrieval** and forces hierarchy into **shadow** mode. This protects production from an accidental environment-variable rollout.
+
+Do not set `RAG_HIERARCHICAL_RETRIEVAL_PROMOTION_APPROVED=true` until the production-readiness command reports hierarchy `READY` using a labelled benchmark report created from fresh shadow observations.
+
+## 3. Persisted hierarchy shadow evidence
+
+Shadow comparisons are no longer log-only. Each fresh comparison is persisted in the AI database as `RagHierarchyShadowObservation` with:
+
+- query/retrieval mode and required evidence type
+- direct ranked chunk IDs
+- hierarchical ranked chunk IDs
+- direct latency
+- hierarchical latency
+- overlap@K
+- Jaccard overlap
+
+The AI migration is:
+
+```text
+apps/ai-service/prisma/migrations/
+20260812190000_add_rag_hierarchy_shadow_observations/migration.sql
+```
+
+Overlap and Jaccard are **observability signals only**. They are not recall, relevance, or answer-quality metrics and are never sufficient for promotion.
+
+## 4. Build a labelled hierarchy benchmark from production shadow traffic
+
+First deploy the shadow-first state and collect fresh observations after a concrete release timestamp.
+
+Export review cases from those observations:
+
+```bash
+node scripts/ops/rag-hierarchy-benchmark.cjs \
+  --since 2026-08-12T12:00:00Z \
+  --limit 100 \
+  --export-template artifacts/rag-hierarchy-labels.json
+```
+
+The exported file contains the query, direct/hierarchical ranked IDs, and grounded candidate evidence. A reviewer must populate each case's `relevantIds` with every candidate that directly contains evidence relevant to answering that query. Leave `relevantIds` empty for unreviewed cases.
+
+Then score the labelled cases:
+
+```bash
+node scripts/ops/rag-hierarchy-benchmark.cjs \
+  --labels artifacts/rag-hierarchy-labels.json \
+  --k 5 \
+  --output artifacts/rag-hierarchy-benchmark.json
+```
+
+The output uses the same metric shape as `EvaluateRetrievalBenchmarkUseCase`:
+
+- Recall@K
+- reciprocal rank / MRR contribution
+- nDCG@K
+- direct metrics
+- hierarchical metrics
+- hierarchical-minus-direct deltas
+
+Do not manufacture `relevantIds` from whichever algorithm ranked a candidate highest. Relevance labels must be determined from the evidence itself.
+
+## 5. Production-readiness evidence gate
+
+Use a concrete post-release timestamp. The command deliberately requires `--since` (or `RAG_PRODUCTION_EVIDENCE_SINCE`) so stale July traces cannot accidentally count as evidence for an August deployment.
+
+```bash
+node scripts/ops/rag-production-readiness.cjs \
+  --since 2026-08-12T12:00:00Z \
+  --benchmark artifacts/rag-hierarchy-benchmark.json \
+  --target all \
+  --output artifacts/rag-production-readiness.json
+```
+
+The command exits with:
+
+- `0`: requested target passed all gates
+- `2`: evidence is valid but promotion/readiness is still blocked
+- `1`: the readiness check itself failed (configuration/database/file error)
+
+Targets:
+
+```bash
+--target hierarchy
+--target visual
+--target all
+```
+
+Default conservative thresholds are configurable:
+
+```env
+RAG_READINESS_MIN_RAG_TRACES=50
+RAG_READINESS_MIN_WORKFLOW_METRIC_COVERAGE=0.95
+RAG_READINESS_MIN_RETRIEVAL_TIMING_TRACES=30
+RAG_READINESS_MIN_HIERARCHY_SHADOW_OBSERVATIONS=30
+RAG_READINESS_MIN_BENCHMARK_CASES=30
+RAG_READINESS_MIN_RECALL_DELTA=-0.01
+RAG_READINESS_MIN_MRR_DELTA=-0.01
+RAG_READINESS_MIN_NDCG_DELTA=-0.01
+RAG_READINESS_MAX_HIERARCHY_P95_LATENCY_RATIO=1.5
+RAG_READINESS_MIN_FRESH_COMPLETED_INDEX_ATTEMPTS=1
+RAG_READINESS_MIN_FRESH_ACTIVE_VISUAL_SCENES=1
+RAG_READINESS_MIN_FRESH_VISUAL_REELS=1
+RAG_READINESS_MIN_VISUAL_CITATION_TRACES=1
+```
+
+Changing a threshold is a rollout decision and should be recorded with the resulting report; do not lower thresholds merely to turn a failed gate green.
+
+## 6. What proves hierarchy is ready
+
+Hierarchy promotion requires all of the following after the release boundary:
+
+1. enough fresh RAG traces
+2. high coverage of the new workflow metrics
+3. enough retrieval traces containing separate planner/retrieval/neural-reranker timings
+4. enough persisted hierarchy shadow observations
+5. acceptable hierarchy-vs-direct p95 latency ratio
+6. enough human-labelled benchmark cases
+7. non-regressing Recall@K
+8. non-regressing MRR
+9. non-regressing nDCG@K
+
+The readiness report includes overlap/Jaccard averages for diagnosis, but they do not participate as relevance-quality gates.
+
+Only after the report says hierarchy is ready may production intentionally use:
+
+```env
+RAG_HIERARCHICAL_RETRIEVAL_ENABLED=true
+RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED=false
+RAG_HIERARCHICAL_RETRIEVAL_PROMOTION_APPROVED=true
+```
+
+Keep the generated readiness JSON as the promotion evidence artifact.
+
+## 7. What proves visual RAG works end-to-end
+
+`ReelVisualScene` rows existing in the schema or a deployed vision adapter do not prove the workflow is operational.
+
+A post-release canary reel must traverse:
+
+```text
+upload
+→ media processing
+→ visual-frame manifest
+→ visual analysis
+→ VISUAL_SCENE document construction
+→ embedding quality gate
+→ inactive persistence
+→ persisted integrity gate
+→ semantic commit
+→ active ReelVisualScene rows
+→ visual RAG retrieval
+→ verified answer
+→ VISUAL citation
+```
+
+The visual readiness gate requires, after the release boundary:
+
+- at least one completed indexing attempt
+- active `ReelVisualScene` rows created by fresh processing
+- at least one fresh reel represented by those active visual rows
+- at least one post-release RAG trace containing a `VISUAL` citation that references a reel with fresh active visual evidence
+
+Recommended canary content should contain independent transcript-only and visual-only facts, for example:
+
+```text
+Speech: "The internal project name is Aurora."
+Visible-only: "ORDER NUMBER: VLR-9281"
+Visible-only later: "DISCOUNT: 25%"
+```
+
+Acceptance questions:
+
+```text
+What project name does the speaker say?
+→ TRANSCRIPT evidence: Aurora
+
+What order number is visible?
+→ VISUAL evidence: VLR-9281
+
+What discount is visible?
+→ VISUAL evidence: 25%
+
+What phone number is visible?
+→ safe refusal if no phone number is present
+```
+
+Do not claim visual RAG works end-to-end until `--target visual` exits `0`.
+
+## 8. Verified answer and citation workflow
 
 Search uses enriched `retrievalText`, while answer generation, verification, and citations use grounded `evidenceText`.
 
-The RAG graph now produces a non-streaming draft first. Routes that require verification must pass the verifier before any answer tokens are published. A failed verifier can request one bounded answer revision; verifier-provider failure is fail-closed for routes that require verification.
+The RAG graph produces a non-streaming draft first. Routes requiring verification must pass the verifier before tokens are published. Retrieval insufficiency has a bounded rewrite/retry path. Unsupported factual claims can trigger bounded answer repair before the final response is streamed.
 
-Retrieval insufficiency now has a real bounded repair path: `REWRITE_AND_RETRY` rewrites the search query using the failure/missing-modality context and reruns retrieval before refusing.
-
-Default production guards:
+Defaults:
 
 ```env
 AI_RAG_MAX_RETRIEVAL_RETRIES=1
 AI_RAG_MAX_ANSWER_REVISIONS=1
 AI_RAG_VERIFIER_MIN_CONFIDENCE=0.65
-```
-
-Memory retrieval and reel retrieval run as parallel graph branches with an explicit readiness barrier before draft generation. Reel recommendations also run independently after routing and fail open so recommendation-provider failure does not fail the answer path.
-
-### Claim-level citation attribution
-
-Citation attribution runs on the verified draft before streaming. A structured LLM receives the user question, final draft, and opaque evidence IDs. It extracts externally checkable factual claims and determines which supplied evidence IDs directly support each claim.
-
-The LLM never writes the public citation payload. The application rebuilds each citation from the trusted retrieval object, including:
-
-- `reelId`
-- `evidenceType` (`TRANSCRIPT`, `VISUAL`, or `METADATA`)
-- optional title
-- optional start/end timestamps
-- a quote truncated from grounded evidence only
-
-Safety behavior:
-
-- invented/unknown evidence IDs are discarded
-- low-confidence support judgments are treated as unsupported
-- transcript/visual citations never fall back to enriched `retrievalText`
-- unsupported factual claims count against citation coverage
-- below-threshold coverage requests one bounded answer revision; if coverage still fails, the graph emits a safe verified-refusal
-- provider/JSON failure falls back to grounded deterministic citation selection only after the answer has already passed verification
-
-Default citation settings:
-
-```env
-CLOUDFLARE_CITATION_MODEL=@cf/meta/llama-3.1-8b-instruct
-AI_RAG_CITATION_MIN_CONFIDENCE=0.65
-AI_RAG_CITATION_CANDIDATE_LIMIT=8
-AI_RAG_CITATION_TIMEOUT_MS=4000
 AI_RAG_CITATION_COVERAGE_THRESHOLD=1
 AI_RAG_MAX_CITATION_REVISIONS=1
 ```
 
-The default coverage threshold is intentionally `1`: every factual reel claim identified by the attribution verifier must be directly supported before streaming.
+Claim-level citation attribution receives opaque evidence IDs; the public citation payload is rebuilt from trusted retrieval objects. The LLM cannot invent public `reelId`, timestamp, evidence type, or quote fields.
 
-Citations remain preserved from `ai-service` through `conversation-service` and bot-message metadata. RAG traces now also preserve `reelId` and `evidenceType` and record retrieval/answer/citation retry counts plus final citation coverage.
+RAG traces store retrieval/answer/citation retry counts, citation coverage, node timings, and grounded citation identity (`reelId`, `evidenceType`).
 
-## 2. Retrieval modes and repair
+## 9. Neural reranking
 
-`REEL_VECTOR` performs semantic vector retrieval only.
+The production reranker is:
 
-`REEL_HYBRID` performs vector + PostgreSQL full-text retrieval. Explicit `#hashtags` are also passed to the tag-intersection lane. Results continue to use Reciprocal Rank Fusion in the semantic-index repository.
-
-Visual questions use the visual-scene index. Transcript questions use transcript chunks. Mixed evidence requirements can retrieve both modalities before reranking.
-
-The LangGraph workflow now invokes the retrieval application use case as three distinct stages: `retrievalPlannerNode -> retrievalNode -> neuralRerankerNode`. Planning, raw retrieval, and cross-encoder/MMR latency therefore appear separately in node timings. A repaired query loops back through the planner so its new query set and search limits are explicit before the retry executes.
-
-## 3. Hierarchical retrieval benchmark
-
-Keep hierarchical retrieval disabled while collecting shadow measurements:
-
-```env
-RAG_HIERARCHICAL_RETRIEVAL_ENABLED=false
-RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED=true
+```text
+retrieval candidates
+→ Cloudflare Workers AI cross-encoder
+→ normalized neural relevance
+→ MMR diversity
+→ top context
 ```
 
-The retrieval layer returns the direct result set but also executes the hierarchical path and logs:
+with deterministic reranking as the fail-open fallback.
 
-- direct latency
-- hierarchical latency
-- result overlap at K
-- Jaccard overlap
-
-Use a labelled evaluation set with `EvaluateRetrievalBenchmarkUseCase` to compare:
-
-- Recall@K
-- MRR
-- nDCG@K
-- hit rate
-- average latency
-
-Do not enable hierarchy globally based only on overlap. Promote hierarchical retrieval only after labelled relevance metrics are non-regressing and latency/cost are acceptable.
-
-## 4. Adaptive sectioning and section quality gate
-
-Recommended initial settings:
-
-```env
-INDEX_LONG_ADAPTIVE_SECTIONING_ENABLED=false
-INDEX_LONG_ADAPTIVE_SECTIONING_SHADOW_MODE=true
-INDEX_LONG_ADAPTIVE_SECTIONING_SHADOW_SAMPLE_RATE=0.1
-INDEX_SECTION_BOUNDARY_EVAL_TOLERANCE_SECONDS=15
-INDEX_LONG_SECTION_MIN_SECONDS=120
-INDEX_LONG_SECTION_MAX_SECONDS=480
-```
-
-Shadow evaluation logs:
-
-- legacy/adaptive section count
-- section-count delta
-- boundary agreement
-- average/min/max adaptive duration
-- too-short/too-long section counts
-
-When adaptive output is used by the indexing graph, it now passes through a deterministic section-quality gate before chunk construction. The gate checks timestamp validity/order, overlap, duration tolerance, undersized-section ratio, and transcript start/end coverage. Unhealthy adaptive output falls back to the legacy sectioner instead of activating a malformed hierarchy.
-
-## 5. Neural reranking
-
-The default reranker is a two-stage production path:
-
-1. send the top retrieval candidates to Cloudflare Workers AI `@cf/baai/bge-reranker-base`
-2. sigmoid-normalize the cross-encoder scores
-3. apply MMR diversity over the neural scores so overlapping chunks/scenes do not dominate
-4. fall back automatically to the deterministic reranker on timeout, provider errors, invalid JSON, or unusable scores
-
-Optional tuning:
+Defaults/tuning include:
 
 ```env
 AI_RAG_NEURAL_RERANK_ENABLED=true
 AI_RAG_NEURAL_RERANK_MODEL=@cf/baai/bge-reranker-base
 AI_RAG_NEURAL_RERANK_CANDIDATE_LIMIT=20
 AI_RAG_NEURAL_RERANK_TIMEOUT_MS=5000
-AI_RAG_NEURAL_RERANK_MAX_CONTEXT_CHARS=5000
 AI_RAG_RERANK_MAX_LIMIT=8
 AI_RAG_MMR_LAMBDA=0.82
-AI_RAG_MMR_SAME_REEL_PENALTY=0.18
-AI_RAG_MMR_TEMPORAL_OVERLAP_PENALTY=0.65
 ```
 
-The deterministic reranker remains the fail-open fallback and combines retrieval signals, IDF-weighted query coverage, exact phrase matching, title/tag coverage, and MMR diversity.
+Fresh production traces must contain separate `retrievalPlannerNode`, `retrievalNode`, and `neuralRerankerNode` timings before rollout performance is considered observed.
 
-Benchmark neural reranking against the deterministic baseline with the labelled retrieval evaluator. Record nDCG/MRR/Recall deltas plus p50/p95 latency and provider failure rate.
+## 10. Visual/OCR indexing defaults
 
-## 6. Long-term memory consolidation
-
-New memories still require explicit evidence from user-authored text. Semantically similar memories of the same type can be consolidated before insertion.
-
-```env
-AI_USER_MEMORY_DEDUPE_SEMANTIC_SCORE=0.94
-AI_USER_MEMORY_DEDUPE_LEXICAL_SCORE=0.55
-```
-
-The implementation intentionally does not replace contradictory memories merely because they are semantically similar. Explicit supersession evidence should be introduced before implementing contradiction overwrite rules.
-
-## 7. Parallel visual/OCR indexing
-
-Media processing extracts candidate frames using both periodic sampling and FFmpeg scene-change detection, deduplicates nearby samples, caps the frame budget, uploads immutable JPEG artifacts, and stores a versioned manifest with checksums and timestamps.
-
-Recommended defaults:
+Media processing combines periodic sampling and FFmpeg scene-change detection, deduplicates nearby frames, caps the frame budget, uploads immutable artifacts, and writes a versioned manifest.
 
 ```env
 MEDIA_VISUAL_PERIODIC_INTERVAL_SECONDS=4
@@ -165,13 +282,7 @@ MEDIA_VISUAL_SCENE_THRESHOLD=0.35
 MEDIA_VISUAL_DEDUPE_WINDOW_MS=750
 MEDIA_VISUAL_MAX_FRAMES=24
 MEDIA_VISUAL_FRAME_EXTRACTION_TIMEOUT_MS=180000
-```
 
-In reel indexing, visual analysis is now an explicit LangGraph branch that runs in parallel with the transcript branch. The visual branch writes only visual evidence/readiness state; transcript processing owns its own progress state. Both branches join before metadata/chunk construction.
-
-Frame integrity and transport encoding remain outside the application layer: the R2 infrastructure adapter verifies the manifest SHA-256 before returning bytes, and the AI infrastructure adapter converts bytes to the base64 RMQ DTO.
-
-```env
 CLOUDFLARE_AI_VISION_MODEL=@cf/moondream/moondream3.1-9B-A2B
 AI_VISION_MAX_IMAGE_BYTES=4194304
 INDEX_VISUAL_ANALYSIS_ENABLED=true
@@ -179,70 +290,27 @@ INDEX_VISUAL_ANALYSIS_REQUIRED=false
 INDEX_VISUAL_ANALYSIS_CONCURRENCY=2
 ```
 
-`INDEX_VISUAL_ANALYSIS_REQUIRED=false` is deliberate: a vision-provider outage or quota limit should not prevent transcript/metadata indexing from activating. Set it to `true` only when visual evidence is a hard indexing requirement.
+`INDEX_VISUAL_ANALYSIS_REQUIRED=false` keeps transcript/metadata indexing available during a vision-provider outage; it does not mean a reel without visual scenes can satisfy a visual-evidence question.
 
-## 8. Index hierarchy and metadata authority
+## 11. Index quality and stale-attempt safety
 
-The semantic hierarchy is:
+Adaptive section output is quality-gated before chunking. Embeddings are validated for dimensions, finite values, non-zero norm, and suspicious duplicate-vector ratios. Persisted semantic candidates are read back while inactive before activation.
 
-```text
-REEL
-├── SECTION
-│   └── CHUNK            (transcript evidence)
-└── VISUAL_SCENE         (sampled-frame evidence)
-```
+Semantic activation/content completion uses a reversible saga:
 
-`VISUAL_SCENE` is not treated as a transcript chunk. It has its own PostgreSQL table with generated full-text search data, GIN indexes, and an HNSW cosine index over the same 384-dimensional embedding space.
+1. verify the content-service attempt is current
+2. discard stale inactive candidates
+3. under a per-reel advisory lock, remember the previous active candidate
+4. activate the new candidate without deleting the previous one
+5. complete the exact content attempt
+6. roll back only this candidate if stale/failing
+7. finalize the new candidate and remove older inactive rows only after content accepts it
 
-Creator-authored title and description remain authoritative during metadata extraction. AI-derived values fill missing fields rather than silently replacing creator text; derived tags are unioned with user tags.
+A stale attempt is not allowed to deactivate a newer candidate.
 
-## 9. Embedding and persisted-candidate quality gates
+## 12. Database rollout
 
-After embeddings are generated, the graph validates:
-
-- declared dimensions match actual vector length
-- all values are finite
-- vector norm is non-zero
-- exact duplicate-vector ratio is not suspicious for multi-document candidates
-
-Default duplicate guard:
-
-```env
-INDEX_EMBEDDING_MAX_DUPLICATE_RATIO=0.5
-```
-
-After semantic rows are persisted but while they are still inactive, an independent Prisma read-back inspector compares persisted counts with the materialized candidate:
-
-- exactly one REEL document
-- expected SECTION count
-- expected CHUNK count
-- expected VISUAL_SCENE count
-- expected transcript segment count
-- zero active candidate documents before commit
-
-A mismatch prevents activation.
-
-## 10. Stale-attempt commit guard and compensation
-
-Semantic activation and content completion now use a reversible commit saga instead of activating/deleting old semantic rows before content-service checks staleness.
-
-The commit sequence is:
-
-1. verify the content-service attempt is still current
-2. if stale, discard the inactive semantic candidate
-3. under a per-reel PostgreSQL advisory lock, remember the previous active semantic attempt and activate the new candidate without deleting the previous rows
-4. atomically ask content-service to complete the exact attempt
-5. if content rejects the attempt as stale, roll semantic activation back to the previous candidate only if this attempt is still active, then discard the stale candidate
-6. if a newer semantic attempt has already become active, the older rollback leaves that newer candidate untouched
-7. if content accepts the current attempt, finalize the semantic candidate and delete older inactive rows
-
-Pre-commit workflow failures discard only inactive candidate rows. The application use case depends on the `IReelIndexWorkflow` domain port rather than importing the LangGraph infrastructure workflow directly.
-
-This does not turn two independent databases into a distributed ACID transaction; it provides bounded compensation and prevents the prior stale-attempt activation path.
-
-## 11. Database rollout
-
-Generate clients, then apply both service migrations before building/deploying:
+Generate clients and deploy both migrations before starting the updated services:
 
 ```bash
 pnpm prisma:generate:reel-indexing
@@ -251,13 +319,14 @@ pnpm migrate:deploy:reel-indexing
 pnpm migrate:deploy:ai
 ```
 
-The AI migration `20260812123000_add_rag_workflow_metrics` adds `RagTrace.workflowMetrics` for repair/coverage observability.
+Relevant AI migrations include:
 
-The reel-indexing migrations include the visual-scene hierarchy/schema introduced by the earlier visual indexing work.
+```text
+20260812123000_add_rag_workflow_metrics
+20260812190000_add_rag_hierarchy_shadow_observations
+```
 
-## 12. Focused validation
-
-Run the graph-related unit tests first:
+## 13. Focused validation before deployment
 
 ```bash
 pnpm exec jest --runInBand \
@@ -269,39 +338,23 @@ pnpm exec jest --runInBand \
   apps/reel-indexing-service/src/application/use-cases/validate-embedding-quality.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/select-healthy-transcript-sections.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/commit-semantic-candidate.use-case.spec.ts
-```
 
-Then compile the affected services:
-
-```bash
 pnpm build:ai
 pnpm build:content
 pnpm build:reel-indexing
-```
-
-Finally run the repository suite:
-
-```bash
 pnpm test
 pnpm build:all
 ```
 
-## 13. Promotion criteria
+## 14. Promotion record
 
-Before enabling hierarchical retrieval or adaptive sectioning globally, use representative labelled reel questions and compare the candidate configuration against the current production baseline. At minimum record:
+For each production promotion, retain:
 
-- Recall/MRR/nDCG
-- planner/retrieval/neural-reranker p50/p95 latency separately
-- neural-reranker fallback rate
-- retrieval-repair rate and success rate
-- answer-revision rate
-- verifier failure/provider-unavailability rate
-- citation precision and claim coverage
-- safe-refusal accuracy for missing visual/transcript evidence
-- visual analysis latency/failure rate
-- adaptive-section fallback rate
-- embedding-quality failures
-- persisted-candidate integrity failures
-- stale-attempt compensation events
+- exact deployment/release timestamp used as `--since`
+- labelled hierarchy file and benchmark report
+- generated production-readiness JSON
+- production environment flags used after promotion
+- canary reel ID(s) used for visual validation
+- any threshold overrides and rationale
 
-Do not promote based only on successful happy-path answers.
+If the report is blocked, the correct rollout action is to collect more valid evidence or fix the failing behavior—not to describe the feature as validated.

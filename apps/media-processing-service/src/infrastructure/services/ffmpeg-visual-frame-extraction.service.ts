@@ -13,9 +13,7 @@ interface ProcessResult {
 }
 
 @Injectable()
-export class FfmpegVisualFrameExtractionService
-  implements IVisualFrameExtractionService
-{
+export class FfmpegVisualFrameExtractionService implements IVisualFrameExtractionService {
   private readonly ffmpegPath: string;
 
   constructor(private readonly configService: ConfigService) {
@@ -184,7 +182,8 @@ export class FfmpegVisualFrameExtractionService
     const configured = this.configService.get<string>('FFMPEG_PATH')?.trim();
     if (configured && this.canExecute(configured)) return configured;
 
-    const executableName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    const executableName =
+      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
     for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
       const candidate = path.join(directory, executableName);
       if (this.canExecute(candidate)) return candidate;

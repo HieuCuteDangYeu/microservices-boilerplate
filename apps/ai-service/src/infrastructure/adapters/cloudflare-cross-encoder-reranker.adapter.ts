@@ -229,8 +229,12 @@ export class CloudflareCrossEncoderRerankerAdapter implements IRerankerService {
     let maxPenalty = 0;
 
     for (const selectedItem of selected) {
-      const sameReel = candidate.candidate.reelId === selectedItem.candidate.reelId;
-      const textSimilarity = this.jaccard(candidate.tokens, selectedItem.tokens);
+      const sameReel =
+        candidate.candidate.reelId === selectedItem.candidate.reelId;
+      const textSimilarity = this.jaccard(
+        candidate.tokens,
+        selectedItem.tokens,
+      );
       const temporalPenalty = sameReel
         ? this.temporalOverlap(candidate.candidate, selectedItem.candidate) *
           temporalOverlapPenalty
@@ -283,7 +287,8 @@ export class CloudflareCrossEncoderRerankerAdapter implements IRerankerService {
 
     const intersection = Math.max(
       0,
-      Math.min(left.endTime, right.endTime) - Math.max(left.startTime, right.startTime),
+      Math.min(left.endTime, right.endTime) -
+        Math.max(left.startTime, right.startTime),
     );
     const union =
       Math.max(left.endTime, right.endTime) -

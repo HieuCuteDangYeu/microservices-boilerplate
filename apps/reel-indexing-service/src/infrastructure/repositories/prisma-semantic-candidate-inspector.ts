@@ -6,9 +6,7 @@ import { PrismaService } from '@indexing/infrastructure/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
 
 @Injectable()
-export class PrismaSemanticCandidateInspector
-  implements ISemanticCandidateInspector
-{
+export class PrismaSemanticCandidateInspector implements ISemanticCandidateInspector {
   constructor(private readonly prisma: PrismaService) {}
 
   async getSnapshot(input: {
@@ -34,7 +32,9 @@ export class PrismaSemanticCandidateInspector
       this.prisma.reelDocument.count({ where: { ...input, isActive: true } }),
       this.prisma.reelSection.count({ where: { ...input, isActive: true } }),
       this.prisma.reelChunk.count({ where: { ...input, isActive: true } }),
-      this.prisma.reelVisualScene.count({ where: { ...input, isActive: true } }),
+      this.prisma.reelVisualScene.count({
+        where: { ...input, isActive: true },
+      }),
     ]);
 
     return {

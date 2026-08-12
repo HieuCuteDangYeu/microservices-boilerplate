@@ -30,4 +30,42 @@ describe('CheckContextSufficiencyUseCase', () => {
     });
     expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
   });
+
+  it('uses the provider sufficiency decision when its action is contradictory', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue({
+        sufficient: true,
+        confidence: 0.9,
+        availableEvidence: ['VISUAL'],
+        missingEvidence: [],
+        reason: 'The sampled frame directly supports the answer.',
+        userFacingReason: '',
+        recommendedAction: 'REFUSE_NO_CONTEXT',
+      }),
+    };
+    const useCase = new CheckContextSufficiencyUseCase(
+      structuredLlmService as never,
+    );
+    const state = {
+      userMessage: 'What order number is visible?',
+      route: {
+        intent: 'REEL_VIDEO_QUESTION',
+        needsRetrieval: true,
+        requiredEvidence: ['VISUAL'],
+      },
+      rerankedChunks: [
+        {
+          evidenceType: 'VISUAL',
+          evidenceText: 'ORDER NUMBER: VLR-9281',
+          chunkText: 'ORDER NUMBER: VLR-9281',
+          tags: [],
+        },
+      ],
+    } as RagChatWorkflowState;
+
+    await expect(useCase.execute(state)).resolves.toMatchObject({
+      sufficient: true,
+      recommendedAction: 'ANSWER',
+    });
+  });
 });
