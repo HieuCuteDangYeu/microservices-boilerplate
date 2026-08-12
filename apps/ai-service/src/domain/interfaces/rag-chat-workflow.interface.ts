@@ -143,6 +143,7 @@ export interface RagChatWorkflowState {
 
   retrievedChunks: ReelContextSearchResult[];
   rerankedChunks: ReelContextSearchResult[];
+  retrievalReady?: boolean;
 
   recommendedReels?: AiRecommendedReel[];
   suggestedQueries?: string[];
@@ -152,6 +153,7 @@ export interface RagChatWorkflowState {
   conversationMemory?: ConversationMemoryContext;
   userMemories?: RelevantUserMemoriesContext;
   memorySelection?: RagMemorySelection;
+  memoryReady?: boolean;
 
   answer?: string;
   verification?: RagVerificationResult;
