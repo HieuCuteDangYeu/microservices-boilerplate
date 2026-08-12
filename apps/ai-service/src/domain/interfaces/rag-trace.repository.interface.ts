@@ -1,4 +1,7 @@
-import type { RagTrace } from '@ai/domain/entities/rag-trace.entity';
+import type {
+  RagTrace,
+  RagWorkflowTraceMetrics,
+} from '@ai/domain/entities/rag-trace.entity';
 import type { RagCitation } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 
 export interface RagTraceCreateInput {
@@ -20,6 +23,7 @@ export interface RagTraceCreateInput {
 
   latencyMs?: number;
   nodeTimings?: Record<string, number>;
+  workflowMetrics?: RagWorkflowTraceMetrics;
 }
 
 export interface IRagTraceRepository {
