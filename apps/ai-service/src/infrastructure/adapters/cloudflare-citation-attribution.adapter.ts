@@ -1,19 +1,23 @@
 import type {
   CitationAttributionCandidate,
+  CitationAttributionResult,
   CitationAttributionSelection,
+  CitationClaimAssessment,
   ICitationAttributionService,
 } from '@ai/domain/interfaces/citation-attribution.service.interface';
 import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-interface RawCitationSelection {
-  evidenceId?: unknown;
+interface RawClaimAssessment {
+  claim?: unknown;
+  supported?: unknown;
+  evidenceIds?: unknown;
   confidence?: unknown;
 }
 
 interface RawCitationAttributionResult {
-  citations?: unknown;
+  claims?: unknown;
 }
 
 @Injectable()
@@ -31,9 +35,9 @@ export class CloudflareCitationAttributionAdapter
     answer: string;
     candidates: CitationAttributionCandidate[];
     maxCitations: number;
-  }): Promise<CitationAttributionSelection[]> {
+  }): Promise<CitationAttributionResult> {
     if (!input.answer.trim() || input.candidates.length === 0) {
-      return [];
+      return this.emptyResult();
     }
 
     const model =
@@ -49,7 +53,7 @@ export class CloudflareCitationAttributionAdapter
       this.number('AI_RAG_CITATION_CANDIDATE_LIMIT', 8, 1, 20),
     );
     const timeoutMs = Math.round(
-      this.number('AI_RAG_CITATION_TIMEOUT_MS', 4_000, 500, 10_000),
+      this.number('AI_RAG_CITATION_TIMEOUT_MS', 4_000, 500, 20_000),
     );
     const candidates = input.candidates.slice(0, maxCandidates);
 
@@ -61,75 +65,123 @@ export class CloudflareCitationAttributionAdapter
         jsonSchema: {
           type: 'object',
           properties: {
-            citations: {
+            claims: {
               type: 'array',
-              maxItems: input.maxCitations,
+              maxItems: 12,
               items: {
                 type: 'object',
                 properties: {
-                  evidenceId: { type: 'string' },
+                  claim: { type: 'string' },
+                  supported: { type: 'boolean' },
+                  evidenceIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    maxItems: 3,
+                  },
                   confidence: { type: 'number', minimum: 0, maximum: 1 },
                 },
-                required: ['evidenceId', 'confidence'],
+                required: ['claim', 'supported', 'evidenceIds', 'confidence'],
                 additionalProperties: false,
               },
             },
           },
-          required: ['citations'],
+          required: ['claims'],
           additionalProperties: false,
         },
-        maxTokens: 350,
+        maxTokens: 700,
         temperature: 0,
         timeoutMs,
       });
 
-    const allowedIds = new Set(candidates.map((candidate) => candidate.evidenceId));
-    const rawSelections = Array.isArray(result.citations)
-      ? (result.citations as RawCitationSelection[])
+    const allowedIds = new Set(
+      candidates.map((candidate) => candidate.evidenceId),
+    );
+    const rawClaims = Array.isArray(result.claims)
+      ? (result.claims as RawClaimAssessment[])
       : [];
-    const seen = new Set<string>();
-    const selections: CitationAttributionSelection[] = [];
+    const claims: CitationClaimAssessment[] = [];
+    const evidenceConfidence = new Map<string, number>();
 
-    for (const raw of rawSelections) {
-      const evidenceId =
-        typeof raw?.evidenceId === 'string' ? raw.evidenceId.trim() : '';
-      const confidence = Number(raw?.confidence);
+    for (const raw of rawClaims) {
+      const claim = typeof raw?.claim === 'string' ? raw.claim.trim() : '';
+      if (!claim) continue;
 
-      if (
-        !evidenceId ||
-        !allowedIds.has(evidenceId) ||
-        seen.has(evidenceId) ||
-        !Number.isFinite(confidence) ||
-        confidence < minConfidence ||
-        confidence > 1
-      ) {
-        continue;
-      }
+      const confidence = this.clampConfidence(raw.confidence);
+      const evidenceIds = Array.isArray(raw.evidenceIds)
+        ? [
+            ...new Set(
+              raw.evidenceIds
+                .filter((value): value is string => typeof value === 'string')
+                .map((value) => value.trim())
+                .filter((value) => allowedIds.has(value)),
+            ),
+          ].slice(0, 3)
+        : [];
+      const supported =
+        raw.supported === true &&
+        confidence >= minConfidence &&
+        evidenceIds.length > 0;
 
-      seen.add(evidenceId);
-      selections.push({ evidenceId, confidence });
+      claims.push({
+        claim,
+        supported,
+        evidenceIds: supported ? evidenceIds : [],
+        confidence,
+      });
 
-      if (selections.length >= input.maxCitations) {
-        break;
+      if (!supported) continue;
+      for (const evidenceId of evidenceIds) {
+        evidenceConfidence.set(
+          evidenceId,
+          Math.max(evidenceConfidence.get(evidenceId) ?? 0, confidence),
+        );
       }
     }
 
-    return selections;
+    const selections: CitationAttributionSelection[] = [
+      ...evidenceConfidence.entries(),
+    ]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, input.maxCitations)
+      .map(([evidenceId, confidence]) => ({ evidenceId, confidence }));
+    const factualClaimCount = claims.length;
+    const supportedClaimCount = claims.filter((claim) => claim.supported).length;
+
+    return {
+      selections,
+      claims,
+      factualClaimCount,
+      supportedClaimCount,
+      coverage:
+        factualClaimCount === 0 ? 1 : supportedClaimCount / factualClaimCount,
+    };
+  }
+
+  private emptyResult(): CitationAttributionResult {
+    return {
+      selections: [],
+      claims: [],
+      factualClaimCount: 0,
+      supportedClaimCount: 0,
+      coverage: 1,
+    };
   }
 
   private systemPrompt(): string {
     return [
-      'You are a citation attribution verifier for a video RAG system.',
+      'You are a claim-level citation verifier for a video RAG system.',
       'Your task is NOT to answer the question and NOT to rewrite evidence.',
-      'Select the smallest set of supplied evidence IDs that directly supports factual claims in the final answer.',
-      'Every factual claim that can be supported by supplied evidence should be covered by at least one selected evidence item.',
-      'Do not select evidence merely because it is topically related.',
+      'Extract only externally checkable factual claims made in the final answer.',
+      'For each factual claim, decide whether the supplied evidence directly supports that exact claim.',
+      'Return the smallest set of supplied evidence IDs that directly supports each supported claim.',
+      'Do not mark a claim supported merely because evidence is topically related.',
       'TRANSCRIPT evidence supports only what is stated in the transcript.',
       'VISUAL evidence supports only what is visible in the sampled frame at its timestamp; never infer events between sampled frames.',
       'METADATA evidence supports only reel metadata.',
-      'If the final answer is a refusal, generic conversational response, or no supplied evidence directly supports it, return an empty citations array.',
+      'If the final answer is a refusal, generic conversational response, or contains no factual claims requiring reel evidence, return an empty claims array.',
       'Never invent an evidence ID. Return only IDs exactly as supplied.',
-      'Confidence is how directly that evidence supports a factual claim in the final answer, from 0 to 1.',
+      'If a factual claim has no direct support, include the claim with supported=false and evidenceIds=[].',
+      'Confidence is how certain you are about the support judgment, from 0 to 1.',
     ].join(' ');
   }
 
@@ -162,9 +214,14 @@ export class CloudflareCitationAttributionAdapter
     return [
       `QUESTION:\n${input.question.trim()}`,
       `FINAL ANSWER:\n${input.answer.trim()}`,
-      `MAX CITATIONS: ${input.maxCitations}`,
+      `MAX FINAL CITATIONS: ${input.maxCitations}`,
       `CANDIDATE EVIDENCE:\n${evidence}`,
     ].join('\n\n');
+  }
+
+  private clampConfidence(value: unknown): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0;
   }
 
   private number(
