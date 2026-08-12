@@ -34,7 +34,7 @@ export class ExtractHierarchicalMetadataUseCase {
 
     if (sections.length <= 1 && transcript.length <= 6_000) {
       return {
-        metadata: this.withUserFallbacks(
+        metadata: this.withUserAuthority(
           job,
           await this.ai.extractReelMetadata({
             title: job.title,
@@ -68,7 +68,7 @@ export class ExtractHierarchicalMetadataUseCase {
       .slice(0, 6_000);
 
     return {
-      metadata: this.withUserFallbacks(
+      metadata: this.withUserAuthority(
         job,
         await this.ai.extractReelMetadata({
           title: job.title,
@@ -84,8 +84,8 @@ export class ExtractHierarchicalMetadataUseCase {
   private hasStrongUserMetadata(job: ReelIndexJob): boolean {
     return Boolean(
       (job.title?.trim().length ?? 0) >= 8 &&
-      (job.description?.trim().length ?? 0) >= 40 &&
-      job.tags.filter((tag) => tag.trim().length > 0).length >= 3,
+        (job.description?.trim().length ?? 0) >= 40 &&
+        job.tags.filter((tag) => tag.trim().length > 0).length >= 3,
     );
   }
 
@@ -97,14 +97,16 @@ export class ExtractHierarchicalMetadataUseCase {
     };
   }
 
-  private withUserFallbacks(
+  private withUserAuthority(
     job: ReelIndexJob,
     extracted: ExtractedReelMetadata,
   ): ExtractedReelMetadata {
     return {
-      title: extracted.title?.trim() || job.title?.trim() || undefined,
+      // Creator-authored title/description remain authoritative. AI-derived
+      // values fill missing fields but never silently rewrite user metadata.
+      title: job.title?.trim() || extracted.title?.trim() || undefined,
       description:
-        extracted.description?.trim() || job.description?.trim() || undefined,
+        job.description?.trim() || extracted.description?.trim() || undefined,
       tags: [
         ...new Set(
           [...job.tags, ...extracted.tags]
