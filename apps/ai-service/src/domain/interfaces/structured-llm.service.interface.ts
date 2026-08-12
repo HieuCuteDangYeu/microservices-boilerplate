@@ -12,6 +12,7 @@ export interface GenerateStructuredObjectInput {
   jsonSchema: StructuredLlmJsonSchema;
   maxTokens?: number;
   temperature?: number;
+  timeoutMs?: number;
 }
 
 export interface IStructuredLlmService {
