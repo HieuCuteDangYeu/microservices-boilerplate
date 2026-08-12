@@ -5,12 +5,18 @@ import type {
 import type {
   RagChatWorkflowState,
   RagCitation,
+  RagCitationCoverageResult,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 interface GroundedCitationCandidate {
   attribution: CitationAttributionCandidate;
   citation: RagCitation;
+}
+
+export interface RagCitationAssessment {
+  citations: RagCitation[];
+  coverage: RagCitationCoverageResult;
 }
 
 @Injectable()
@@ -24,26 +30,29 @@ export class BuildRagCitationsUseCase {
   ) {}
 
   async execute(state: RagChatWorkflowState): Promise<RagCitation[]> {
-    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') {
-      return [];
-    }
+    return (await this.assess(state)).citations;
+  }
 
-    if (state.contextSufficiency?.sufficient === false) {
-      return [];
+  async assess(state: RagChatWorkflowState): Promise<RagCitationAssessment> {
+    if (
+      state.route?.intent !== 'REEL_VIDEO_QUESTION' ||
+      state.contextSufficiency?.sufficient === false
+    ) {
+      return this.notRequired();
     }
 
     const answer = state.answer?.trim();
     if (!answer) {
-      return [];
+      return this.notRequired();
     }
 
     const candidates = this.buildCandidates(state);
     if (candidates.length === 0) {
-      return [];
+      return this.notRequired();
     }
 
     try {
-      const selected = await this.citationAttributionService.attribute({
+      const attribution = await this.citationAttributionService.attribute({
         question: state.userMessage,
         answer,
         candidates: candidates.map((candidate) => candidate.attribution),
@@ -51,12 +60,15 @@ export class BuildRagCitationsUseCase {
       });
 
       const byEvidenceId = new Map(
-        candidates.map((candidate) => [candidate.attribution.evidenceId, candidate]),
+        candidates.map((candidate) => [
+          candidate.attribution.evidenceId,
+          candidate,
+        ]),
       );
       const citations: RagCitation[] = [];
       const seen = new Set<string>();
 
-      for (const selection of selected) {
+      for (const selection of attribution.selections) {
         const candidate = byEvidenceId.get(selection.evidenceId);
         if (!candidate || seen.has(selection.evidenceId)) continue;
 
@@ -66,17 +78,51 @@ export class BuildRagCitationsUseCase {
         if (citations.length >= this.maxCitations) break;
       }
 
-      return citations;
+      return {
+        citations,
+        coverage: {
+          mode: 'LLM',
+          coverage: attribution.coverage,
+          factualClaimCount: attribution.factualClaimCount,
+          supportedClaimCount: attribution.supportedClaimCount,
+          unsupportedClaims: attribution.claims
+            .filter((claim) => !claim.supported)
+            .map((claim) => claim.claim)
+            .slice(0, 6),
+        },
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
         `[CitationAttribution] provider failed; using grounded deterministic fallback: ${message}`,
       );
 
-      return candidates
-        .slice(0, this.maxCitations)
-        .map((candidate) => candidate.citation);
+      return {
+        citations: candidates
+          .slice(0, this.maxCitations)
+          .map((candidate) => candidate.citation),
+        coverage: {
+          mode: 'FALLBACK',
+          coverage: 1,
+          factualClaimCount: 0,
+          supportedClaimCount: 0,
+          unsupportedClaims: [],
+        },
+      };
     }
+  }
+
+  private notRequired(): RagCitationAssessment {
+    return {
+      citations: [],
+      coverage: {
+        mode: 'NOT_REQUIRED',
+        coverage: 1,
+        factualClaimCount: 0,
+        supportedClaimCount: 0,
+        unsupportedClaims: [],
+      },
+    };
   }
 
   private buildCandidates(
