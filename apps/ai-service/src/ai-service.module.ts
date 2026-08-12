@@ -25,7 +25,9 @@ import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/updat
 import { UpsertUserMemoriesUseCase } from '@ai/application/use-cases/upsert-user-memories.use-case';
 import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.use-case';
 import { ChatPromptBuilderAdapter } from '@ai/infrastructure/adapters/chat-prompt-builder.adapter';
+import { CloudflareCitationAttributionAdapter } from '@ai/infrastructure/adapters/cloudflare-citation-attribution.adapter';
 import { CloudflareConversationSummarizerAdapter } from '@ai/infrastructure/adapters/cloudflare-conversation-summarizer.adapter';
+import { CloudflareCrossEncoderRerankerAdapter } from '@ai/infrastructure/adapters/cloudflare-cross-encoder-reranker.adapter';
 import { CloudflareLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-llm.adapter';
 import { CloudflareMemoryExtractorAdapter } from '@ai/infrastructure/adapters/cloudflare-memory-extractor.adapter';
 import { CloudflareStructuredLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-structured-llm.adapter';
@@ -117,6 +119,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   controllers: [AiController],
   providers: [
     PrismaService,
+    SimpleRerankerAdapter,
 
     StreamChatUseCase,
     GenerateEmbeddingUseCase,
@@ -176,7 +179,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IRerankerService',
-      useClass: SimpleRerankerAdapter,
+      useClass: CloudflareCrossEncoderRerankerAdapter,
     },
     {
       provide: 'IReelSemanticIndexService',
@@ -209,6 +212,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IStructuredLlmService',
       useClass: CloudflareStructuredLlmAdapter,
+    },
+    {
+      provide: 'ICitationAttributionService',
+      useClass: CloudflareCitationAttributionAdapter,
     },
     {
       provide: 'IChatPromptBuilder',
