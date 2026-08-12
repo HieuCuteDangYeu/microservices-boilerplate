@@ -41,19 +41,23 @@ export class VerifierAgentUseCase {
           systemPrompt: this.buildSystemPrompt(),
           userPrompt: this.buildUserPrompt(state),
           jsonSchema: this.getJsonSchema(),
-          maxTokens: 350,
-          temperature: 0.1,
+          maxTokens: 450,
+          temperature: 0,
+          timeoutMs: 4_000,
         });
 
       return this.normalize(raw);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`[VerifierAgent] fallback pass: ${message}`);
+      const groundedFallback = this.canDeterministicallyPass(state);
+      this.logger.warn(
+        `[VerifierAgent] provider failed; deterministic fallback passed=${groundedFallback}: ${message}`,
+      );
 
       return {
-        passed: true,
-        confidence: 0.5,
-        issues: ['Verifier failed, fallback pass was used.'],
+        passed: groundedFallback,
+        confidence: groundedFallback ? 0.55 : 0.2,
+        issues: ['Verifier provider failed; deterministic grounding fallback was used.'],
         requiresRevision: false,
       };
     }
@@ -61,19 +65,24 @@ export class VerifierAgentUseCase {
 
   private buildSystemPrompt(): string {
     return `
-You are a verifier agent for a RAG chatbot answer.
+You are a verifier agent for a production RAG chatbot answer.
 
 Check:
-- Whether the answer is grounded in the available context.
-- Whether reel/video claims are supported by retrieved chunks.
+- Whether every factual answer claim is grounded in the supplied evidence or selected memory context.
+- Whether reel/video claims use the correct evidence modality.
+- Whether visual claims are limited to sampled-frame evidence at the supplied timestamps.
+- Whether transcript claims are actually stated by transcript evidence.
+- Whether metadata claims come from metadata evidence.
 - Whether memory recall is supported by recent history, conversation summary, or user memory.
-- Whether the answer is safe and not overconfident.
+- Whether the answer adds unsupported causes, identities, quantities, chronology, or certainty.
 
 Rules:
 1. Return only structured JSON matching the schema.
 2. Do not rewrite the answer directly.
-3. If revision is needed, provide a short instruction for the answer agent.
+3. If revision is needed, provide a short concrete instruction for the answer agent.
 4. Do not require revision for harmless style differences.
+5. Retrieval text and search-enrichment fields are not evidence. Judge reel claims only from evidenceText supplied below.
+6. If a required factual claim is unsupported, passed must be false.
 `.trim();
   }
 
@@ -81,6 +90,9 @@ Rules:
     return `
 Intent:
 ${state.route?.intent ?? 'UNKNOWN'}
+
+Required evidence:
+${state.route?.requiredEvidence.join(', ') || 'NONE'}
 
 User message:
 ${state.userMessage}
@@ -94,13 +106,17 @@ ${state.conversationMemory?.summary || '(empty)'}
 User memories:
 ${JSON.stringify(state.userMemories?.memories ?? [])}
 
-Retrieved chunks:
+Grounded reel evidence:
 ${JSON.stringify(
-  state.rerankedChunks.map((chunk) => ({
-    chunkId: chunk.chunkId,
-    reelId: chunk.reelId,
+  state.rerankedChunks.map((chunk, index) => ({
+    evidenceId: `e${index}`,
+    evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
     title: chunk.title,
-    chunkText: chunk.chunkText,
+    startTime: chunk.startTime,
+    endTime: chunk.endTime,
+    evidenceText:
+      chunk.evidenceText?.trim() ||
+      (chunk.evidenceType === 'METADATA' ? chunk.chunkText.trim() : undefined),
   })),
 )}
 `.trim();
@@ -141,17 +157,46 @@ ${JSON.stringify(
         : 0.5;
 
     return {
-      passed: typeof raw.passed === 'boolean' ? raw.passed : true,
+      passed: typeof raw.passed === 'boolean' ? raw.passed : false,
       confidence,
       issues,
       requiresRevision:
         typeof raw.requiresRevision === 'boolean'
           ? raw.requiresRevision
-          : false,
+          : !raw.passed,
       revisedInstruction:
         typeof raw.revisedInstruction === 'string'
           ? raw.revisedInstruction.trim()
           : undefined,
     };
+  }
+
+  private canDeterministicallyPass(state: RagChatWorkflowState): boolean {
+    if (!state.route?.needsVerification) return true;
+    if (!state.route.needsRetrieval) return true;
+    if (state.contextSufficiency?.sufficient !== true) return false;
+
+    const required = state.route.requiredEvidence.filter(
+      (value) => value !== 'NONE',
+    );
+    if (required.length === 0) return true;
+
+    return required.every((requiredEvidence) => {
+      if (requiredEvidence === 'AUDIO') return false;
+      if (
+        requiredEvidence === 'CONVERSATION_MEMORY' ||
+        requiredEvidence === 'USER_MEMORY'
+      ) {
+        return true;
+      }
+
+      return state.rerankedChunks.some((chunk) => {
+        const type = chunk.evidenceType ?? 'TRANSCRIPT';
+        const evidence =
+          chunk.evidenceText?.trim() ||
+          (type === 'METADATA' ? chunk.chunkText.trim() : '');
+        return type === requiredEvidence && Boolean(evidence);
+      });
+    });
   }
 }
