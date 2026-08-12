@@ -1,4 +1,5 @@
 import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
+import type { UserMemory } from '@ai/domain/entities/user-memory.entity';
 import type {
   IUserMemoryRepository,
   UserMemoryUpsertInput,
@@ -83,7 +84,7 @@ export class UpsertUserMemoriesUseCase {
       return [];
     }
 
-    const results = [];
+    const results: UserMemory[] = [];
 
     for (const memory of validMemories) {
       const memoryWithEmbedding = await this.attachEmbedding(memory);

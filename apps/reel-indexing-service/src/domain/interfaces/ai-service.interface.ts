@@ -15,7 +15,7 @@ import type { VisualFrameAnalysis } from '@common/ai/interfaces/visual-analysis.
 
 export interface IndexingVisualFrameInput {
   imageBytes: Uint8Array;
-  mimeType: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
   timestampMs: number;
 }
 
