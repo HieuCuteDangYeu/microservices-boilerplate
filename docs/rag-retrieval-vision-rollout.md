@@ -64,7 +64,7 @@ Citations remain preserved from `ai-service` through `conversation-service` and 
 
 Visual questions use the visual-scene index. Transcript questions use transcript chunks. Mixed evidence requirements can retrieve both modalities before reranking.
 
-The retrieval agent still owns planning plus execution internally. The LangGraph workflow now owns the higher-level failure cycle: retrieval -> sufficiency -> optional query repair -> retrieval.
+The LangGraph workflow now invokes the retrieval application use case as three distinct stages: `retrievalPlannerNode -> retrievalNode -> neuralRerankerNode`. Planning, raw retrieval, and cross-encoder/MMR latency therefore appear separately in node timings. A repaired query loops back through the planner so its new query set and search limits are explicit before the retry executes.
 
 ## 3. Hierarchical retrieval benchmark
 
@@ -75,7 +75,7 @@ RAG_HIERARCHICAL_RETRIEVAL_ENABLED=false
 RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED=true
 ```
 
-The retrieval agent returns the direct result set but also executes the hierarchical path and logs:
+The retrieval layer returns the direct result set but also executes the hierarchical path and logs:
 
 - direct latency
 - hierarchical latency
@@ -232,8 +232,9 @@ The commit sequence is:
 2. if stale, discard the inactive semantic candidate
 3. under a per-reel PostgreSQL advisory lock, remember the previous active semantic attempt and activate the new candidate without deleting the previous rows
 4. atomically ask content-service to complete the exact attempt
-5. if content rejects the attempt as stale, roll semantic activation back to the previous candidate and discard the stale candidate
-6. if content accepts it, finalize the semantic candidate and delete older inactive rows
+5. if content rejects the attempt as stale, roll semantic activation back to the previous candidate only if this attempt is still active, then discard the stale candidate
+6. if a newer semantic attempt has already become active, the older rollback leaves that newer candidate untouched
+7. if content accepts the current attempt, finalize the semantic candidate and delete older inactive rows
 
 Pre-commit workflow failures discard only inactive candidate rows. The application use case depends on the `IReelIndexWorkflow` domain port rather than importing the LangGraph infrastructure workflow directly.
 
@@ -261,8 +262,10 @@ Run the graph-related unit tests first:
 ```bash
 pnpm exec jest --runInBand \
   apps/ai-service/src/application/use-cases/build-rag-citations.use-case.spec.ts \
+  apps/ai-service/src/application/use-cases/verifier-agent.use-case.spec.ts \
   apps/ai-service/src/infrastructure/adapters/cloudflare-citation-attribution.adapter.spec.ts \
   apps/ai-service/src/infrastructure/adapters/cloudflare-cross-encoder-reranker.adapter.spec.ts \
+  apps/reel-indexing-service/src/application/use-cases/analyze-visual-frame-manifest.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/validate-embedding-quality.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/select-healthy-transcript-sections.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/commit-semantic-candidate.use-case.spec.ts
@@ -288,7 +291,8 @@ pnpm build:all
 Before enabling hierarchical retrieval or adaptive sectioning globally, use representative labelled reel questions and compare the candidate configuration against the current production baseline. At minimum record:
 
 - Recall/MRR/nDCG
-- neural-reranker p50/p95 latency and fallback rate
+- planner/retrieval/neural-reranker p50/p95 latency separately
+- neural-reranker fallback rate
 - retrieval-repair rate and success rate
 - answer-revision rate
 - verifier failure/provider-unavailability rate
