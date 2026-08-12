@@ -1,5 +1,15 @@
 import type { RagCitation } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 
+export interface RagWorkflowTraceMetrics {
+  retrievalRetryCount: number;
+  answerRetryCount: number;
+  citationRetryCount: number;
+  citationCoverageMode?: 'LLM' | 'FALLBACK' | 'NOT_REQUIRED';
+  citationCoverage?: number;
+  factualClaimCount?: number;
+  supportedClaimCount?: number;
+}
+
 export interface RagTraceProps {
   id: string;
 
@@ -21,6 +31,7 @@ export interface RagTraceProps {
 
   latencyMs?: number;
   nodeTimings: Record<string, number>;
+  workflowMetrics: RagWorkflowTraceMetrics;
 
   createdAt: Date;
 }
@@ -46,6 +57,7 @@ export class RagTrace {
 
   readonly latencyMs?: number;
   readonly nodeTimings: Record<string, number>;
+  readonly workflowMetrics: RagWorkflowTraceMetrics;
 
   readonly createdAt: Date;
 
@@ -70,6 +82,7 @@ export class RagTrace {
 
     this.latencyMs = props.latencyMs;
     this.nodeTimings = props.nodeTimings;
+    this.workflowMetrics = props.workflowMetrics;
 
     this.createdAt = props.createdAt;
   }
