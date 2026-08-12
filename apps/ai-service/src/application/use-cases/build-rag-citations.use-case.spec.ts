@@ -50,17 +50,30 @@ describe('BuildRagCitationsUseCase', () => {
     },
     retryCount: 0,
     retrievalRetryCount: 0,
+    citationRetryCount: 0,
   });
 
   it('uses LLM-selected evidence but quotes only grounded evidence text', async () => {
     const attributionService: ICitationAttributionService = {
-      attribute: jest.fn().mockResolvedValue([
-        { evidenceId: 'e0', confidence: 0.98 },
-      ]),
+      attribute: jest.fn().mockResolvedValue({
+        selections: [{ evidenceId: 'e0', confidence: 0.98 }],
+        claims: [
+          {
+            claim: 'The visible error says Cannot find module @nestjs/config.',
+            supported: true,
+            evidenceIds: ['e0'],
+            confidence: 0.98,
+          },
+        ],
+        factualClaimCount: 1,
+        supportedClaimCount: 1,
+        coverage: 1,
+      }),
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
-    await expect(useCase.execute(buildState())).resolves.toEqual([
+    const assessment = await useCase.assess(buildState());
+    expect(assessment.citations).toEqual([
       {
         sourceType: 'REEL',
         reelId: 'r1',
@@ -71,32 +84,40 @@ describe('BuildRagCitationsUseCase', () => {
         quote: 'Visible text: Cannot find module @nestjs/config',
       },
     ]);
-
-    expect(attributionService.attribute).toHaveBeenCalledWith(
+    expect(assessment.coverage).toEqual(
       expect.objectContaining({
-        question: 'What error is visible?',
-        answer: 'The visible error says Cannot find module @nestjs/config.',
-        maxCitations: 3,
-        candidates: [
-          expect.objectContaining({
-            evidenceId: 'e0',
-            evidenceType: 'VISUAL',
-            evidenceText: 'Visible text: Cannot find module @nestjs/config',
-          }),
-        ],
+        mode: 'LLM',
+        coverage: 1,
+        factualClaimCount: 1,
+        supportedClaimCount: 1,
       }),
     );
   });
 
-  it('does not trust evidence IDs invented by the attribution model', async () => {
+  it('reports unsupported claims instead of inventing citations', async () => {
     const attributionService: ICitationAttributionService = {
-      attribute: jest.fn().mockResolvedValue([
-        { evidenceId: 'invented', confidence: 1 },
-      ]),
+      attribute: jest.fn().mockResolvedValue({
+        selections: [],
+        claims: [
+          {
+            claim: 'The error is caused by a missing production dependency.',
+            supported: false,
+            evidenceIds: [],
+            confidence: 0.95,
+          },
+        ],
+        factualClaimCount: 1,
+        supportedClaimCount: 0,
+        coverage: 0,
+      }),
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
-    await expect(useCase.execute(buildState())).resolves.toEqual([]);
+    const assessment = await useCase.assess(buildState());
+    expect(assessment.citations).toEqual([]);
+    expect(assessment.coverage.unsupportedClaims).toEqual([
+      'The error is caused by a missing production dependency.',
+    ]);
   });
 
   it('falls back to grounded rerank order when attribution provider fails', async () => {
@@ -105,13 +126,15 @@ describe('BuildRagCitationsUseCase', () => {
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
-    await expect(useCase.execute(buildState())).resolves.toEqual([
+    const assessment = await useCase.assess(buildState());
+    expect(assessment.citations).toEqual([
       expect.objectContaining({
         reelId: 'r1',
         evidenceType: 'VISUAL',
         quote: 'Visible text: Cannot find module @nestjs/config',
       }),
     ]);
+    expect(assessment.coverage.mode).toBe('FALLBACK');
   });
 
   it('does not emit citations for insufficient context', async () => {
