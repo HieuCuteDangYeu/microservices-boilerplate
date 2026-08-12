@@ -45,6 +45,7 @@ import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-rerank
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
 import { PrismaConversationMemoryRepository } from '@ai/infrastructure/repositories/prisma-conversation-memory.repository';
+import { PrismaRagHierarchyShadowObservationRepository } from '@ai/infrastructure/repositories/prisma-rag-hierarchy-shadow-observation.repository';
 import { PrismaRagTraceRepository } from '@ai/infrastructure/repositories/prisma-rag-trace.repository';
 import { PrismaUserMemoryRepository } from '@ai/infrastructure/repositories/prisma-user-memory.repository';
 import { R2AudioStorageService } from '@ai/infrastructure/services/r2-audio-storage.service';
@@ -198,6 +199,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IRagTraceRepository',
       useClass: PrismaRagTraceRepository,
+    },
+    {
+      provide: 'IRagHierarchyShadowObservationRepository',
+      useClass: PrismaRagHierarchyShadowObservationRepository,
     },
     {
       provide: 'IMemoryExtractorService',
