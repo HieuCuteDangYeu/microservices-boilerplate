@@ -1,19 +1,31 @@
 import type { CompleteReelIndexCommand } from '@common/processing/interfaces/complete-reel-index.interface';
 import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
+import type { VisualSceneEvidence } from '@common/processing/interfaces/visual-scene-evidence.interface';
 import { AnalyzeVisualFrameManifestUseCase } from '@indexing/application/use-cases/analyze-visual-frame-manifest.use-case';
 import { BuildAdaptiveTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-adaptive-transcript-sections.use-case';
 import { BuildHierarchicalIndexUseCase } from '@indexing/application/use-cases/build-hierarchical-index.use-case';
 import { BuildTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-transcript-sections.use-case';
+import { CommitSemanticCandidateUseCase } from '@indexing/application/use-cases/commit-semantic-candidate.use-case';
 import { ExtractHierarchicalMetadataUseCase } from '@indexing/application/use-cases/extract-hierarchical-metadata.use-case';
 import { MergeTranscriptSegmentsUseCase } from '@indexing/application/use-cases/merge-transcript-segments.use-case';
+import { SelectHealthyTranscriptSectionsUseCase } from '@indexing/application/use-cases/select-healthy-transcript-sections.use-case';
 import { TranscribeAudioManifestUseCase } from '@indexing/application/use-cases/transcribe-audio-manifest.use-case';
+import { ValidateEmbeddingQualityUseCase } from '@indexing/application/use-cases/validate-embedding-quality.use-case';
 import { ValidateEvidenceIndexCandidateUseCase } from '@indexing/application/use-cases/validate-evidence-index-candidate.use-case';
-import type { IndexCheckpointStage } from '@indexing/domain/entities/index-checkpoint.entity';
+import { ValidatePersistedSemanticCandidateUseCase } from '@indexing/application/use-cases/validate-persisted-semantic-candidate.use-case';
+import type {
+  IndexCheckpointStage,
+  TranscriptSection,
+} from '@indexing/domain/entities/index-checkpoint.entity';
 import { IndexClassificationMismatchError } from '@indexing/domain/errors/index-classification-mismatch.error';
 import type { IArtifactStorage } from '@indexing/domain/interfaces/artifact-storage.interface';
 import type { IIndexingContentService } from '@indexing/domain/interfaces/content-service.interface';
 import type { IIndexCheckpointRepository } from '@indexing/domain/interfaces/index-checkpoint.repository.interface';
+import type {
+  IReelIndexWorkflow,
+  ReelIndexWorkflowStatus,
+} from '@indexing/domain/interfaces/reel-index-workflow.interface';
 import type { ISemanticIndexRepository } from '@indexing/domain/interfaces/semantic-index.repository.interface';
 import { PrismaLangGraphCheckpointSaver } from '@indexing/infrastructure/repositories/prisma-langgraph-checkpoint-saver';
 import { END, START, StateGraph, StateSchema } from '@langchain/langgraph';
@@ -22,7 +34,6 @@ import { ConfigService } from '@nestjs/config';
 import { z } from 'zod/v4';
 
 export type ReelIndexRoute = 'NO_AUDIO' | 'SHORT' | 'LONG';
-export type ReelIndexWorkflowStatus = 'COMPLETED' | 'DUPLICATE' | 'STALE';
 
 export function routeIndexing(input: {
   hasAudio: boolean;
@@ -52,6 +63,10 @@ export interface ReelIndexGraphState {
   status?: ReelIndexWorkflowStatus;
   metadataQuality?: 'strong' | 'weak';
   chunkingStrategy?: 'metadata-only' | 'short' | 'long';
+  candidateSections?: TranscriptSection[];
+  visualScenes: VisualSceneEvidence[];
+  visualReady: boolean;
+  transcriptReady: boolean;
   indexCompletion?: CompleteReelIndexCommand;
   warnings: string[];
   failure?: {
@@ -70,6 +85,10 @@ const ReelIndexGraphStateSchema = new StateSchema({
   status: z.enum(['COMPLETED', 'DUPLICATE', 'STALE']).optional(),
   metadataQuality: z.enum(['strong', 'weak']).optional(),
   chunkingStrategy: z.enum(['metadata-only', 'short', 'long']).optional(),
+  candidateSections: z.array(z.any()).optional(),
+  visualScenes: z.array(z.any()).default([]),
+  visualReady: z.boolean().default(false),
+  transcriptReady: z.boolean().default(false),
   indexCompletion: z.any().optional(),
   warnings: z.array(z.string()).default([]),
   failure: z
@@ -82,7 +101,7 @@ const ReelIndexGraphStateSchema = new StateSchema({
 });
 
 @Injectable()
-export class ReelIndexLangGraphWorkflow {
+export class ReelIndexLangGraphWorkflow implements IReelIndexWorkflow {
   private readonly invokeGraph: (
     state: ReelIndexGraphState,
     config: { configurable: { thread_id: string } },
@@ -95,9 +114,13 @@ export class ReelIndexLangGraphWorkflow {
     private readonly mergeTranscript: MergeTranscriptSegmentsUseCase,
     private readonly buildSections: BuildTranscriptSectionsUseCase,
     private readonly buildAdaptiveSections: BuildAdaptiveTranscriptSectionsUseCase,
+    private readonly selectHealthySections: SelectHealthyTranscriptSectionsUseCase,
     private readonly extractMetadata: ExtractHierarchicalMetadataUseCase,
     private readonly buildIndex: BuildHierarchicalIndexUseCase,
+    private readonly validateEmbeddingQuality: ValidateEmbeddingQualityUseCase,
     private readonly validateCandidate: ValidateEvidenceIndexCandidateUseCase,
+    private readonly validatePersistedCandidate: ValidatePersistedSemanticCandidateUseCase,
+    private readonly commitCandidate: CommitSemanticCandidateUseCase,
     private readonly checkpointer: PrismaLangGraphCheckpointSaver,
     @Inject('IArtifactStorage') private readonly storage: IArtifactStorage,
     @Inject('IIndexCheckpointRepository')
@@ -123,6 +146,9 @@ export class ReelIndexLangGraphWorkflow {
         job: input.job,
         allowReclaim: input.allowReclaim,
         progress: 0,
+        visualScenes: [],
+        visualReady: false,
+        transcriptReady: false,
         warnings: [],
       },
       {
@@ -149,6 +175,9 @@ export class ReelIndexLangGraphWorkflow {
       .addNode('validate_and_classify', (state) =>
         this.validateAndClassify(state as ReelIndexGraphState),
       )
+      .addNode('analyze_visual_frames', (state) =>
+        this.analyzeVisualEvidence(state as ReelIndexGraphState),
+      )
       .addNode('build_metadata_only_index', (state) =>
         this.buildMetadataOnlyIndex(state as ReelIndexGraphState),
       )
@@ -167,6 +196,7 @@ export class ReelIndexLangGraphWorkflow {
       .addNode('validate_transcript', (state) =>
         this.validateTranscript(state as ReelIndexGraphState),
       )
+      .addNode('evidence_ready_join', () => ({}))
       .addNode('evaluate_metadata_quality', (state) =>
         this.evaluateMetadataQuality(state as ReelIndexGraphState),
       )
@@ -188,6 +218,9 @@ export class ReelIndexLangGraphWorkflow {
       .addNode('detect_long_sections', (state) =>
         this.detectLongSections(state as ReelIndexGraphState),
       )
+      .addNode('section_quality_gate', (state) =>
+        this.sectionQualityGate(state as ReelIndexGraphState),
+      )
       .addNode('build_long_evidence_chunks', (state) =>
         this.buildLongDocumentDrafts(state as ReelIndexGraphState),
       )
@@ -197,19 +230,21 @@ export class ReelIndexLangGraphWorkflow {
       .addNode('generate_missing_embeddings', (state) =>
         this.generateMissingEmbeddings(state as ReelIndexGraphState),
       )
+      .addNode('embedding_quality_gate', (state) =>
+        this.embeddingQualityGate(state as ReelIndexGraphState),
+      )
       .addNode('validate_index_candidate', (state) =>
         this.validateIndexCandidate(state as ReelIndexGraphState),
       )
       .addNode('persist_semantic_candidate', (state) =>
         this.persistSemanticCandidate(state as ReelIndexGraphState),
       )
-      .addNode('activate_semantic_candidate', (state) =>
-        this.activateSemanticCandidate(state as ReelIndexGraphState),
+      .addNode('persisted_candidate_integrity_gate', (state) =>
+        this.persistedCandidateIntegrityGate(state as ReelIndexGraphState),
       )
-      .addNode('complete_content_index_state', (state) =>
-        this.completeContentIndexState(state as ReelIndexGraphState),
+      .addNode('commit_semantic_candidate', (state) =>
+        this.commitSemanticCandidate(state as ReelIndexGraphState),
       )
-      .addNode('mark_index_completed', () => this.markIndexCompleted())
       .addEdge(START, 'load_or_resume_attempt')
       .addConditionalEdges(
         'load_or_resume_attempt',
@@ -221,22 +256,38 @@ export class ReelIndexLangGraphWorkflow {
         'validate_and_classify',
         (state) => {
           const route = (state as ReelIndexGraphState).route;
-          if (route === 'NO_AUDIO') return 'build_metadata_only_index';
-          if (route === 'SHORT') return 'transcribe_short_video';
-          return 'load_audio_manifest';
+          const transcriptNode =
+            route === 'NO_AUDIO'
+              ? 'build_metadata_only_index'
+              : route === 'SHORT'
+                ? 'transcribe_short_video'
+                : 'load_audio_manifest';
+          return ['analyze_visual_frames', transcriptNode];
         },
         [
+          'analyze_visual_frames',
           'build_metadata_only_index',
           'transcribe_short_video',
           'load_audio_manifest',
         ],
       )
-      .addEdge('build_metadata_only_index', 'evaluate_metadata_quality')
+      .addEdge('analyze_visual_frames', 'evidence_ready_join')
+      .addEdge('build_metadata_only_index', 'evidence_ready_join')
       .addEdge('transcribe_short_video', 'validate_transcript')
       .addEdge('load_audio_manifest', 'transcribe_pending_segments')
       .addEdge('transcribe_pending_segments', 'merge_transcript_segments')
       .addEdge('merge_transcript_segments', 'validate_transcript')
-      .addEdge('validate_transcript', 'evaluate_metadata_quality')
+      .addEdge('validate_transcript', 'evidence_ready_join')
+      .addConditionalEdges(
+        'evidence_ready_join',
+        (state) => {
+          const value = state as ReelIndexGraphState;
+          return value.visualReady && value.transcriptReady
+            ? 'evaluate_metadata_quality'
+            : END;
+        },
+        ['evaluate_metadata_quality', END],
+      )
       .addConditionalEdges(
         'evaluate_metadata_quality',
         (state) =>
@@ -261,24 +312,21 @@ export class ReelIndexLangGraphWorkflow {
           'detect_long_sections',
         ],
       )
-      .addEdge('detect_long_sections', 'build_long_evidence_chunks')
+      .addEdge('detect_long_sections', 'section_quality_gate')
+      .addEdge('section_quality_gate', 'build_long_evidence_chunks')
       .addEdge('build_metadata_document', 'validate_document_tokens')
       .addEdge('build_short_evidence_chunks', 'validate_document_tokens')
       .addEdge('build_long_evidence_chunks', 'validate_document_tokens')
       .addEdge('validate_document_tokens', 'generate_missing_embeddings')
-      .addEdge('generate_missing_embeddings', 'validate_index_candidate')
+      .addEdge('generate_missing_embeddings', 'embedding_quality_gate')
+      .addEdge('embedding_quality_gate', 'validate_index_candidate')
       .addEdge('validate_index_candidate', 'persist_semantic_candidate')
-      .addEdge('persist_semantic_candidate', 'activate_semantic_candidate')
-      .addConditionalEdges(
-        'complete_content_index_state',
-        (state) =>
-          (state as ReelIndexGraphState).status === 'STALE'
-            ? END
-            : 'mark_index_completed',
-        ['mark_index_completed', END],
+      .addEdge(
+        'persist_semantic_candidate',
+        'persisted_candidate_integrity_gate',
       )
-      .addEdge('activate_semantic_candidate', 'complete_content_index_state')
-      .addEdge('mark_index_completed', END);
+      .addEdge('persisted_candidate_integrity_gate', 'commit_semantic_candidate')
+      .addEdge('commit_semantic_candidate', END);
   }
 
   private async loadOrResume(
@@ -323,6 +371,15 @@ export class ReelIndexLangGraphWorkflow {
     };
   }
 
+  private async analyzeVisualEvidence(
+    state: ReelIndexGraphState,
+  ): Promise<Partial<ReelIndexGraphState>> {
+    return {
+      visualScenes: await this.analyzeVisualFrames.execute(state.job),
+      visualReady: true,
+    };
+  }
+
   private async buildMetadataOnlyIndex(
     state: ReelIndexGraphState,
   ): Promise<Partial<ReelIndexGraphState>> {
@@ -331,7 +388,10 @@ export class ReelIndexLangGraphWorkflow {
       'EXTRACTING_METADATA',
       { sections: [] },
     );
-    return this.stageNode(state, 'build_metadata_only_index', 40);
+    return {
+      ...(await this.stageNode(state, 'build_metadata_only_index', 40)),
+      transcriptReady: true,
+    };
   }
 
   private async transcribeShortVideo(
@@ -405,7 +465,10 @@ export class ReelIndexLangGraphWorkflow {
     ) {
       throw new Error('Audio Reel produced no verified transcript');
     }
-    return this.stageNode(state, 'validate_transcript', 40);
+    return {
+      ...(await this.stageNode(state, 'validate_transcript', 40)),
+      transcriptReady: true,
+    };
   }
 
   private evaluateMetadataQuality(
@@ -486,14 +549,13 @@ export class ReelIndexLangGraphWorkflow {
   ): Promise<Partial<ReelIndexGraphState>> {
     const checkpoint = await this.requireCheckpoint(state);
     const metadata = this.requireMetadata(checkpoint.extractedMetadata);
-    const visualScenes = await this.analyzeVisualFrames.execute(state.job);
     const drafts = this.buildIndex.buildDocumentDrafts({
       job: state.job,
       transcript: checkpoint.mergedTranscript,
       transcriptSegments: checkpoint.mergedSegments,
       metadata,
       sections,
-      visualScenes,
+      visualScenes: state.visualScenes,
     });
     await this.checkpoints.setStage(
       state.job.indexAttemptId,
@@ -510,18 +572,49 @@ export class ReelIndexLangGraphWorkflow {
     state: ReelIndexGraphState,
   ): Promise<Partial<ReelIndexGraphState>> {
     const checkpoint = await this.requireCheckpoint(state);
-    const sections = await this.buildAdaptiveSections.execute(
+    const candidateSections = await this.buildAdaptiveSections.execute(
       checkpoint.mergedSegments ?? [],
     );
-    if (!sections.length) {
+    if (!candidateSections.length) {
       throw new Error('Long transcript produced no semantic sections');
     }
+    return {
+      candidateSections,
+      ...(await this.stageNode(state, 'detect_long_sections', 58)),
+    };
+  }
+
+  private async sectionQualityGate(
+    state: ReelIndexGraphState,
+  ): Promise<Partial<ReelIndexGraphState>> {
+    const checkpoint = await this.requireCheckpoint(state);
+    const fallback = this.buildSections.execute(
+      checkpoint.mergedTranscript,
+      checkpoint.mergedSegments,
+    );
+    const selection = this.selectHealthySections.execute({
+      candidate: state.candidateSections ?? [],
+      fallback,
+      sourceSegments: checkpoint.mergedSegments ?? [],
+      minimumSeconds: this.positiveNumber('INDEX_LONG_SECTION_MIN_SECONDS', 120),
+      maximumSeconds: this.positiveNumber('INDEX_LONG_SECTION_MAX_SECONDS', 480),
+    });
+
     await this.checkpoints.setStage(
       state.job.indexAttemptId,
       'BUILDING_SECTIONS',
-      { sections },
+      { sections: selection.sections },
     );
-    return this.stageNode(state, 'detect_long_sections', 60);
+
+    return {
+      ...(await this.stageNode(state, 'section_quality_gate', 60)),
+      warnings: selection.usedFallback
+        ? [
+            ...state.warnings,
+            `Adaptive sectioning fallback used: ${selection.reason ?? 'quality gate failed'}`,
+          ]
+        : state.warnings,
+    };
   }
 
   private async buildLongDocumentDrafts(
@@ -529,21 +622,18 @@ export class ReelIndexLangGraphWorkflow {
   ): Promise<Partial<ReelIndexGraphState>> {
     const checkpoint = await this.requireCheckpoint(state);
     const sections = checkpoint.sections ?? [];
-    const visualScenes = await this.analyzeVisualFrames.execute(state.job);
     const drafts = this.buildIndex.buildDocumentDrafts({
       job: state.job,
       transcript: checkpoint.mergedTranscript,
       transcriptSegments: checkpoint.mergedSegments,
       metadata: this.requireMetadata(checkpoint.extractedMetadata),
       sections,
-      visualScenes,
+      visualScenes: state.visualScenes,
     });
     await this.checkpoints.setStage(
       state.job.indexAttemptId,
       'BUILDING_CHUNKS',
-      {
-        documentDrafts: drafts,
-      },
+      { documentDrafts: drafts },
     );
     return this.stageNode(state, 'build_long_evidence_chunks', 70);
   }
@@ -569,6 +659,24 @@ export class ReelIndexLangGraphWorkflow {
       checkpoint.documentDrafts ?? [],
     );
     return this.stageNode(state, 'generate_missing_embeddings', 85);
+  }
+
+  private async embeddingQualityGate(
+    state: ReelIndexGraphState,
+  ): Promise<Partial<ReelIndexGraphState>> {
+    const checkpoint = await this.requireCheckpoint(state);
+    const documents = await this.buildIndex.materializeDocuments(
+      checkpoint.documentDrafts ?? [],
+    );
+    this.validateEmbeddingQuality.execute({
+      documents,
+      expectedDimensions: documents[0]?.embeddingDimensions,
+      maxDuplicateRatio: this.fraction(
+        'INDEX_EMBEDDING_MAX_DUPLICATE_RATIO',
+        0.5,
+      ),
+    });
+    return this.stageNode(state, 'embedding_quality_gate', 88);
   }
 
   private async validateIndexCandidate(
@@ -601,26 +709,46 @@ export class ReelIndexLangGraphWorkflow {
     });
     await this.checkpoints.setStage(state.job.indexAttemptId, 'PERSISTING');
     return {
-      ...this.stageNode(state, 'persist_semantic_candidate', 95),
+      ...(await this.stageNode(state, 'persist_semantic_candidate', 95)),
       indexCompletion: this.toCompletionCommand(state.job, documents),
     };
   }
 
-  private async completeContentIndexState(
+  private async persistedCandidateIntegrityGate(
     state: ReelIndexGraphState,
   ): Promise<Partial<ReelIndexGraphState>> {
-    const completion = state.indexCompletion;
-    if (!completion) {
+    const checkpoint = await this.requireCheckpoint(state);
+    const documents = await this.buildIndex.materializeDocuments(
+      checkpoint.documentDrafts ?? [],
+    );
+    await this.validatePersistedCandidate.execute({
+      job: state.job,
+      documents,
+      transcriptSegmentCount: checkpoint.mergedSegments?.length ?? 0,
+    });
+    return this.stageNode(state, 'persisted_candidate_integrity_gate', 97);
+  }
+
+  private async commitSemanticCandidate(
+    state: ReelIndexGraphState,
+  ): Promise<Partial<ReelIndexGraphState>> {
+    if (!state.indexCompletion) {
       throw new Error('Semantic index completion summary is missing');
     }
-    const applied = await this.content.completeIndexing(completion);
-    if (!applied) {
-      return {
-        status: 'STALE',
-        currentStage: 'complete_content_index_state',
-      };
-    }
-    return this.stageNode(state, 'complete_content_index_state', 100);
+
+    const status = await this.commitCandidate.execute({
+      job: state.job,
+      completion: state.indexCompletion,
+    });
+
+    return {
+      status,
+      currentStage:
+        status === 'COMPLETED'
+          ? 'commit_semantic_candidate'
+          : 'stale_semantic_candidate',
+      progress: status === 'COMPLETED' ? 100 : state.progress,
+    };
   }
 
   private toCompletionCommand(
@@ -644,24 +772,6 @@ export class ReelIndexLangGraphWorkflow {
       embeddingDimensions: reelDocument.embeddingDimensions,
       embeddingVersion: reelDocument.embeddingVersion,
       indexedAt: new Date().toISOString(),
-    };
-  }
-
-  private async activateSemanticCandidate(
-    state: ReelIndexGraphState,
-  ): Promise<Partial<ReelIndexGraphState>> {
-    await this.semanticIndex.activateCandidate(
-      state.job.reelId,
-      state.job.indexAttemptId,
-    );
-    return this.stageNode(state, 'activate_semantic_candidate', 99);
-  }
-
-  private markIndexCompleted(): Partial<ReelIndexGraphState> {
-    return {
-      status: 'COMPLETED',
-      currentStage: 'mark_index_completed',
-      progress: 100,
     };
   }
 
@@ -701,10 +811,12 @@ export class ReelIndexLangGraphWorkflow {
     if (currentStage.includes('metadata')) return 'EXTRACTING_METADATA';
     if (currentStage.includes('section')) return 'BUILDING_SECTIONS';
     if (currentStage.includes('embedding')) return 'EMBEDDING';
-    if (currentStage.includes('persist') || currentStage.includes('activate')) {
+    if (currentStage.includes('persist') || currentStage.includes('commit')) {
       return 'PERSISTING';
     }
-    if (currentStage.includes('validat')) return 'VALIDATING';
+    if (currentStage.includes('validat') || currentStage.includes('quality')) {
+      return 'VALIDATING';
+    }
     return 'BUILDING_CHUNKS';
   }
 
@@ -726,5 +838,12 @@ export class ReelIndexLangGraphWorkflow {
   private positiveNumber(key: string, fallback: number): number {
     const value = Number(this.config.get<string>(key) ?? fallback);
     return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  private fraction(key: string, fallback: number): number {
+    const value = Number(this.config.get<string>(key) ?? fallback);
+    return Number.isFinite(value)
+      ? Math.min(1, Math.max(0, value))
+      : fallback;
   }
 }
