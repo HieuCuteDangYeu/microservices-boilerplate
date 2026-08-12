@@ -75,6 +75,20 @@ export class PrismaSemanticCandidateLifecycle
   }): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.reelId}))`;
+
+      // A stale/failed attempt may finish its content RPC after a newer attempt
+      // has already activated. Never let the older rollback deactivate the
+      // newer winner. Compensation is valid only while this candidate is still
+      // the active semantic candidate under the same per-reel lock.
+      const stillActive = await transaction.reelDocument.count({
+        where: {
+          reelId: input.reelId,
+          indexAttemptId: input.indexAttemptId,
+          isActive: true,
+        },
+      });
+      if (stillActive !== 1) return;
+
       await this.setActive(transaction, input.reelId, undefined, false);
 
       if (!input.previousIndexAttemptId) return;
