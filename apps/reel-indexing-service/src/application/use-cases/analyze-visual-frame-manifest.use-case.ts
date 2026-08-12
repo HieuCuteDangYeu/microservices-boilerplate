@@ -4,7 +4,6 @@ import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.
 import type { IArtifactStorage } from '@indexing/domain/interfaces/artifact-storage.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash } from 'node:crypto';
 
 @Injectable()
 export class AnalyzeVisualFrameManifestUseCase {
@@ -43,14 +42,13 @@ export class AnalyzeVisualFrameManifestUseCase {
       this.getPositiveInt('INDEX_VISUAL_ANALYSIS_CONCURRENCY', 2, 1, 8),
       async (artifact, index) => {
         try {
-          const image = await this.storage.getArtifactBytes(artifact.key);
-          const checksum = createHash('sha256').update(image).digest('hex');
-          if (checksum !== artifact.checksum) {
-            throw new Error('frame checksum mismatch');
-          }
+          const imageBytes = await this.storage.getVerifiedArtifactBytes({
+            key: artifact.key,
+            sha256: artifact.checksum,
+          });
 
           const analysis = await this.ai.analyzeVisualFrame({
-            imageBase64: Buffer.from(image).toString('base64'),
+            imageBytes,
             mimeType: 'image/jpeg',
             timestampMs: artifact.timestampMs,
           });
