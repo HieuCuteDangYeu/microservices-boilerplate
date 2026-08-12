@@ -6,13 +6,33 @@ This document describes how to evaluate and roll out the retrieval and visual-in
 
 Search uses enriched `retrievalText`, while answers and citations use grounded `evidenceText`.
 
-A reel citation now contains:
+Citation selection now runs after the final answer. A structured LLM receives the user question, final answer, and opaque evidence IDs. It may select only supplied evidence IDs; the application then rebuilds each citation from the trusted retrieval object. The LLM never writes the quote, reel ID, timestamp, or evidence type.
+
+A reel citation contains:
 
 - `reelId`
 - `evidenceType` (`TRANSCRIPT`, `VISUAL`, or `METADATA`)
 - optional title
 - optional start/end timestamps
 - a quote truncated from grounded evidence only
+
+Safety and availability behavior:
+
+- invented/unknown evidence IDs are discarded
+- low-confidence attributions are discarded
+- an empty attribution result remains empty rather than attaching unrelated evidence
+- provider/JSON failures fall back to the previous grounded rerank-order citation selection
+- transcript/visual citations never fall back to enriched `retrievalText`
+
+Optional tuning:
+
+```env
+CLOUDFLARE_CITATION_MODEL=@cf/meta/llama-3.1-8b-instruct
+AI_RAG_CITATION_MIN_CONFIDENCE=0.65
+AI_RAG_CITATION_CANDIDATE_LIMIT=8
+```
+
+These are optional because the implementation has defaults and reuses the existing `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` credentials.
 
 Citations are preserved from `ai-service` through `conversation-service` and stored in bot-message metadata.
 
@@ -71,17 +91,30 @@ The deterministic sample rate prevents semantic-boundary embeddings from being g
 
 ## 5. Reranking
 
-The deterministic reranker remains the default. It combines calibrated retrieval signals, IDF-weighted query coverage, exact phrase matching, title/tag coverage, and MMR diversity.
+The default reranker is now a two-stage production path:
+
+1. send the top retrieval candidates to Cloudflare Workers AI `@cf/baai/bge-reranker-base`
+2. sigmoid-normalize the cross-encoder scores
+3. apply MMR diversity over the neural scores so overlapping chunks/scenes do not dominate
+4. fall back automatically to the deterministic reranker on timeout, provider errors, invalid JSON, or unusable scores
 
 Optional tuning:
 
 ```env
-AI_RAG_MMR_LAMBDA=0.74
-AI_RAG_MMR_SAME_REEL_PENALTY=0.22
-AI_RAG_MMR_TEMPORAL_OVERLAP_PENALTY=0.7
+AI_RAG_NEURAL_RERANK_ENABLED=true
+AI_RAG_NEURAL_RERANK_MODEL=@cf/baai/bge-reranker-base
+AI_RAG_NEURAL_RERANK_CANDIDATE_LIMIT=20
+AI_RAG_NEURAL_RERANK_TIMEOUT_MS=5000
+AI_RAG_NEURAL_RERANK_MAX_CONTEXT_CHARS=5000
+AI_RAG_RERANK_MAX_LIMIT=8
+AI_RAG_MMR_LAMBDA=0.82
+AI_RAG_MMR_SAME_REEL_PENALTY=0.18
+AI_RAG_MMR_TEMPORAL_OVERLAP_PENALTY=0.65
 ```
 
-Benchmark this implementation before introducing a neural cross-encoder so the additional latency/cost has a measurable target to beat.
+The deterministic reranker remains registered as the fail-open fallback and still combines retrieval signals, IDF-weighted query coverage, exact phrase matching, title/tag coverage, and MMR diversity.
+
+Benchmark neural reranking against the deterministic baseline with the labelled retrieval evaluator. Record nDCG/MRR/Recall deltas plus p50/p95 latency and provider failure rate.
 
 ## 6. Long-term memory consolidation
 
@@ -143,4 +176,4 @@ Generate Prisma clients using the repository's normal install/build flow before 
 
 ## 10. Promotion criteria
 
-Before enabling hierarchical retrieval or adaptive sectioning globally, use representative labelled reel questions and compare the candidate configuration against the current production baseline. At minimum record relevance metrics, p50/p95 latency, provider calls, token/neuron cost, answer groundedness, and refusal accuracy for missing visual/transcript evidence.
+Before enabling hierarchical retrieval or adaptive sectioning globally, use representative labelled reel questions and compare the candidate configuration against the current production baseline. At minimum record relevance metrics, p50/p95 latency, provider calls, token/neuron cost, answer groundedness, citation precision, citation coverage, and refusal accuracy for missing visual/transcript evidence.
