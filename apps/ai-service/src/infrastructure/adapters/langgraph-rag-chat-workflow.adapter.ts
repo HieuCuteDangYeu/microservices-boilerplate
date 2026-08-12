@@ -122,7 +122,15 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
   private buildGraph(nodeTimings: Record<string, number>) {
     return new StateGraph(RagChatStateSchema)
       .addNode('queryRouterNode', this.createQueryRouterNode(nodeTimings))
+      .addNode(
+        'retrievalPlannerNode',
+        this.createRetrievalPlannerNode(nodeTimings),
+      )
       .addNode('retrievalNode', this.createRetrievalNode(nodeTimings))
+      .addNode(
+        'neuralRerankerNode',
+        this.createNeuralRerankerNode(nodeTimings),
+      )
       .addNode(
         'contextSufficiencyNode',
         this.createContextSufficiencyNode(nodeTimings),
@@ -167,9 +175,11 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       .addConditionalEdges(
         'queryRouterNode',
         this.routesAfterQueryRouter,
-        ['retrievalNode', 'memorySelectorNode', 'reelRecommendationNode'],
+        ['retrievalPlannerNode', 'memorySelectorNode', 'reelRecommendationNode'],
       )
-      .addEdge('retrievalNode', 'contextSufficiencyNode')
+      .addEdge('retrievalPlannerNode', 'retrievalNode')
+      .addEdge('retrievalNode', 'neuralRerankerNode')
+      .addEdge('neuralRerankerNode', 'contextSufficiencyNode')
       .addConditionalEdges(
         'contextSufficiencyNode',
         this.routeAfterContextSufficiency,
@@ -179,7 +189,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
           'noContextAnswerNode',
         ],
       )
-      .addEdge('retrievalRepairNode', 'retrievalNode')
+      .addEdge('retrievalRepairNode', 'retrievalPlannerNode')
       .addEdge('markRetrievalReadyNode', 'answerContextJoinNode')
       .addEdge('memorySelectorNode', 'answerContextJoinNode')
       .addConditionalEdges('answerContextJoinNode', this.routeAfterContextJoin, [
@@ -230,36 +240,74 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     };
   }
 
+  private createRetrievalPlannerNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      if (!state.route) return {};
+      const planningMessage =
+        state.retrievalRepairQuery?.trim() || state.userMessage;
+      const retrievalPlan = await this.timed(
+        'retrievalPlannerNode',
+        nodeTimings,
+        () =>
+          this.retrievalAgentUseCase.plan({
+            message: planningMessage,
+            route: state.route!,
+          }),
+      );
+
+      this.logger.debug(
+        `[RagGraph] retrieval plan mode=${retrievalPlan.mode} queries=${retrievalPlan.queries?.length ?? 0} searchLimit=${retrievalPlan.searchLimit} rerankLimit=${retrievalPlan.rerankLimit}`,
+      );
+      return { retrievalPlan };
+    };
+  }
+
   private createRetrievalNode(nodeTimings: Record<string, number>) {
     return async (
       state: RagChatWorkflowState,
     ): Promise<Partial<RagChatWorkflowState>> => {
-      const route = state.route;
+      if (!state.route || !state.retrievalPlan) return {};
 
-      if (!route) {
-        return {};
-      }
-
-      const retrievalMessage =
-        state.retrievalRepairQuery?.trim() || state.userMessage;
-      const result = await this.timed('retrievalNode', nodeTimings, () =>
-        this.retrievalAgentUseCase.execute({
+      const retrievedChunks = await this.timed('retrievalNode', nodeTimings, () =>
+        this.retrievalAgentUseCase.retrieve({
           userId: state.userId,
           conversationId: state.conversationId,
-          message: retrievalMessage,
-          route,
+          route: state.route!,
+          plan: state.retrievalPlan!,
         }),
       );
 
       this.logger.log(
-        `[RagGraph] retrieved=${result.retrievedChunks.length} reranked=${result.rerankedChunks.length} retry=${state.retrievalRetryCount}`,
+        `[RagGraph] retrieved=${retrievedChunks.length} retry=${state.retrievalRetryCount}`,
       );
 
       return {
-        retrievalPlan: result.plan,
-        retrievedChunks: result.retrievedChunks,
-        rerankedChunks: result.rerankedChunks,
+        retrievedChunks,
+        rerankedChunks: [],
       };
+    };
+  }
+
+  private createNeuralRerankerNode(nodeTimings: Record<string, number>) {
+    return async (
+      state: RagChatWorkflowState,
+    ): Promise<Partial<RagChatWorkflowState>> => {
+      if (!state.retrievalPlan) return { rerankedChunks: [] };
+
+      const rerankedChunks = await this.timed(
+        'neuralRerankerNode',
+        nodeTimings,
+        () =>
+          this.retrievalAgentUseCase.rerank({
+            plan: state.retrievalPlan!,
+            retrievedChunks: state.retrievedChunks,
+          }),
+      );
+
+      this.logger.log(`[RagGraph] reranked=${rerankedChunks.length}`);
+      return { rerankedChunks };
     };
   }
 
@@ -295,6 +343,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
       return {
         retrievalRepairQuery: query,
+        retrievalPlan: undefined,
         retrievalRetryCount: state.retrievalRetryCount + 1,
         retrievalReady: false,
         retrievedChunks: [],
@@ -568,13 +617,15 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
   private routesAfterQueryRouter = (
     state: RagChatWorkflowState,
-  ): Array<'retrievalNode' | 'memorySelectorNode' | 'reelRecommendationNode'> => {
+  ): Array<
+    'retrievalPlannerNode' | 'memorySelectorNode' | 'reelRecommendationNode'
+  > => {
     const destinations: Array<
-      'retrievalNode' | 'memorySelectorNode' | 'reelRecommendationNode'
+      'retrievalPlannerNode' | 'memorySelectorNode' | 'reelRecommendationNode'
     > = ['memorySelectorNode'];
 
     if (state.route?.needsRetrieval) {
-      destinations.push('retrievalNode');
+      destinations.push('retrievalPlannerNode');
     }
     if (state.route?.recommendationAction.type !== 'NONE') {
       destinations.push('reelRecommendationNode');
@@ -615,7 +666,8 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     state: RagChatWorkflowState,
   ): 'draftAnswerNode' | typeof END => {
     const memoryReady = state.memoryReady === true;
-    const retrievalReady = !state.route?.needsRetrieval || state.retrievalReady === true;
+    const retrievalReady =
+      !state.route?.needsRetrieval || state.retrievalReady === true;
     return memoryReady && retrievalReady ? 'draftAnswerNode' : END;
   };
 
