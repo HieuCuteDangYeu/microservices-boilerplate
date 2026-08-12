@@ -81,3 +81,27 @@ model RagTrace {
   @@index([conversationId])
   @@index([createdAt])
 }
+
+model RagHierarchyShadowObservation {
+  id String @id @default(uuid())
+
+  userId         String
+  conversationId String
+  queryText      String @db.Text
+  retrievalMode  String
+  requiredEvidence String[]
+
+  directChunkIds       Json
+  hierarchicalChunkIds Json
+  directCount           Int
+  hierarchicalCount     Int
+  directMs              Int
+  hierarchicalMs        Int
+  overlapAtK            Float
+  jaccard               Float
+
+  createdAt DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
