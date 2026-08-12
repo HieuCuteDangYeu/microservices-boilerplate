@@ -8,6 +8,7 @@ import type { VisualFrameManifest } from '@common/processing/interfaces/visual-f
 import type { IArtifactStorage } from '@indexing/domain/interfaces/artifact-storage.interface';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'node:crypto';
 
 @Injectable()
 export class R2ArtifactStorageAdapter implements IArtifactStorage {
@@ -62,6 +63,18 @@ export class R2ArtifactStorageAdapter implements IArtifactStorage {
     }
 
     return await response.Body.transformToByteArray();
+  }
+
+  async getVerifiedArtifactBytes(input: {
+    key: string;
+    sha256: string;
+  }): Promise<Uint8Array> {
+    const bytes = await this.getArtifactBytes(input.key);
+    const actual = createHash('sha256').update(bytes).digest('hex');
+    if (actual !== input.sha256.trim().toLowerCase()) {
+      throw new Error(`Artifact ${input.key} checksum mismatch`);
+    }
+    return bytes;
   }
 
   async artifactExists(key: string): Promise<boolean> {
