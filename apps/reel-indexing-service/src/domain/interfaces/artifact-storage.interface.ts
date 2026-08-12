@@ -7,5 +7,9 @@ export interface IArtifactStorage {
   ): Promise<TranscriptionAudioManifest>;
   getVisualFrameManifest(key: string): Promise<VisualFrameManifest>;
   getArtifactBytes(key: string): Promise<Uint8Array>;
+  getVerifiedArtifactBytes(input: {
+    key: string;
+    sha256: string;
+  }): Promise<Uint8Array>;
   artifactExists(key: string): Promise<boolean>;
 }
