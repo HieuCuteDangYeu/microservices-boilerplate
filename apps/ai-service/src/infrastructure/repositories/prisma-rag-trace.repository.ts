@@ -1,4 +1,7 @@
-import { RagTrace } from '@ai/domain/entities/rag-trace.entity';
+import {
+  RagTrace,
+  type RagWorkflowTraceMetrics,
+} from '@ai/domain/entities/rag-trace.entity';
 import type { RagCitation } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type {
   IRagTraceRepository,
@@ -35,6 +38,13 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
 
         latencyMs: input.latencyMs,
         nodeTimings: this.toJsonNumberRecord(input.nodeTimings ?? {}),
+        workflowMetrics: this.toJsonWorkflowMetrics(
+          input.workflowMetrics ?? {
+            retrievalRetryCount: 0,
+            answerRetryCount: 0,
+            citationRetryCount: 0,
+          },
+        ),
       },
     });
 
@@ -63,20 +73,21 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
 
       latencyMs: record.latencyMs ?? undefined,
       nodeTimings: this.fromJsonNumberRecord(record.nodeTimings),
+      workflowMetrics: this.fromJsonWorkflowMetrics(record.workflowMetrics),
 
       createdAt: record.createdAt,
     });
   }
 
   private toJsonStringArray(value: string[]): Prisma.InputJsonValue {
-    const jsonArray: Prisma.InputJsonValue[] = value.map((item) => item);
-
-    return jsonArray;
+    return value.map((item) => item);
   }
 
   private toJsonCitations(value: RagCitation[]): Prisma.InputJsonValue {
     const jsonArray: Prisma.InputJsonObject[] = value.map((citation) => ({
       sourceType: citation.sourceType,
+      reelId: citation.reelId,
+      evidenceType: citation.evidenceType,
       title: citation.title ?? null,
       startTime: citation.startTime ?? null,
       endTime: citation.endTime ?? null,
@@ -94,6 +105,20 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
     ).map(([key, item]) => [key, item]);
 
     return Object.fromEntries(entries);
+  }
+
+  private toJsonWorkflowMetrics(
+    value: RagWorkflowTraceMetrics,
+  ): Prisma.InputJsonValue {
+    return {
+      retrievalRetryCount: value.retrievalRetryCount,
+      answerRetryCount: value.answerRetryCount,
+      citationRetryCount: value.citationRetryCount,
+      citationCoverageMode: value.citationCoverageMode ?? null,
+      citationCoverage: value.citationCoverage ?? null,
+      factualClaimCount: value.factualClaimCount ?? null,
+      supportedClaimCount: value.supportedClaimCount ?? null,
+    };
   }
 
   private fromJsonStringArray(value: Prisma.JsonValue | null): string[] {
@@ -116,8 +141,21 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
         continue;
       }
 
+      const reelId = this.readJsonString(item, 'reelId');
+      const evidenceType = this.readJsonString(item, 'evidenceType');
+      if (
+        !reelId ||
+        (evidenceType !== 'TRANSCRIPT' &&
+          evidenceType !== 'VISUAL' &&
+          evidenceType !== 'METADATA')
+      ) {
+        continue;
+      }
+
       citations.push({
         sourceType: 'REEL',
+        reelId,
+        evidenceType,
         title: this.readJsonString(item, 'title'),
         startTime: this.readJsonNumber(item, 'startTime'),
         endTime: this.readJsonNumber(item, 'endTime'),
@@ -144,6 +182,36 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
     }
 
     return result;
+  }
+
+  private fromJsonWorkflowMetrics(
+    value: Prisma.JsonValue | null,
+  ): RagWorkflowTraceMetrics {
+    if (!this.isJsonObject(value)) {
+      return {
+        retrievalRetryCount: 0,
+        answerRetryCount: 0,
+        citationRetryCount: 0,
+      };
+    }
+
+    const coverageMode = this.readJsonString(value, 'citationCoverageMode');
+    return {
+      retrievalRetryCount:
+        this.readJsonNumber(value, 'retrievalRetryCount') ?? 0,
+      answerRetryCount: this.readJsonNumber(value, 'answerRetryCount') ?? 0,
+      citationRetryCount:
+        this.readJsonNumber(value, 'citationRetryCount') ?? 0,
+      citationCoverageMode:
+        coverageMode === 'LLM' ||
+        coverageMode === 'FALLBACK' ||
+        coverageMode === 'NOT_REQUIRED'
+          ? coverageMode
+          : undefined,
+      citationCoverage: this.readJsonNumber(value, 'citationCoverage'),
+      factualClaimCount: this.readJsonNumber(value, 'factualClaimCount'),
+      supportedClaimCount: this.readJsonNumber(value, 'supportedClaimCount'),
+    };
   }
 
   private isJsonObject(
