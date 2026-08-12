@@ -12,7 +12,10 @@ import type {
   AnalyzeVisualFrameRequest,
   VisualFrameAnalysis,
 } from '@common/ai/interfaces/visual-analysis.interface';
-import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
+import type {
+  IIndexingAiService,
+  IndexingVisualFrameInput,
+} from '@indexing/domain/interfaces/ai-service.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
@@ -37,11 +40,17 @@ export class AiServiceAdapter implements IIndexingAiService {
   }
 
   async analyzeVisualFrame(
-    input: AnalyzeVisualFrameRequest,
+    input: IndexingVisualFrameInput,
   ): Promise<VisualFrameAnalysis> {
+    const request: AnalyzeVisualFrameRequest = {
+      imageBase64: Buffer.from(input.imageBytes).toString('base64'),
+      mimeType: input.mimeType,
+      timestampMs: input.timestampMs,
+    };
+
     return await firstValueFrom(
       this.client
-        .send<VisualFrameAnalysis>('ai.analyze_visual_frame', input)
+        .send<VisualFrameAnalysis>('ai.analyze_visual_frame', request)
         .pipe(timeout(120_000)),
     );
   }
