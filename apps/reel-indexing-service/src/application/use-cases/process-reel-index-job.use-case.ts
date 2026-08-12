@@ -1,7 +1,8 @@
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import type { IIndexingContentService } from '@indexing/domain/interfaces/content-service.interface';
 import type { IIndexCheckpointRepository } from '@indexing/domain/interfaces/index-checkpoint.repository.interface';
-import { ReelIndexLangGraphWorkflow } from '@indexing/infrastructure/workflows/reel-index-langgraph.workflow';
+import type { IReelIndexWorkflow } from '@indexing/domain/interfaces/reel-index-workflow.interface';
+import type { ISemanticCandidateLifecycle } from '@indexing/domain/interfaces/semantic-candidate-lifecycle.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 export type ProcessReelIndexJobResult =
@@ -13,11 +14,14 @@ export class ProcessReelIndexJobUseCase {
   private readonly logger = new Logger(ProcessReelIndexJobUseCase.name);
 
   constructor(
-    private readonly workflow: ReelIndexLangGraphWorkflow,
+    @Inject('IReelIndexWorkflow')
+    private readonly workflow: IReelIndexWorkflow,
     @Inject('IIndexCheckpointRepository')
     private readonly checkpoints: IIndexCheckpointRepository,
     @Inject('IIndexingContentService')
     private readonly content: IIndexingContentService,
+    @Inject('ISemanticCandidateLifecycle')
+    private readonly candidateLifecycle: ISemanticCandidateLifecycle,
   ) {}
 
   async execute(input: {
@@ -37,6 +41,16 @@ export class ProcessReelIndexJobUseCase {
       await this.checkpoints
         .fail(input.job.indexAttemptId, detail)
         .catch(() => undefined);
+
+      // Safe for pre-commit failures: only inactive candidate rows are removed.
+      // Commit-node failures perform their own reversible activation rollback.
+      await this.candidateLifecycle
+        .discardCandidate({
+          reelId: input.job.reelId,
+          indexAttemptId: input.job.indexAttemptId,
+        })
+        .catch(() => undefined);
+
       if (input.allowRetry) return { status: 'RETRY', error: detail };
 
       await this.content
