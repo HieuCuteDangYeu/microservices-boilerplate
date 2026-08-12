@@ -71,8 +71,9 @@ model RagTrace {
   verifierConfidence Float?
   verifierIssues     Json?
 
-  latencyMs  Int?
-  nodeTimings Json?
+  latencyMs       Int?
+  nodeTimings      Json?
+  workflowMetrics Json?
 
   createdAt DateTime @default(now())
 
