@@ -42,6 +42,12 @@ const SPECIAL_WRITE_INDEX: Record<string, number> = {
   __resume__: -4,
 };
 
+// The graph topology changed materially (parallel visual/transcript branches,
+// quality gates, and a new commit node). Namespace persisted LangGraph state so
+// in-flight checkpoints created by the previous topology are never resumed as
+// if they belonged to this graph. Domain indexing checkpoints remain reusable.
+const CHECKPOINT_THREAD_VERSION = 'reel-index-v2';
+
 @Injectable()
 export class PrismaLangGraphCheckpointSaver extends BaseCheckpointSaver {
   constructor(private readonly prisma: PrismaService) {
@@ -236,14 +242,15 @@ export class PrismaLangGraphCheckpointSaver extends BaseCheckpointSaver {
   }
 
   async deleteThread(threadId: string): Promise<void> {
+    const storageThreadId = this.versionThreadId(threadId);
     await this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw(Prisma.sql`
         DELETE FROM "LangGraphCheckpointWrite"
-        WHERE "threadId" = ${threadId}
+        WHERE "threadId" = ${storageThreadId}
       `);
       await transaction.$executeRaw(Prisma.sql`
         DELETE FROM "LangGraphCheckpoint"
-        WHERE "threadId" = ${threadId}
+        WHERE "threadId" = ${storageThreadId}
       `);
     });
   }
@@ -268,7 +275,17 @@ export class PrismaLangGraphCheckpointSaver extends BaseCheckpointSaver {
     ) {
       throw new Error('LangGraph checkpoint config is invalid');
     }
-    return { threadId, checkpointNamespace, checkpointId };
+    return {
+      threadId: this.versionThreadId(threadId),
+      checkpointNamespace,
+      checkpointId,
+    };
+  }
+
+  private versionThreadId(threadId: string): string {
+    const clean = threadId.trim();
+    const prefix = `${CHECKPOINT_THREAD_VERSION}:`;
+    return clean.startsWith(prefix) ? clean : `${prefix}${clean}`;
   }
 
   private toConfig(
