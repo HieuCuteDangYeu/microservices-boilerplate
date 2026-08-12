@@ -33,6 +33,7 @@ const RagChatStateSchema = new StateSchema({
 
   retrievedChunks: z.array(z.any()).default([]),
   rerankedChunks: z.array(z.any()).default([]),
+  retrievalReady: z.boolean().default(false),
 
   recommendedReels: z.array(z.any()).default([]),
   suggestedQueries: z.array(z.string()).default([]),
@@ -42,6 +43,7 @@ const RagChatStateSchema = new StateSchema({
   conversationMemory: z.any().optional(),
   userMemories: z.any().optional(),
   memorySelection: z.any().optional(),
+  memoryReady: z.boolean().default(false),
 
   answer: z.string().optional(),
   verification: z.any().optional(),
@@ -87,8 +89,10 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       memory: input.memory,
       retrievedChunks: [],
       rerankedChunks: [],
+      retrievalReady: false,
       recommendedReels: [],
       suggestedQueries: [],
+      memoryReady: false,
       citations: [],
       retryCount: 0,
       retrievalRetryCount: 0,
@@ -127,7 +131,9 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         'retrievalRepairNode',
         this.createRetrievalRepairNode(nodeTimings),
       )
+      .addNode('markRetrievalReadyNode', () => ({ retrievalReady: true }))
       .addNode('memorySelectorNode', this.createMemoryNode(nodeTimings))
+      .addNode('answerContextJoinNode', () => ({}))
       .addNode('draftAnswerNode', this.createDraftAnswerNode(nodeTimings))
       .addNode('verifierNode', this.createVerifierNode(nodeTimings))
       .addNode(
@@ -158,18 +164,28 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       )
 
       .addEdge(START, 'queryRouterNode')
-      .addConditionalEdges('queryRouterNode', this.routeAfterQueryRouter, [
-        'retrievalNode',
-        'memorySelectorNode',
-      ])
+      .addConditionalEdges(
+        'queryRouterNode',
+        this.routesAfterQueryRouter,
+        ['retrievalNode', 'memorySelectorNode', 'reelRecommendationNode'],
+      )
       .addEdge('retrievalNode', 'contextSufficiencyNode')
       .addConditionalEdges(
         'contextSufficiencyNode',
         this.routeAfterContextSufficiency,
-        ['memorySelectorNode', 'retrievalRepairNode', 'noContextAnswerNode'],
+        [
+          'markRetrievalReadyNode',
+          'retrievalRepairNode',
+          'noContextAnswerNode',
+        ],
       )
       .addEdge('retrievalRepairNode', 'retrievalNode')
-      .addEdge('memorySelectorNode', 'draftAnswerNode')
+      .addEdge('markRetrievalReadyNode', 'answerContextJoinNode')
+      .addEdge('memorySelectorNode', 'answerContextJoinNode')
+      .addConditionalEdges('answerContextJoinNode', this.routeAfterContextJoin, [
+        'draftAnswerNode',
+        END,
+      ])
       .addEdge('draftAnswerNode', 'verifierNode')
       .addConditionalEdges('verifierNode', this.routeAfterVerifier, [
         'citationNode',
@@ -190,7 +206,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       .addEdge('prepareCitationRevisionNode', 'draftAnswerNode')
       .addEdge('verificationFailureNode', 'finalAnswerNode')
       .addEdge('noContextAnswerNode', 'finalAnswerNode')
-      .addEdge('finalAnswerNode', 'reelRecommendationNode')
+      .addEdge('finalAnswerNode', END)
       .addEdge('reelRecommendationNode', END)
       .compile();
   }
@@ -280,6 +296,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       return {
         retrievalRepairQuery: query,
         retrievalRetryCount: state.retrievalRetryCount + 1,
+        retrievalReady: false,
         retrievedChunks: [],
         rerankedChunks: [],
       };
@@ -293,7 +310,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       const route = state.route;
 
       if (!route) {
-        return {};
+        return { memoryReady: true };
       }
 
       const result = await this.timed('memorySelectorNode', nodeTimings, () =>
@@ -310,6 +327,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         memorySelection: result.selection,
         conversationMemory: result.conversationMemory,
         userMemories: result.userMemories,
+        memoryReady: true,
       };
     };
   }
@@ -485,44 +503,50 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
       const query = action.query?.trim() || state.userMessage.trim();
 
-      const recommendedReels = await this.timed(
-        'reelRecommendationNode',
-        nodeTimings,
-        async () => {
-          const searchResults = query
-            ? await this.contentService.searchPublicReels({
-                query,
-                viewerId: state.userId,
-                limit: 8,
-              })
-            : [];
+      try {
+        const recommendedReels = await this.timed(
+          'reelRecommendationNode',
+          nodeTimings,
+          async () => {
+            const searchResults = query
+              ? await this.contentService.searchPublicReels({
+                  query,
+                  viewerId: state.userId,
+                  limit: 8,
+                })
+              : [];
 
-          const uniqueSearchResults =
-            this.dedupeRecommendedReels(searchResults);
+            const uniqueSearchResults =
+              this.dedupeRecommendedReels(searchResults);
 
-          if (
-            uniqueSearchResults.length >= action.minRelevantItems ||
-            !action.allowPersonalizedFallback
-          ) {
-            return uniqueSearchResults.slice(0, 8);
-          }
+            if (
+              uniqueSearchResults.length >= action.minRelevantItems ||
+              !action.allowPersonalizedFallback
+            ) {
+              return uniqueSearchResults.slice(0, 8);
+            }
 
-          const fallback = await this.contentService.getRecommendedReels({
-            viewerId: state.userId,
-            limit: 8,
-          });
+            const fallback = await this.contentService.getRecommendedReels({
+              viewerId: state.userId,
+              limit: 8,
+            });
 
-          return this.dedupeRecommendedReels([
-            ...uniqueSearchResults,
-            ...fallback,
-          ]).slice(0, 8);
-        },
-      );
+            return this.dedupeRecommendedReels([
+              ...uniqueSearchResults,
+              ...fallback,
+            ]).slice(0, 8);
+          },
+        );
 
-      return {
-        recommendedReels,
-        suggestedQueries: [],
-      };
+        return {
+          recommendedReels,
+          suggestedQueries: [],
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`[RagGraph] recommendation branch failed open: ${message}`);
+        return { recommendedReels: [], suggestedQueries: [] };
+      }
     };
   }
 
@@ -542,20 +566,34 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     return [...map.values()];
   }
 
-  private routeAfterQueryRouter = (
+  private routesAfterQueryRouter = (
     state: RagChatWorkflowState,
-  ): 'retrievalNode' | 'memorySelectorNode' => {
-    return state.route?.needsRetrieval ? 'retrievalNode' : 'memorySelectorNode';
+  ): Array<'retrievalNode' | 'memorySelectorNode' | 'reelRecommendationNode'> => {
+    const destinations: Array<
+      'retrievalNode' | 'memorySelectorNode' | 'reelRecommendationNode'
+    > = ['memorySelectorNode'];
+
+    if (state.route?.needsRetrieval) {
+      destinations.push('retrievalNode');
+    }
+    if (state.route?.recommendationAction.type !== 'NONE') {
+      destinations.push('reelRecommendationNode');
+    }
+
+    return destinations;
   };
 
   private routeAfterContextSufficiency = (
     state: RagChatWorkflowState,
-  ): 'memorySelectorNode' | 'retrievalRepairNode' | 'noContextAnswerNode' => {
+  ):
+    | 'markRetrievalReadyNode'
+    | 'retrievalRepairNode'
+    | 'noContextAnswerNode' => {
     const context = state.contextSufficiency;
-    if (!context) return 'memorySelectorNode';
+    if (!context) return 'markRetrievalReadyNode';
 
     if (context.sufficient && context.recommendedAction === 'ANSWER') {
-      return 'memorySelectorNode';
+      return 'markRetrievalReadyNode';
     }
 
     if (
@@ -573,13 +611,32 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     return 'noContextAnswerNode';
   };
 
+  private routeAfterContextJoin = (
+    state: RagChatWorkflowState,
+  ): 'draftAnswerNode' | typeof END => {
+    const memoryReady = state.memoryReady === true;
+    const retrievalReady = !state.route?.needsRetrieval || state.retrievalReady === true;
+    return memoryReady && retrievalReady ? 'draftAnswerNode' : END;
+  };
+
   private routeAfterVerifier = (
     state: RagChatWorkflowState,
   ):
     | 'citationNode'
     | 'prepareAnswerRevisionNode'
     | 'verificationFailureNode' => {
-    if (state.verification?.passed) return 'citationNode';
+    const minimumConfidence = this.number(
+      'AI_RAG_VERIFIER_MIN_CONFIDENCE',
+      0.65,
+      0,
+      1,
+    );
+    if (
+      state.verification?.passed &&
+      state.verification.confidence >= minimumConfidence
+    ) {
+      return 'citationNode';
+    }
 
     if (
       state.verification?.requiresRevision &&
@@ -604,7 +661,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
     const threshold = this.number(
       'AI_RAG_CITATION_COVERAGE_THRESHOLD',
-      0.8,
+      1,
       0,
       1,
     );
