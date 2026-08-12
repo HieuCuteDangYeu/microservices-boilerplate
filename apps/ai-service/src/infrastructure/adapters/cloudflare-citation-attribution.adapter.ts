@@ -48,6 +48,9 @@ export class CloudflareCitationAttributionAdapter
     const maxCandidates = Math.round(
       this.number('AI_RAG_CITATION_CANDIDATE_LIMIT', 8, 1, 20),
     );
+    const timeoutMs = Math.round(
+      this.number('AI_RAG_CITATION_TIMEOUT_MS', 4_000, 500, 10_000),
+    );
     const candidates = input.candidates.slice(0, maxCandidates);
 
     const result =
@@ -77,6 +80,7 @@ export class CloudflareCitationAttributionAdapter
         },
         maxTokens: 350,
         temperature: 0,
+        timeoutMs,
       });
 
     const allowedIds = new Set(candidates.map((candidate) => candidate.evidenceId));
@@ -118,6 +122,7 @@ export class CloudflareCitationAttributionAdapter
       'You are a citation attribution verifier for a video RAG system.',
       'Your task is NOT to answer the question and NOT to rewrite evidence.',
       'Select the smallest set of supplied evidence IDs that directly supports factual claims in the final answer.',
+      'Every factual claim that can be supported by supplied evidence should be covered by at least one selected evidence item.',
       'Do not select evidence merely because it is topically related.',
       'TRANSCRIPT evidence supports only what is stated in the transcript.',
       'VISUAL evidence supports only what is visible in the sampled frame at its timestamp; never infer events between sampled frames.',
