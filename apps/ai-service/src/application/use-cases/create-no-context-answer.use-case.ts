@@ -1,27 +1,13 @@
-import type { IChatTokenPublisher } from '@ai/domain/interfaces/chat-token-publisher.interface';
 import type {
   RagChatWorkflowState,
   RagRequiredEvidence,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class CreateNoContextAnswerUseCase {
-  constructor(
-    @Inject('IChatTokenPublisher')
-    private readonly chatTokenPublisher: IChatTokenPublisher,
-  ) {}
-
   execute(state: RagChatWorkflowState): string {
-    const answer = this.buildAnswer(state);
-
-    this.chatTokenPublisher.publishToken({
-      conversationId: state.conversationId,
-      userId: state.userId,
-      token: answer,
-    });
-
-    return answer;
+    return this.buildAnswer(state);
   }
 
   private buildAnswer(state: RagChatWorkflowState): string {
