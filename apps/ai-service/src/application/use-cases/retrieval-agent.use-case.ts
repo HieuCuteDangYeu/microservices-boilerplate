@@ -71,12 +71,36 @@ export class RetrievalAgentUseCase {
     retrievedChunks: TranscriptMatch[];
     rerankedChunks: TranscriptMatch[];
   }> {
-    const plan = await this.planRetrieval(input);
-    if (plan.mode === 'NONE') {
-      return { plan, retrievedChunks: [], rerankedChunks: [] };
+    const plan = await this.plan({ message: input.message, route: input.route });
+    const retrievedChunks = await this.retrieve({
+      userId: input.userId,
+      conversationId: input.conversationId,
+      route: input.route,
+      plan,
+    });
+    const rerankedChunks = await this.rerank({ plan, retrievedChunks });
+
+    return { plan, retrievedChunks, rerankedChunks };
+  }
+
+  async plan(input: {
+    message: string;
+    route: RagChatRouteDecision;
+  }): Promise<RagRetrievalPlan> {
+    return await this.planRetrieval(input);
+  }
+
+  async retrieve(input: {
+    userId: string;
+    conversationId: string;
+    route: RagChatRouteDecision;
+    plan: RagRetrievalPlan;
+  }): Promise<TranscriptMatch[]> {
+    if (input.plan.mode === 'NONE') {
+      return [];
     }
 
-    const queries = this.getQueries(plan);
+    const queries = this.getQueries(input.plan);
     const allCandidates: TranscriptMatch[] = [];
     const accessibleReelIds =
       await this.contentService.resolveReelContextAccess({
@@ -84,7 +108,7 @@ export class RetrievalAgentUseCase {
         conversationId: input.conversationId,
       });
     if (accessibleReelIds.length === 0) {
-      return { plan, retrievedChunks: [], rerankedChunks: [] };
+      return [];
     }
 
     const includeVisual = input.route.requiredEvidence.includes('VISUAL');
@@ -100,27 +124,35 @@ export class RetrievalAgentUseCase {
       });
       allCandidates.push(
         ...(await this.retrieveForQuery({
-          mode: plan.mode,
+          mode: input.plan.mode,
           queryText,
           queryEmbedding: queryEmbedding.values,
           accessibleReelIds,
-          limit: plan.searchLimit,
+          limit: input.plan.searchLimit,
           includeTranscript,
           includeVisual,
         })),
       );
     }
 
-    const retrievedChunks = this.dedupeByChunkId(allCandidates);
-    const rerankedChunks = plan.shouldRerank
-      ? await this.rerankerService.rerank({
-          queryText: queries.join('\n'),
-          candidates: retrievedChunks,
-          limit: plan.rerankLimit,
-        })
-      : retrievedChunks.slice(0, plan.rerankLimit);
+    return this.dedupeByChunkId(allCandidates);
+  }
 
-    return { plan, retrievedChunks, rerankedChunks };
+  async rerank(input: {
+    plan: RagRetrievalPlan;
+    retrievedChunks: TranscriptMatch[];
+  }): Promise<TranscriptMatch[]> {
+    if (input.plan.mode === 'NONE' || input.retrievedChunks.length === 0) {
+      return [];
+    }
+
+    return input.plan.shouldRerank
+      ? await this.rerankerService.rerank({
+          queryText: this.getQueries(input.plan).join('\n'),
+          candidates: input.retrievedChunks,
+          limit: input.plan.rerankLimit,
+        })
+      : input.retrievedChunks.slice(0, input.plan.rerankLimit);
   }
 
   private async retrieveForQuery(
@@ -415,6 +447,7 @@ export class RetrievalAgentUseCase {
           jsonSchema: this.getJsonSchema(),
           maxTokens: 450,
           temperature: 0.1,
+          timeoutMs: 4_000,
         });
       return this.normalize(raw, input.message);
     } catch (error: unknown) {
