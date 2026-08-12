@@ -107,6 +107,14 @@ export interface RagContextSufficiencyResult {
   recommendedAction: 'ANSWER' | 'REFUSE_NO_CONTEXT' | 'REWRITE_AND_RETRY';
 }
 
+export interface RagCitationCoverageResult {
+  mode: 'LLM' | 'FALLBACK' | 'NOT_REQUIRED';
+  coverage: number;
+  factualClaimCount: number;
+  supportedClaimCount: number;
+  unsupportedClaims: string[];
+}
+
 export type RagCitation = AiRagCitation;
 
 export interface RagChatWorkflowInput {
@@ -131,6 +139,7 @@ export interface RagChatWorkflowState {
 
   route?: RagChatRouteDecision;
   retrievalPlan?: RagRetrievalPlan;
+  retrievalRepairQuery?: string;
 
   retrievedChunks: ReelContextSearchResult[];
   rerankedChunks: ReelContextSearchResult[];
@@ -147,9 +156,11 @@ export interface RagChatWorkflowState {
   answer?: string;
   verification?: RagVerificationResult;
   citations?: RagCitation[];
+  citationCoverage?: RagCitationCoverageResult;
 
   retryCount: number;
   retrievalRetryCount: number;
+  citationRetryCount: number;
 }
 
 export interface IRagChatWorkflow {
