@@ -4,6 +4,7 @@ import type {
 } from '@indexing/domain/interfaces/semantic-candidate-lifecycle.interface';
 import { PrismaService } from '@indexing/infrastructure/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/reel-indexing-client';
 
 @Injectable()
 export class PrismaSemanticCandidateLifecycle
@@ -201,7 +202,7 @@ export class PrismaSemanticCandidateLifecycle
   }
 
   private async setActive(
-    transaction: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    transaction: Prisma.TransactionClient,
     reelId: string,
     indexAttemptId: string | undefined,
     isActive: boolean,
