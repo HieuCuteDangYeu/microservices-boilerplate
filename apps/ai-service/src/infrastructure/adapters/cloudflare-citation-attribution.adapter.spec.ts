@@ -8,14 +8,22 @@ describe('CloudflareCitationAttributionAdapter', () => {
       get: jest.fn((key: string) => values[key]),
     }) as unknown as ConfigService;
 
-  it('keeps only supplied high-confidence evidence IDs', async () => {
+  it('keeps only supplied high-confidence evidence IDs and computes coverage', async () => {
     const structuredLlmService: IStructuredLlmService = {
       generateObject: jest.fn().mockResolvedValue({
-        citations: [
-          { evidenceId: 'e0', confidence: 0.92 },
-          { evidenceId: 'invented', confidence: 1 },
-          { evidenceId: 'e1', confidence: 0.2 },
-          { evidenceId: 'e0', confidence: 0.99 },
+        claims: [
+          {
+            claim: 'The screen shows a module-not-found error.',
+            supported: true,
+            evidenceIds: ['e0', 'invented'],
+            confidence: 0.92,
+          },
+          {
+            claim: 'It is caused by a production dependency.',
+            supported: true,
+            evidenceIds: ['e1'],
+            confidence: 0.2,
+          },
         ],
       }),
     };
@@ -27,7 +35,8 @@ describe('CloudflareCitationAttributionAdapter', () => {
     await expect(
       adapter.attribute({
         question: 'What error is visible?',
-        answer: 'The screen shows a module-not-found error.',
+        answer:
+          'The screen shows a module-not-found error caused by a production dependency.',
         maxCitations: 3,
         candidates: [
           {
@@ -44,7 +53,26 @@ describe('CloudflareCitationAttributionAdapter', () => {
           },
         ],
       }),
-    ).resolves.toEqual([{ evidenceId: 'e0', confidence: 0.92 }]);
+    ).resolves.toEqual({
+      selections: [{ evidenceId: 'e0', confidence: 0.92 }],
+      claims: [
+        {
+          claim: 'The screen shows a module-not-found error.',
+          supported: true,
+          evidenceIds: ['e0'],
+          confidence: 0.92,
+        },
+        {
+          claim: 'It is caused by a production dependency.',
+          supported: false,
+          evidenceIds: [],
+          confidence: 0.2,
+        },
+      ],
+      factualClaimCount: 2,
+      supportedClaimCount: 1,
+      coverage: 0.5,
+    });
 
     expect(structuredLlmService.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -55,9 +83,9 @@ describe('CloudflareCitationAttributionAdapter', () => {
     );
   });
 
-  it('returns an empty attribution when the model selects no evidence', async () => {
+  it('returns full coverage when the answer contains no factual claims', async () => {
     const structuredLlmService: IStructuredLlmService = {
-      generateObject: jest.fn().mockResolvedValue({ citations: [] }),
+      generateObject: jest.fn().mockResolvedValue({ claims: [] }),
     };
     const adapter = new CloudflareCitationAttributionAdapter(
       structuredLlmService,
@@ -78,6 +106,12 @@ describe('CloudflareCitationAttributionAdapter', () => {
           },
         ],
       }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({
+      selections: [],
+      claims: [],
+      factualClaimCount: 0,
+      supportedClaimCount: 0,
+      coverage: 1,
+    });
   });
 });
