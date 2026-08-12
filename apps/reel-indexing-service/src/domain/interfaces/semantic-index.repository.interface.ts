@@ -16,8 +16,21 @@ export interface SemanticIndexCandidate {
   documents: ReelIndexDocument[];
 }
 
+export interface SemanticIndexCandidateSnapshot {
+  reelDocumentCount: number;
+  sectionCount: number;
+  chunkCount: number;
+  visualSceneCount: number;
+  transcriptSegmentCount: number;
+  activeDocumentCount: number;
+}
+
 export interface ISemanticIndexRepository {
   persistCandidate(input: SemanticIndexCandidate): Promise<void>;
+  getCandidateSnapshot(
+    reelId: string,
+    indexAttemptId: string,
+  ): Promise<SemanticIndexCandidateSnapshot>;
   activateCandidate(reelId: string, indexAttemptId: string): Promise<void>;
   discardCandidate(reelId: string, indexAttemptId: string): Promise<void>;
   searchReels(
