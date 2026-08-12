@@ -8,6 +8,11 @@ export interface IIndexingContentService {
     allowReclaim?: boolean;
   }): Promise<boolean>;
 
+  isIndexingAttemptCurrent(input: {
+    reelId: string;
+    indexAttemptId: string;
+  }): Promise<boolean>;
+
   reportProgress(input: {
     reelId: string;
     indexAttemptId: string;
