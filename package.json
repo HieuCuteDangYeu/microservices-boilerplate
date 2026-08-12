@@ -89,7 +89,9 @@
     "backfill:conversation-client-message-ids": "node scripts/backfill-conversation-client-message-ids.cjs",
     "backfill:user-memory-embeddings": "node scripts/send-rmq-message.cjs ai_queue ai.backfill_user_memory_embeddings '{\"limit\":100}'",
     "ops:reindex:reel": "node scripts/ops/reindex-reel.cjs",
-    "ops:reindex:status": "node scripts/ops/reindex-status.cjs"
+    "ops:reindex:status": "node scripts/ops/reindex-status.cjs",
+    "ops:rag:benchmark": "node scripts/ops/rag-hierarchy-benchmark.cjs",
+    "ops:rag:readiness": "node scripts/ops/rag-production-readiness.cjs"
   },
   "packageManager": "pnpm@9.15.0",
   "overrides": {
@@ -119,13 +121,13 @@
     "amqp-connection-manager": "^5.0.0",
     "amqplib": "^0.10.9",
     "bcrypt": "^6.0.0",
-    "cookie-parser": "^1.4.7",
+    "cookie-parser": "^6.0.0",
     "firebase-admin": "^14.1.0",
     "google-auth-library": "^10.6.1",
     "ioredis": "^5.8.2",
     "mediasoup": "^3.14.20",
     "mongoose": "^9.1.4",
-    "nestjs-zod": "^5.0.1",
+    "nestjs-zod": "^5.1.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pnpm": "9.15.0",
