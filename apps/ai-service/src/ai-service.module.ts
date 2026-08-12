@@ -16,6 +16,7 @@ import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-c
 import { MemoryWriterAgentUseCase } from '@ai/application/use-cases/memory-writer-agent.use-case';
 import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
 import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
+import { RewriteRetrievalQueryUseCase } from '@ai/application/use-cases/rewrite-retrieval-query.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
@@ -139,6 +140,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 
     QueryRouterAgentUseCase,
     RetrievalAgentUseCase,
+    RewriteRetrievalQueryUseCase,
     MemoryAgentUseCase,
     GenerateDraftAnswerUseCase,
     StreamFinalAnswerUseCase,
