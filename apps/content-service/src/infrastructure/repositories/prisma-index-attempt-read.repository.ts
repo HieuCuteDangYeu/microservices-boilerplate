@@ -3,9 +3,7 @@ import { PrismaService } from '@content/infrastructure/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
 
 @Injectable()
-export class PrismaIndexAttemptReadRepository
-  implements IIndexAttemptReadRepository
-{
+export class PrismaIndexAttemptReadRepository implements IIndexAttemptReadRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async isIndexingAttemptCurrent(input: {

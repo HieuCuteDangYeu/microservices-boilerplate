@@ -30,9 +30,7 @@ describe('EvaluateRetrievalBenchmarkUseCase', () => {
     expect(result.hierarchical.reciprocalRank).toBeGreaterThan(
       result.direct.reciprocalRank,
     );
-    expect(result.hierarchical.ndcgAtK).toBeGreaterThan(
-      result.direct.ndcgAtK,
-    );
+    expect(result.hierarchical.ndcgAtK).toBeGreaterThan(result.direct.ndcgAtK);
     expect(result.delta.reciprocalRank).toBeGreaterThan(0);
   });
 

@@ -10,6 +10,7 @@ import type {
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 interface RawRouteDecision {
   intent?: unknown;
@@ -59,11 +60,14 @@ export class QueryRouterAgentUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
+    private readonly config?: ConfigService,
   ) {}
 
   async execute(input: {
     message: string;
     recentHistory?: string;
+    hasSharedReelContext?: boolean;
+    sharedReelCount?: number;
   }): Promise<RagChatRouteDecision> {
     if (!input.message.trim()) {
       return this.createNormalChatRoute(
@@ -79,9 +83,13 @@ export class QueryRouterAgentUseCase {
           jsonSchema: this.getJsonSchema(),
           maxTokens: 650,
           temperature: 0,
+          model:
+            this.config?.get<string>('CLOUDFLARE_ROUTER_MODEL') ||
+            '@cf/meta/llama-3.1-8b-instruct-fast',
+          timeoutMs: this.timeout('AI_RAG_ROUTER_TIMEOUT_MS'),
         });
 
-      return this.normalize(result, input.message);
+      return this.normalize(result, input);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 
@@ -164,10 +172,15 @@ Routing rules:
   private buildUserPrompt(input: {
     message: string;
     recentHistory?: string;
+    hasSharedReelContext?: boolean;
+    sharedReelCount?: number;
   }): string {
     return `
 Current user message:
 ${input.message}
+
+Shared reel context:
+${input.hasSharedReelContext ? `AVAILABLE (${input.sharedReelCount ?? 0} accessible reel${input.sharedReelCount === 1 ? '' : 's'})` : 'NOT AVAILABLE'}
 
 Recent conversation context:
 ${input.recentHistory || '(empty)'}
@@ -265,9 +278,15 @@ Classify the current user message.
 
   private normalize(
     raw: RawRouteDecision,
-    message: string,
+    input: {
+      message: string;
+      hasSharedReelContext?: boolean;
+    },
   ): RagChatRouteDecision {
-    const sharedReelQuestionType = this.sharedReelQuestionType(message);
+    const sharedReelQuestionType = this.sharedReelQuestionType(
+      input.message,
+      input.hasSharedReelContext === true,
+    );
     const intent = sharedReelQuestionType
       ? 'REEL_VIDEO_QUESTION'
       : this.normalizeIntent(raw.intent);
@@ -326,18 +345,24 @@ Classify the current user message.
 
   private sharedReelQuestionType(
     message: string,
+    hasSharedReelContext: boolean,
   ): RagReelQuestionType | undefined {
-    const normalized = message.toLowerCase();
-    const mentionsSharedMedia =
-      /\b(shared|this|that)\b/.test(normalized) &&
-      /\b(reel|video|clip|media|canary)\b/.test(normalized);
-
-    if (!mentionsSharedMedia) {
+    if (!hasSharedReelContext) {
       return undefined;
     }
 
+    const normalized = message.toLowerCase();
+
     if (
-      /\b(say|says|mention|mentions|transcript|quote|chunk|timestamp|citation)\b/.test(
+      /\b(screen|visible|shown|see|look|written|text|order number|discount)\b/.test(
+        normalized,
+      )
+    ) {
+      return 'VISUAL_CONTENT';
+    }
+
+    if (
+      /\b(say|says|mention|mentions|speaker|spoken|transcript|quote|chunk|timestamp|citation|project name)\b/.test(
         normalized,
       )
     ) {
@@ -350,6 +375,20 @@ Classify the current user message.
       )
     ) {
       return 'REEL_METADATA';
+    }
+
+    if (
+      /\b(about|summary|summarize|main point|meaning|topic)\b/.test(normalized)
+    ) {
+      return 'GENERAL_REEL_SUMMARY';
+    }
+
+    const mentionsSharedMedia =
+      /\b(shared|this|that)\b/.test(normalized) &&
+      /\b(reel|video|clip|media|canary)\b/.test(normalized);
+
+    if (!mentionsSharedMedia) {
+      return undefined;
     }
 
     return 'AMBIGUOUS_REEL_REFERENCE';
@@ -546,6 +585,7 @@ Classify the current user message.
 
     if (
       requiredEvidence.includes('TRANSCRIPT') ||
+      requiredEvidence.includes('VISUAL') ||
       requiredEvidence.includes('METADATA')
     ) {
       return true;
@@ -687,5 +727,12 @@ Classify the current user message.
       },
       reason,
     };
+  }
+
+  private timeout(key: string): number {
+    const configured = Number(this.config?.get<string>(key) ?? '8000');
+    return Number.isFinite(configured)
+      ? Math.min(30_000, Math.max(500, Math.round(configured)))
+      : 8_000;
   }
 }

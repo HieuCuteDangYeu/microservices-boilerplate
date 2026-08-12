@@ -7,9 +7,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/ai-client';
 
 @Injectable()
-export class PrismaRagHierarchyShadowObservationRepository
-  implements IRagHierarchyShadowObservationRepository
-{
+export class PrismaRagHierarchyShadowObservationRepository implements IRagHierarchyShadowObservationRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async save(observation: RagHierarchyShadowObservation): Promise<void> {

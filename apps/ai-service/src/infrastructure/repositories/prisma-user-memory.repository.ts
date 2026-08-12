@@ -214,7 +214,9 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       });
 
       if (!existing || existing.userId !== input.userId) {
-        throw new Error(`User memory ${memoryId} is not available for replacement`);
+        throw new Error(
+          `User memory ${memoryId} is not available for replacement`,
+        );
       }
 
       const updated = await tx.userMemory.update({

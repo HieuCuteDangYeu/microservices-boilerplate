@@ -84,8 +84,8 @@ export class ExtractHierarchicalMetadataUseCase {
   private hasStrongUserMetadata(job: ReelIndexJob): boolean {
     return Boolean(
       (job.title?.trim().length ?? 0) >= 8 &&
-        (job.description?.trim().length ?? 0) >= 40 &&
-        job.tags.filter((tag) => tag.trim().length > 0).length >= 3,
+      (job.description?.trim().length ?? 0) >= 40 &&
+      job.tags.filter((tag) => tag.trim().length > 0).length >= 3,
     );
   }
 

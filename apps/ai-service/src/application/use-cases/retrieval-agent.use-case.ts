@@ -10,8 +10,8 @@ import type {
   RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IRagHierarchyShadowObservationRepository } from '@ai/domain/interfaces/rag-hierarchy-shadow-observation.repository.interface';
-import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
 import type { IReelSemanticIndexService } from '@ai/domain/interfaces/reel-semantic-index.service.interface';
+import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
 import type {
   IStructuredLlmService,
   StructuredLlmJsonSchema,
@@ -79,7 +79,10 @@ export class RetrievalAgentUseCase {
     retrievedChunks: TranscriptMatch[];
     rerankedChunks: TranscriptMatch[];
   }> {
-    const plan = await this.plan({ message: input.message, route: input.route });
+    const plan = await this.plan({
+      message: input.message,
+      route: input.route,
+    });
     const retrievedChunks = await this.retrieve({
       userId: input.userId,
       conversationId: input.conversationId,
@@ -103,6 +106,7 @@ export class RetrievalAgentUseCase {
     conversationId: string;
     route: RagChatRouteDecision;
     plan: RagRetrievalPlan;
+    accessibleReelIds?: string[];
   }): Promise<TranscriptMatch[]> {
     if (input.plan.mode === 'NONE') {
       return [];
@@ -111,10 +115,11 @@ export class RetrievalAgentUseCase {
     const queries = this.getQueries(input.plan);
     const allCandidates: TranscriptMatch[] = [];
     const accessibleReelIds =
-      await this.contentService.resolveReelContextAccess({
+      input.accessibleReelIds ??
+      (await this.contentService.resolveReelContextAccess({
         userId: input.userId,
         conversationId: input.conversationId,
-      });
+      }));
     if (accessibleReelIds.length === 0) {
       return [];
     }
@@ -341,7 +346,9 @@ export class RetrievalAgentUseCase {
   }
 
   private extractExplicitQueryTags(queryText: string): string[] {
-    const tags = queryText.match(/#[\p{L}\p{N}_-]+/gu) ?? [];
+    const tags = queryText
+      .split(/[^#\p{L}\p{N}_-]+/u)
+      .filter((token) => /^#[\p{L}\p{N}_-]+$/u.test(token));
     return [...new Set(tags.map((tag) => tag.slice(1).toLowerCase()))].slice(
       0,
       8,

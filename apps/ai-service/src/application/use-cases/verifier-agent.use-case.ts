@@ -7,6 +7,7 @@ import type {
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 interface RawVerificationResult {
   passed?: unknown;
@@ -23,6 +24,7 @@ export class VerifierAgentUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
+    private readonly config?: ConfigService,
   ) {}
 
   async execute(state: RagChatWorkflowState): Promise<RagVerificationResult> {
@@ -43,7 +45,10 @@ export class VerifierAgentUseCase {
           jsonSchema: this.getJsonSchema(),
           maxTokens: 450,
           temperature: 0,
-          timeoutMs: 4_000,
+          model:
+            this.config?.get<string>('CLOUDFLARE_VERIFIER_MODEL') ||
+            '@cf/meta/llama-3.1-8b-instruct-fast',
+          timeoutMs: this.timeout('AI_RAG_VERIFIER_TIMEOUT_MS'),
         });
 
       return this.normalize(raw);
@@ -82,6 +87,7 @@ Rules:
 4. Do not require revision for harmless style differences.
 5. Retrieval text and search-enrichment fields are not evidence. Judge reel claims only from evidenceText supplied below.
 6. If a required factual claim is unsupported, passed must be false.
+7. A direct claim that a fact is visible is supported when grounded visual evidence contains that fact. The answer does not need to repeat the evidence timestamp unless the user asks when it appears or the answer makes a timing claim.
 `.trim();
   }
 
@@ -168,5 +174,12 @@ ${JSON.stringify(
           ? raw.revisedInstruction.trim()
           : undefined,
     };
+  }
+
+  private timeout(key: string): number {
+    const configured = Number(this.config?.get<string>(key) ?? '8000');
+    return Number.isFinite(configured)
+      ? Math.min(30_000, Math.max(500, Math.round(configured)))
+      : 8_000;
   }
 }

@@ -141,9 +141,7 @@ export class SimpleRerankerAdapter implements IRerankerService {
     };
   }
 
-  private calculateRetrievalSignal(
-    candidate: ReelContextSearchResult,
-  ): number {
+  private calculateRetrievalSignal(candidate: ReelContextSearchResult): number {
     const rrf = this.normalizeRrf(candidate.score ?? 0);
     const vector = this.clamp(candidate.vectorScore ?? 0, 0, 1);
     const lexical = this.clamp(
@@ -285,7 +283,8 @@ export class SimpleRerankerAdapter implements IRerankerService {
 
     const intersection = Math.max(
       0,
-      Math.min(left.endTime, right.endTime) - Math.max(left.startTime, right.startTime),
+      Math.min(left.endTime, right.endTime) -
+        Math.max(left.startTime, right.startTime),
     );
     const union =
       Math.max(left.endTime, right.endTime) -

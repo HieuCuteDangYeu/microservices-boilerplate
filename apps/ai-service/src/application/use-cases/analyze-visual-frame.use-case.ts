@@ -14,7 +14,9 @@ export class AnalyzeVisualFrameUseCase {
     private readonly configService: ConfigService,
   ) {}
 
-  async execute(input: AnalyzeVisualFrameRequest): Promise<VisualFrameAnalysis> {
+  async execute(
+    input: AnalyzeVisualFrameRequest,
+  ): Promise<VisualFrameAnalysis> {
     const mimeType = input.mimeType ?? 'image/jpeg';
     const image = Buffer.from(input.imageBase64, 'base64');
     const maxBytes = this.getPositiveInt(

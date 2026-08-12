@@ -111,9 +111,31 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
     }
 
     try {
-      return JSON.parse(content) as T;
+      return this.parseJsonObject(content) as T;
     } catch {
       throw new Error('Cloudflare structured LLM returned invalid JSON');
+    }
+  }
+
+  private parseJsonObject(content: string): Record<string, unknown> {
+    const trimmed = content
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    try {
+      return JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      const firstBrace = trimmed.indexOf('{');
+      const lastBrace = trimmed.lastIndexOf('}');
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1)) as Record<
+          string,
+          unknown
+        >;
+      }
+      throw new Error('No JSON object found');
     }
   }
 

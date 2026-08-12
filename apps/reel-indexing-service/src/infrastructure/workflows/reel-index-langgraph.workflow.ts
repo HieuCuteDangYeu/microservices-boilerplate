@@ -325,7 +325,10 @@ export class ReelIndexLangGraphWorkflow implements IReelIndexWorkflow {
         'persist_semantic_candidate',
         'persisted_candidate_integrity_gate',
       )
-      .addEdge('persisted_candidate_integrity_gate', 'commit_semantic_candidate')
+      .addEdge(
+        'persisted_candidate_integrity_gate',
+        'commit_semantic_candidate',
+      )
       .addEdge('commit_semantic_candidate', END);
   }
 
@@ -476,8 +479,8 @@ export class ReelIndexLangGraphWorkflow implements IReelIndexWorkflow {
   ): Partial<ReelIndexGraphState> {
     const strong = Boolean(
       (state.job.title?.trim().length ?? 0) >= 8 &&
-        (state.job.description?.trim().length ?? 0) >= 40 &&
-        state.job.tags.filter((tag) => tag.trim()).length >= 3,
+      (state.job.description?.trim().length ?? 0) >= 40 &&
+      state.job.tags.filter((tag) => tag.trim()).length >= 3,
     );
     return {
       metadataQuality: strong ? 'strong' : 'weak',
@@ -596,8 +599,14 @@ export class ReelIndexLangGraphWorkflow implements IReelIndexWorkflow {
       candidate: state.candidateSections ?? [],
       fallback,
       sourceSegments: checkpoint.mergedSegments ?? [],
-      minimumSeconds: this.positiveNumber('INDEX_LONG_SECTION_MIN_SECONDS', 120),
-      maximumSeconds: this.positiveNumber('INDEX_LONG_SECTION_MAX_SECONDS', 480),
+      minimumSeconds: this.positiveNumber(
+        'INDEX_LONG_SECTION_MIN_SECONDS',
+        120,
+      ),
+      maximumSeconds: this.positiveNumber(
+        'INDEX_LONG_SECTION_MAX_SECONDS',
+        480,
+      ),
     });
 
     await this.checkpoints.setStage(
@@ -761,8 +770,9 @@ export class ReelIndexLangGraphWorkflow implements IReelIndexWorkflow {
       reelId: job.reelId,
       indexAttemptId: job.indexAttemptId,
       indexVersion: job.indexVersion,
-      reelDocumentCount: documents.filter((document) => document.kind === 'REEL')
-        .length,
+      reelDocumentCount: documents.filter(
+        (document) => document.kind === 'REEL',
+      ).length,
       sectionCount: documents.filter((document) => document.kind === 'SECTION')
         .length,
       chunkCount: documents.filter((document) => document.kind === 'CHUNK')
@@ -842,8 +852,6 @@ export class ReelIndexLangGraphWorkflow implements IReelIndexWorkflow {
 
   private fraction(key: string, fallback: number): number {
     const value = Number(this.config.get<string>(key) ?? fallback);
-    return Number.isFinite(value)
-      ? Math.min(1, Math.max(0, value))
-      : fallback;
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback;
   }
 }

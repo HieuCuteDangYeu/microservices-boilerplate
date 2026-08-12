@@ -14,23 +14,21 @@ const completion = {
   indexAttemptId: 'attempt-2',
 } as CompleteReelIndexCommand;
 
-const buildContent = (): jest.Mocked<IIndexingContentService> =>
-  ({
-    claimIndexingAttempt: jest.fn(),
-    isIndexingAttemptCurrent: jest.fn(),
-    reportProgress: jest.fn(),
-    completeIndexing: jest.fn(),
-    failIndexing: jest.fn(),
-    reindexReel: jest.fn(),
-  }) as jest.Mocked<IIndexingContentService>;
+const buildContent = (): jest.Mocked<IIndexingContentService> => ({
+  claimIndexingAttempt: jest.fn(),
+  isIndexingAttemptCurrent: jest.fn(),
+  reportProgress: jest.fn(),
+  completeIndexing: jest.fn(),
+  failIndexing: jest.fn(),
+  reindexReel: jest.fn(),
+});
 
-const buildLifecycle = (): jest.Mocked<ISemanticCandidateLifecycle> =>
-  ({
-    activateCandidate: jest.fn(),
-    rollbackCandidate: jest.fn(),
-    finalizeCandidate: jest.fn(),
-    discardCandidate: jest.fn(),
-  }) as jest.Mocked<ISemanticCandidateLifecycle>;
+const buildLifecycle = (): jest.Mocked<ISemanticCandidateLifecycle> => ({
+  activateCandidate: jest.fn(),
+  rollbackCandidate: jest.fn(),
+  finalizeCandidate: jest.fn(),
+  discardCandidate: jest.fn(),
+});
 
 describe('CommitSemanticCandidateUseCase', () => {
   it('discards an inactive candidate when the attempt is already stale', async () => {
@@ -80,7 +78,9 @@ describe('CommitSemanticCandidateUseCase', () => {
     lifecycle.finalizeCandidate.mockResolvedValue();
     const useCase = new CommitSemanticCandidateUseCase(content, lifecycle);
 
-    await expect(useCase.execute({ job, completion })).resolves.toBe('COMPLETED');
+    await expect(useCase.execute({ job, completion })).resolves.toBe(
+      'COMPLETED',
+    );
     expect(lifecycle.finalizeCandidate).toHaveBeenCalledWith({
       reelId: 'reel-1',
       indexAttemptId: 'attempt-2',

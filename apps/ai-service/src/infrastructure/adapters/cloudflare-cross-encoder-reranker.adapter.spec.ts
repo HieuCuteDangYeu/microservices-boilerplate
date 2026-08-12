@@ -56,17 +56,19 @@ describe('CloudflareCrossEncoderRerankerAdapter', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      text: async () =>
-        JSON.stringify({
-          success: true,
-          result: {
-            response: [
-              { id: 1, score: 4 },
-              { id: 0, score: -1 },
-            ],
-          },
-        }),
-    }) as unknown as typeof fetch;
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            success: true,
+            result: {
+              response: [
+                { id: 1, score: 4 },
+                { id: 0, score: -1 },
+              ],
+            },
+          }),
+        ),
+    });
 
     const fallback = {
       rerank: jest.fn(),
@@ -91,8 +93,8 @@ describe('CloudflareCrossEncoderRerankerAdapter', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 503,
-      text: async () => JSON.stringify({ success: false }),
-    }) as unknown as typeof fetch;
+      text: () => Promise.resolve(JSON.stringify({ success: false })),
+    });
 
     const fallbackResult = [candidates[0]];
     const fallback = {

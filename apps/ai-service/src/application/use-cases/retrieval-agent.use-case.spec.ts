@@ -71,7 +71,10 @@ const reelCandidate: SemanticIndexSearchResult = {
   evidenceType: 'METADATA',
 };
 const directCandidate = buildCandidate('chunk-direct', 'reel-document-1');
-const hierarchicalCandidate = buildCandidate('chunk-hierarchical', 'reel-document-1');
+const hierarchicalCandidate = buildCandidate(
+  'chunk-hierarchical',
+  'reel-document-1',
+);
 
 const reelDocument: SemanticReelDocument = {
   id: 'reel-document-1',
@@ -113,8 +116,10 @@ const buildUseCase = (configValues: Record<string, string>) => {
     getRecommendedReels: jest.fn(),
   };
   const searchChunks = jest.fn(
-    async (input: SemanticIndexSearchRequest): Promise<SemanticIndexSearchResult[]> =>
-      input.filters?.parentIds ? [hierarchicalCandidate] : [directCandidate],
+    (input: SemanticIndexSearchRequest): Promise<SemanticIndexSearchResult[]> =>
+      Promise.resolve(
+        input.filters?.parentIds ? [hierarchicalCandidate] : [directCandidate],
+      ),
   );
   const semanticIndexService: IReelSemanticIndexService = {
     searchReels: jest.fn().mockResolvedValue([reelCandidate]),
@@ -124,9 +129,10 @@ const buildUseCase = (configValues: Record<string, string>) => {
     getAdjacentChunks: jest.fn().mockResolvedValue([]),
     getReelDocument: jest.fn().mockResolvedValue(reelDocument),
   };
-  const hierarchyObservationRepository: IRagHierarchyShadowObservationRepository = {
-    save: jest.fn().mockResolvedValue(undefined),
-  };
+  const hierarchyObservationRepository: IRagHierarchyShadowObservationRepository =
+    {
+      save: jest.fn().mockResolvedValue(undefined),
+    };
 
   const useCase = new RetrievalAgentUseCase(
     {} as IStructuredLlmService,
@@ -143,12 +149,13 @@ const buildUseCase = (configValues: Record<string, string>) => {
 
 describe('RetrievalAgentUseCase hierarchy rollout', () => {
   it('serves direct retrieval and forces shadow when production hierarchy is requested without approval', async () => {
-    const { hierarchyObservationRepository, searchChunks, useCase } = buildUseCase({
-      NODE_ENV: 'production',
-      RAG_HIERARCHICAL_RETRIEVAL_ENABLED: 'true',
-      RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED: 'false',
-      RAG_HIERARCHICAL_RETRIEVAL_PROMOTION_APPROVED: 'false',
-    });
+    const { hierarchyObservationRepository, searchChunks, useCase } =
+      buildUseCase({
+        NODE_ENV: 'production',
+        RAG_HIERARCHICAL_RETRIEVAL_ENABLED: 'true',
+        RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED: 'false',
+        RAG_HIERARCHICAL_RETRIEVAL_PROMOTION_APPROVED: 'false',
+      });
 
     const result = await useCase.retrieve({
       userId: 'user-1',
@@ -158,7 +165,9 @@ describe('RetrievalAgentUseCase hierarchy rollout', () => {
     });
 
     expect(result.map((item) => item.chunkId)).toContain('chunk-direct');
-    expect(result.map((item) => item.chunkId)).not.toContain('chunk-hierarchical');
+    expect(result.map((item) => item.chunkId)).not.toContain(
+      'chunk-hierarchical',
+    );
     expect(searchChunks).toHaveBeenCalledWith(
       expect.objectContaining({ filters: { reelIds: ['reel-1'] } }),
     );

@@ -12,6 +12,9 @@ interface CloudflareAiResponse {
   success?: boolean;
   result?: {
     answer?: string;
+    result?: {
+      answer?: string;
+    };
   };
   errors?: Array<CloudflareAiError | string>;
 }
@@ -72,7 +75,9 @@ export class CloudflareVisionAdapter implements IVisionService {
       );
     }
 
-    const answer = payload.result?.answer?.trim();
+    const answer = (
+      payload.result?.answer ?? payload.result?.result?.answer
+    )?.trim();
     if (!answer) {
       throw new Error('Cloudflare Workers AI vision returned no answer');
     }
@@ -84,7 +89,8 @@ export class CloudflareVisionAdapter implements IVisionService {
 
     if (!caption && !ocrText && objects.length === 0) {
       return {
-        caption: this.cleanText(answer) || 'No reliable visual details detected.',
+        caption:
+          this.cleanText(answer) || 'No reliable visual details detected.',
         objects: [],
         provider: 'cloudflare-workers-ai',
         model: this.model,

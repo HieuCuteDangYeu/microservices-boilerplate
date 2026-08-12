@@ -78,7 +78,9 @@ export class CheckContextSufficiencyUseCase {
         availableEvidence,
         missingEvidence: deterministicallyMissing,
         reason: `Required evidence is unavailable: ${deterministicallyMissing.join(', ')}.`,
-        userFacingReason: this.userFacingMissingEvidence(deterministicallyMissing),
+        userFacingReason: this.userFacingMissingEvidence(
+          deterministicallyMissing,
+        ),
         recommendedAction: 'REFUSE_NO_CONTEXT',
       };
     }
@@ -120,7 +122,8 @@ export class CheckContextSufficiencyUseCase {
         confidence: 0.5,
         availableEvidence,
         missingEvidence: [],
-        reason: 'Context sufficiency checker failed after required evidence was verified.',
+        reason:
+          'Context sufficiency checker failed after required evidence was verified.',
         recommendedAction: 'ANSWER',
       };
     }
@@ -251,12 +254,21 @@ ${JSON.stringify(
     raw: RawContextSufficiencyResult,
     state: RagChatWorkflowState,
   ): RagContextSufficiencyResult {
-    const recommendedAction =
+    const rawRecommendedAction =
       raw.recommendedAction === 'ANSWER' ||
       raw.recommendedAction === 'REFUSE_NO_CONTEXT' ||
       raw.recommendedAction === 'REWRITE_AND_RETRY'
         ? raw.recommendedAction
         : 'ANSWER';
+    const sufficient =
+      typeof raw.sufficient === 'boolean'
+        ? raw.sufficient
+        : rawRecommendedAction === 'ANSWER';
+    const recommendedAction = sufficient
+      ? 'ANSWER'
+      : rawRecommendedAction === 'REWRITE_AND_RETRY'
+        ? 'REWRITE_AND_RETRY'
+        : 'REFUSE_NO_CONTEXT';
     const availableEvidence = this.normalizeEvidenceArray(
       raw.availableEvidence,
       this.getAvailableEvidence(state),
@@ -266,10 +278,7 @@ ${JSON.stringify(
       [],
     );
     return {
-      sufficient:
-        typeof raw.sufficient === 'boolean'
-          ? raw.sufficient
-          : recommendedAction === 'ANSWER',
+      sufficient,
       confidence:
         typeof raw.confidence === 'number' && Number.isFinite(raw.confidence)
           ? Math.min(Math.max(raw.confidence, 0), 1)
@@ -360,9 +369,7 @@ ${JSON.stringify(
     return typeof value === 'string' && value.trim().length > 0;
   }
 
-  private userFacingMissingEvidence(
-    missing: RagRequiredEvidence[],
-  ): string {
+  private userFacingMissingEvidence(missing: RagRequiredEvidence[]): string {
     if (missing.includes('VISUAL')) {
       return 'I do not have relevant sampled visual evidence from the shared reel to answer that reliably.';
     }

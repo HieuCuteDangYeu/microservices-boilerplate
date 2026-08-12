@@ -92,8 +92,12 @@ export class BuildAdaptiveTranscriptSectionsUseCase {
     const durations = adaptive.map((section) =>
       Math.max(0, (section.endMs - section.startMs) / 1000),
     );
-    const adaptiveBoundaries = adaptive.slice(0, -1).map((section) => section.endMs);
-    const legacyBoundaries = legacy.slice(0, -1).map((section) => section.endMs);
+    const adaptiveBoundaries = adaptive
+      .slice(0, -1)
+      .map((section) => section.endMs);
+    const legacyBoundaries = legacy
+      .slice(0, -1)
+      .map((section) => section.endMs);
     const toleranceMs = tolerance * 1000;
     const matchedBoundaries = adaptiveBoundaries.filter((boundary) =>
       legacyBoundaries.some(
@@ -119,7 +123,8 @@ export class BuildAdaptiveTranscriptSectionsUseCase {
         durations.length > 0 ? Math.min(...durations) : 0,
       adaptiveMaxDurationSeconds:
         durations.length > 0 ? Math.max(...durations) : 0,
-      adaptiveTooShortCount: durations.filter((value) => value < minimum).length,
+      adaptiveTooShortCount: durations.filter((value) => value < minimum)
+        .length,
       adaptiveTooLongCount: durations.filter((value) => value > maximum).length,
     };
   }

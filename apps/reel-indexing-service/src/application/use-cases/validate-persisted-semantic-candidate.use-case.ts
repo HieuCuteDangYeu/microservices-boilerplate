@@ -20,7 +20,8 @@ export class ValidatePersistedSemanticCandidateUseCase {
         .length,
       sectionCount: input.documents.filter((item) => item.kind === 'SECTION')
         .length,
-      chunkCount: input.documents.filter((item) => item.kind === 'CHUNK').length,
+      chunkCount: input.documents.filter((item) => item.kind === 'CHUNK')
+        .length,
       visualSceneCount: input.documents.filter(
         (item) => item.kind === 'VISUAL_SCENE',
       ).length,
@@ -41,7 +42,9 @@ export class ValidatePersistedSemanticCandidateUseCase {
     }
 
     if (actual.reelDocumentCount !== 1) {
-      throw new Error('Persisted semantic candidate must contain exactly one REEL document');
+      throw new Error(
+        'Persisted semantic candidate must contain exactly one REEL document',
+      );
     }
 
     if (actual.activeDocumentCount !== 0) {

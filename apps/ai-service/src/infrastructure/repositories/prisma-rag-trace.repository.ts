@@ -200,8 +200,7 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
       retrievalRetryCount:
         this.readJsonNumber(value, 'retrievalRetryCount') ?? 0,
       answerRetryCount: this.readJsonNumber(value, 'answerRetryCount') ?? 0,
-      citationRetryCount:
-        this.readJsonNumber(value, 'citationRetryCount') ?? 0,
+      citationRetryCount: this.readJsonNumber(value, 'citationRetryCount') ?? 0,
       citationCoverageMode:
         coverageMode === 'LLM' ||
         coverageMode === 'FALLBACK' ||

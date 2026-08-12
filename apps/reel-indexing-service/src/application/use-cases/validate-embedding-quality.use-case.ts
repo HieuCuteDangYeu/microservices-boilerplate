@@ -49,10 +49,7 @@ export class ValidateEmbeddingQualityUseCase {
     if (input.documents.length >= 6) {
       const duplicateRatio =
         (input.documents.length - signatures.size) / input.documents.length;
-      const maximum = Math.min(
-        1,
-        Math.max(0, input.maxDuplicateRatio ?? 0.5),
-      );
+      const maximum = Math.min(1, Math.max(0, input.maxDuplicateRatio ?? 0.5));
       if (duplicateRatio > maximum) {
         throw new Error(
           `Embedding duplicate ratio ${duplicateRatio.toFixed(3)} exceeds ${maximum.toFixed(3)}`,

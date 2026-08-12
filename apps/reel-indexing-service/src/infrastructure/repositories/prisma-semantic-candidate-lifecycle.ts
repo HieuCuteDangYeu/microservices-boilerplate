@@ -7,9 +7,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/reel-indexing-client';
 
 @Injectable()
-export class PrismaSemanticCandidateLifecycle
-  implements ISemanticCandidateLifecycle
-{
+export class PrismaSemanticCandidateLifecycle implements ISemanticCandidateLifecycle {
   constructor(private readonly prisma: PrismaService) {}
 
   async activateCandidate(input: {
@@ -37,7 +35,9 @@ export class PrismaSemanticCandidateLifecycle
         data: { isActive: true },
       });
       if (activated.count !== 1) {
-        throw new Error(`Semantic candidate ${input.indexAttemptId} is missing`);
+        throw new Error(
+          `Semantic candidate ${input.indexAttemptId} is missing`,
+        );
       }
 
       await transaction.reelSection.updateMany({

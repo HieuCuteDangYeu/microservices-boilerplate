@@ -21,9 +21,7 @@ interface RawCitationAttributionResult {
 }
 
 @Injectable()
-export class CloudflareCitationAttributionAdapter
-  implements ICitationAttributionService
-{
+export class CloudflareCitationAttributionAdapter implements ICitationAttributionService {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
@@ -58,40 +56,42 @@ export class CloudflareCitationAttributionAdapter
     const candidates = input.candidates.slice(0, maxCandidates);
 
     const result =
-      await this.structuredLlmService.generateObject<RawCitationAttributionResult>({
-        model,
-        systemPrompt: this.systemPrompt(),
-        userPrompt: this.userPrompt({ ...input, candidates }),
-        jsonSchema: {
-          type: 'object',
-          properties: {
-            claims: {
-              type: 'array',
-              maxItems: 12,
-              items: {
-                type: 'object',
-                properties: {
-                  claim: { type: 'string' },
-                  supported: { type: 'boolean' },
-                  evidenceIds: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    maxItems: 3,
+      await this.structuredLlmService.generateObject<RawCitationAttributionResult>(
+        {
+          model,
+          systemPrompt: this.systemPrompt(),
+          userPrompt: this.userPrompt({ ...input, candidates }),
+          jsonSchema: {
+            type: 'object',
+            properties: {
+              claims: {
+                type: 'array',
+                maxItems: 12,
+                items: {
+                  type: 'object',
+                  properties: {
+                    claim: { type: 'string' },
+                    supported: { type: 'boolean' },
+                    evidenceIds: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      maxItems: 3,
+                    },
+                    confidence: { type: 'number', minimum: 0, maximum: 1 },
                   },
-                  confidence: { type: 'number', minimum: 0, maximum: 1 },
+                  required: ['claim', 'supported', 'evidenceIds', 'confidence'],
+                  additionalProperties: false,
                 },
-                required: ['claim', 'supported', 'evidenceIds', 'confidence'],
-                additionalProperties: false,
               },
             },
+            required: ['claims'],
+            additionalProperties: false,
           },
-          required: ['claims'],
-          additionalProperties: false,
+          maxTokens: 700,
+          temperature: 0,
+          timeoutMs,
         },
-        maxTokens: 700,
-        temperature: 0,
-        timeoutMs,
-      });
+      );
 
     const allowedIds = new Set(
       candidates.map((candidate) => candidate.evidenceId),
@@ -145,7 +145,9 @@ export class CloudflareCitationAttributionAdapter
       .slice(0, input.maxCitations)
       .map(([evidenceId, confidence]) => ({ evidenceId, confidence }));
     const factualClaimCount = claims.length;
-    const supportedClaimCount = claims.filter((claim) => claim.supported).length;
+    const supportedClaimCount = claims.filter(
+      (claim) => claim.supported,
+    ).length;
 
     return {
       selections,
