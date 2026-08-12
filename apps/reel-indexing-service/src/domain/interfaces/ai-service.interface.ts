@@ -11,10 +11,13 @@ import type {
   ReelMetadataExtractionInput,
 } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
-import type {
-  AnalyzeVisualFrameRequest,
-  VisualFrameAnalysis,
-} from '@common/ai/interfaces/visual-analysis.interface';
+import type { VisualFrameAnalysis } from '@common/ai/interfaces/visual-analysis.interface';
+
+export interface IndexingVisualFrameInput {
+  imageBytes: Uint8Array;
+  mimeType: string;
+  timestampMs: number;
+}
 
 export interface IIndexingAiService {
   transcribeAudioKey(input: {
@@ -23,7 +26,7 @@ export interface IIndexingAiService {
   }): Promise<TranscriptionResult>;
 
   analyzeVisualFrame(
-    input: AnalyzeVisualFrameRequest,
+    input: IndexingVisualFrameInput,
   ): Promise<VisualFrameAnalysis>;
 
   extractReelMetadata(
