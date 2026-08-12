@@ -40,6 +40,16 @@ export class SaveRagTraceUseCase {
 
         latencyMs: input.latencyMs,
         nodeTimings: input.nodeTimings,
+        workflowMetrics: {
+          retrievalRetryCount: input.state.retrievalRetryCount,
+          answerRetryCount: input.state.retryCount,
+          citationRetryCount: input.state.citationRetryCount,
+          citationCoverageMode: input.state.citationCoverage?.mode,
+          citationCoverage: input.state.citationCoverage?.coverage,
+          factualClaimCount: input.state.citationCoverage?.factualClaimCount,
+          supportedClaimCount:
+            input.state.citationCoverage?.supportedClaimCount,
+        },
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
