@@ -15,6 +15,7 @@ import { GetRecommendedReelsUseCase } from '@content/application/use-cases/get-r
 import { GetReelStatusUseCase } from '@content/application/use-cases/get-reel-status.use-case';
 import { GetReelUseCase } from '@content/application/use-cases/get-reel.use-case';
 import { GetSearchSuggestionsUseCase } from '@content/application/use-cases/get-search-suggestions.use-case';
+import { IsReelIndexingAttemptCurrentUseCase } from '@content/application/use-cases/is-reel-indexing-attempt-current.use-case';
 import { ListReelsUseCase } from '@content/application/use-cases/list-reels.use-case';
 import { ReprocessReelUseCase } from '@content/application/use-cases/reprocess-reel.use-case';
 import { ReindexReelUseCase } from '@content/application/use-cases/reindex-reel.use-case';
@@ -41,9 +42,11 @@ import { SemanticReelSearchAdapter } from '@content/infrastructure/adapters/sema
 import { REEL_INDEX_QUERY_QUEUE } from '@common/processing/interfaces/semantic-index.interface';
 import { UserServiceAdapter } from '@content/infrastructure/adapters/user-service.adapter';
 import { ContentController } from '@content/infrastructure/controllers/content.controller';
+import { IndexingAttemptGuardController } from '@content/infrastructure/controllers/indexing-attempt-guard.controller';
 import { OutboxDispatcherService } from '@content/infrastructure/jobs/outbox-dispatcher.service';
 import { PrismaService } from '@content/infrastructure/prisma/prisma.service';
 import { ContentRepository } from '@content/infrastructure/repositories/content.repository';
+import { PrismaIndexAttemptReadRepository } from '@content/infrastructure/repositories/prisma-index-attempt-read.repository';
 import { RecommendationRepository } from '@content/infrastructure/repositories/recommendation.repository';
 import { R2StorageService } from '@content/infrastructure/services/r2-storage.service';
 import { RecommendationConfigService } from '@content/infrastructure/services/recommendation-config.service';
@@ -102,10 +105,11 @@ function createRmqClientRegistration(name: string, queue: string) {
       createRmqClientRegistration('INDEX_SERVICE_RMQ', REEL_INDEX_QUERY_QUEUE),
     ]),
   ],
-  controllers: [ContentController],
+  controllers: [ContentController, IndexingAttemptGuardController],
   providers: [
     PrismaService,
     ContentRepository,
+    PrismaIndexAttemptReadRepository,
     ReelMediaJobPublisherAdapter,
     ReelIndexJobPublisherAdapter,
     OutboxDispatcherService,
@@ -131,6 +135,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     ReindexReelUseCase,
     ClaimReelProcessingAttemptUseCase,
     ClaimReelIndexingAttemptUseCase,
+    IsReelIndexingAttemptCurrentUseCase,
     CompleteReelIndexingUseCase,
     FailReelIndexingUseCase,
     ReportReelIndexingProgressUseCase,
@@ -157,6 +162,10 @@ function createRmqClientRegistration(name: string, queue: string) {
     {
       provide: 'IContentRepository',
       useExisting: ContentRepository,
+    },
+    {
+      provide: 'IIndexAttemptReadRepository',
+      useExisting: PrismaIndexAttemptReadRepository,
     },
     {
       provide: 'IReelViewEventRepository',
