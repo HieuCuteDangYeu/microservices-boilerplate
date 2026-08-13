@@ -115,7 +115,7 @@ export class OutboxDispatcherService
 
       if (this.dispatchRequested) {
         this.dispatchRequested = false;
-        this.requestDispatch('follow-up');
+        void this.dispatch('follow-up');
       }
     }
   }
@@ -124,7 +124,7 @@ export class OutboxDispatcherService
     const intervalMs = this.getSafetySweepMs();
 
     this.safetySweepTimer = setInterval(() => {
-      this.requestDispatch('safety-sweep');
+      void this.dispatch('safety-sweep');
     }, intervalMs);
 
     this.logger.log(`Outbox safety sweep interval=${intervalMs}ms`);
@@ -150,7 +150,7 @@ export class OutboxDispatcherService
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
       this.retryDueAt = undefined;
-      this.requestDispatch('retry');
+      void this.dispatch('retry');
     }, normalizedDelayMs);
   }
 
