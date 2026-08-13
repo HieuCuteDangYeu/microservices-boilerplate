@@ -8,17 +8,21 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-const DEFAULT_SAFETY_SWEEP_MS = 30 * 60_000;
+const DEFAULT_SAFETY_SWEEP_MS = 60 * 60_000;
 const MIN_SAFETY_SWEEP_MS = 10 * 60_000;
 
 @Injectable()
 export class OutboxDispatcherService
-  implements OnApplicationBootstrap, OnApplicationShutdown, IOutboxDispatchTrigger
+  implements
+    OnApplicationBootstrap,
+    OnApplicationShutdown,
+    IOutboxDispatchTrigger
 {
   private readonly logger = new Logger(OutboxDispatcherService.name);
   private dispatching = false;
   private dispatchScheduled = false;
   private dispatchRequested = false;
+  private dispatchTimer?: ReturnType<typeof setTimeout>;
   private safetySweepTimer?: ReturnType<typeof setInterval>;
   private retryTimer?: ReturnType<typeof setTimeout>;
   private retryDueAt?: number;
@@ -34,6 +38,12 @@ export class OutboxDispatcherService
   }
 
   onApplicationShutdown(): void {
+    if (this.dispatchTimer) {
+      clearTimeout(this.dispatchTimer);
+      this.dispatchTimer = undefined;
+      this.dispatchScheduled = false;
+    }
+
     if (this.safetySweepTimer) {
       clearInterval(this.safetySweepTimer);
       this.safetySweepTimer = undefined;
@@ -61,7 +71,8 @@ export class OutboxDispatcherService
     }
 
     this.dispatchScheduled = true;
-    setTimeout(() => {
+    this.dispatchTimer = setTimeout(() => {
+      this.dispatchTimer = undefined;
       this.dispatchScheduled = false;
       void this.dispatch(reason);
     }, 0);
@@ -123,7 +134,11 @@ export class OutboxDispatcherService
     const normalizedDelayMs = Math.max(1000, Math.floor(delayMs));
     const dueAt = Date.now() + normalizedDelayMs;
 
-    if (this.retryTimer && this.retryDueAt !== undefined && this.retryDueAt <= dueAt) {
+    if (
+      this.retryTimer &&
+      this.retryDueAt !== undefined &&
+      this.retryDueAt <= dueAt
+    ) {
       return;
     }
 
