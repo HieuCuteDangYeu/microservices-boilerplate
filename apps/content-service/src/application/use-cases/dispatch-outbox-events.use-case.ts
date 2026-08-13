@@ -16,6 +16,7 @@ export interface DispatchOutboxEventsResult {
   claimed: number;
   published: number;
   failed: number;
+  nextRetryDelayMs?: number;
 }
 
 @Injectable()
@@ -77,9 +78,8 @@ export class DispatchOutboxEventsUseCase {
         result.published += 1;
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
-        const nextAttemptAt = new Date(
-          Date.now() + this.getRetryDelayMs(event.attemptCount),
-        );
+        const retryDelayMs = this.getRetryDelayMs(event.attemptCount);
+        const nextAttemptAt = new Date(Date.now() + retryDelayMs);
 
         await this.outboxRepository.markFailed({
           eventId: event.id,
@@ -88,6 +88,10 @@ export class DispatchOutboxEventsUseCase {
           lastError: message,
         });
         result.failed += 1;
+        result.nextRetryDelayMs =
+          result.nextRetryDelayMs === undefined
+            ? retryDelayMs
+            : Math.min(result.nextRetryDelayMs, retryDelayMs);
 
         this.logger.warn(
           `Outbox event ${event.id} publish failed on attempt ${event.attemptCount}: ${message}`,
