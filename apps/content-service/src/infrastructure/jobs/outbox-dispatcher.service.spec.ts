@@ -42,14 +42,14 @@ describe('OutboxDispatcherService', () => {
     jest.useRealTimers();
   });
 
-  it('does not poll Postgres every second and uses the 30 minute safety sweep', async () => {
+  it('does not poll Postgres every second and uses the 60 minute safety sweep', async () => {
     const { service, execute } = createService();
 
     service.onApplicationBootstrap();
     await jest.advanceTimersByTimeAsync(0);
     expect(execute).toHaveBeenCalledTimes(1);
 
-    await jest.advanceTimersByTimeAsync(29 * 60_000);
+    await jest.advanceTimersByTimeAsync(59 * 60_000);
     expect(execute).toHaveBeenCalledTimes(1);
 
     await jest.advanceTimersByTimeAsync(60_000);
