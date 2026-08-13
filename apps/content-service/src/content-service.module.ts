@@ -176,6 +176,10 @@ function createRmqClientRegistration(name: string, queue: string) {
       useExisting: ContentRepository,
     },
     {
+      provide: 'IOutboxDispatchTrigger',
+      useExisting: OutboxDispatcherService,
+    },
+    {
       provide: 'IStorageService',
       useClass: R2StorageService,
     },

@@ -1,4 +1,5 @@
 import type { IContentRepository } from '@content/domain/interfaces/content.repository.interface';
+import type { IOutboxDispatchTrigger } from '@content/domain/interfaces/outbox-dispatch-trigger.interface';
 import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
@@ -6,6 +7,8 @@ export class ReindexReelUseCase {
   constructor(
     @Inject('IContentRepository')
     private readonly repository: IContentRepository,
+    @Inject('IOutboxDispatchTrigger')
+    private readonly outboxDispatchTrigger: IOutboxDispatchTrigger,
   ) {}
 
   async execute(
@@ -15,8 +18,12 @@ export class ReindexReelUseCase {
     const indexAttemptId = await this.repository.queueReelIndexingAttempt(
       reelId.trim(),
     );
-    return indexAttemptId
-      ? { queued: true, indexAttemptId }
-      : { queued: false };
+
+    if (!indexAttemptId) {
+      return { queued: false };
+    }
+
+    this.outboxDispatchTrigger.trigger();
+    return { queued: true, indexAttemptId };
   }
 }

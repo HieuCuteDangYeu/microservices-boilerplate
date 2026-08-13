@@ -1,10 +1,11 @@
+import { REEL_MEDIA_JOB_EVENT_TYPE } from '@common/processing/interfaces/reel-media-job.interface';
 import {
   InvalidMediaFileError,
   ReelAlreadyProcessingError,
   ReelNotFoundError,
   ReelReprocessForbiddenError,
 } from '@content/domain/errors/content.error';
-import { REEL_MEDIA_JOB_EVENT_TYPE } from '@common/processing/interfaces/reel-media-job.interface';
+import type { IOutboxDispatchTrigger } from '@content/domain/interfaces/outbox-dispatch-trigger.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Reel } from '../../domain/entities/reel.entity';
@@ -21,6 +22,8 @@ export class ReprocessReelUseCase {
     private readonly contentRepository: IContentRepository,
     @Inject('IStorageService')
     private readonly storageService: IStorageService,
+    @Inject('IOutboxDispatchTrigger')
+    private readonly outboxDispatchTrigger: IOutboxDispatchTrigger,
     private readonly buildReelMediaJobUseCase: BuildReelMediaJobUseCase,
   ) {}
 
@@ -62,17 +65,21 @@ export class ReprocessReelUseCase {
       tags: reel.tags,
     });
 
-    return await this.contentRepository.queueReelProcessingAttemptWithMediaJob(
-      reel.id,
-      mediaAttemptId,
-      indexAttemptId,
-      {
-        id: mediaJob.jobId,
-        eventType: REEL_MEDIA_JOB_EVENT_TYPE,
-        payload: mediaJob,
-        createdAt: new Date(mediaJob.createdAt),
-      },
-    );
+    const queuedReel =
+      await this.contentRepository.queueReelProcessingAttemptWithMediaJob(
+        reel.id,
+        mediaAttemptId,
+        indexAttemptId,
+        {
+          id: mediaJob.jobId,
+          eventType: REEL_MEDIA_JOB_EVENT_TYPE,
+          payload: mediaJob,
+          createdAt: new Date(mediaJob.createdAt),
+        },
+      );
+
+    this.outboxDispatchTrigger.trigger();
+    return queuedReel;
   }
 
   private isActiveAndNotStale(reel: Reel): boolean {

@@ -1,6 +1,7 @@
 import { CreateReelDto } from '@common/content/dtos/create-reel.dto';
 import { REEL_MEDIA_JOB_EVENT_TYPE } from '@common/processing/interfaces/reel-media-job.interface';
 import { InvalidMediaFileError } from '@content/domain/errors/content.error';
+import type { IOutboxDispatchTrigger } from '@content/domain/interfaces/outbox-dispatch-trigger.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { IContentRepository } from '../../domain/interfaces/content.repository.interface';
@@ -14,6 +15,8 @@ export class CreateReelUseCase {
     private readonly contentRepository: IContentRepository,
     @Inject('IStorageService')
     private readonly storageService: IStorageService,
+    @Inject('IOutboxDispatchTrigger')
+    private readonly outboxDispatchTrigger: IOutboxDispatchTrigger,
     private readonly buildReelMediaJobUseCase: BuildReelMediaJobUseCase,
   ) {}
 
@@ -40,7 +43,7 @@ export class CreateReelUseCase {
       tags: payload.tags,
     });
 
-    return await this.contentRepository.createReelWithMediaJob(
+    const reel = await this.contentRepository.createReelWithMediaJob(
       {
         id: reelId,
         userId,
@@ -66,5 +69,8 @@ export class CreateReelUseCase {
         createdAt: new Date(mediaJob.createdAt),
       },
     );
+
+    this.outboxDispatchTrigger.trigger();
+    return reel;
   }
 }
