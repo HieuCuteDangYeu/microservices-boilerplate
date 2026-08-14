@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-master
+  group: deploy-master-${{ github.event.pull_request.merge_commit_sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -90,6 +90,10 @@ jobs:
           fi
 
           if printf '%s\n' "$changed_files" | grep -Eq '^docker-compose\.yml'; then
+            deploy_all=true
+          fi
+
+          if printf '%s\n' "$changed_files" | grep -Eq '^\.github/workflows/deploy\.yml$'; then
             deploy_all=true
           fi
 
@@ -294,11 +298,16 @@ jobs:
             echo "Compose config check:"
             docker compose config
 
-            if [ -n "${BUILD_SERVICES}" ]; then
-              echo "Pulling changed images..."
-              docker compose pull ${BUILD_SERVICES}
+            PULL_SERVICES="${BUILD_SERVICES}"
+            if [ -z "${PULL_SERVICES}" ]; then
+              PULL_SERVICES="${DEPLOY_SERVICES}"
+            fi
+
+            if [ -n "${PULL_SERVICES}" ]; then
+              echo "Pulling deploy images: ${PULL_SERVICES}"
+              docker compose pull ${PULL_SERVICES}
             else
-              echo "No images were rebuilt; skipping image pull."
+              echo "No deploy images to pull."
             fi
 
             echo "Starting deploy services..."
