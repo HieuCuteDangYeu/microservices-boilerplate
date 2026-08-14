@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-master-${{ github.event.pull_request.merge_commit_sha || github.sha }}
+  group: deploy-master
   cancel-in-progress: true
 
 jobs:
@@ -244,6 +244,8 @@ jobs:
           script: |
             set -e
 
+            DEPLOY_SHA="${{ github.event.pull_request.merge_commit_sha || github.sha }}"
+
             echo "Checking server..."
             whoami
             pwd
@@ -256,10 +258,31 @@ jobs:
 
             if [ ! -d ".git" ]; then
               git clone https://github.com/HieuCuteDangYeu/microservices-boilerplate.git .
-            else
-              git status
-              git pull origin master
             fi
+
+            echo "Syncing production checkout to ${DEPLOY_SHA}..."
+            git status --short
+            git fetch --prune origin master
+
+            if ! git cat-file -e "${DEPLOY_SHA}^{commit}" 2>/dev/null; then
+              git fetch --prune origin "${DEPLOY_SHA}"
+            fi
+
+            # Production is a deployment checkout, not a development branch.
+            # Reset tracked changes/local commits but intentionally preserve
+            # untracked operational artifacts such as artifacts/.
+            git reset --hard
+            git checkout -B master "${DEPLOY_SHA}"
+            git reset --hard "${DEPLOY_SHA}"
+
+            CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+            if [ "${CHECKED_OUT_SHA}" != "${DEPLOY_SHA}" ]; then
+              echo "Expected deployment SHA ${DEPLOY_SHA}, got ${CHECKED_OUT_SHA}"
+              exit 1
+            fi
+
+            echo "Production checkout: ${CHECKED_OUT_SHA}"
+            git status --short
 
             export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
             echo "DOCKERHUB_USERNAME is set"
