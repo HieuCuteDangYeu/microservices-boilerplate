@@ -225,6 +225,11 @@ export class ChatMapper {
       creatorId: domain.creatorId,
       participantIds: domain.participantIds,
       participants: domain.participants,
+      ...(domain.name !== undefined ? { name: domain.name } : {}),
+      ...(domain.picture !== undefined ? { picture: domain.picture } : {}),
+      ...(domain.memberJoinedAt !== undefined
+        ? { memberJoinedAt: domain.memberJoinedAt }
+        : {}),
       lastMessage: domain.lastMessage,
       lastMessageAt: domain.lastMessageAt?.toISOString() ?? null,
       isGroup: domain.isGroup,

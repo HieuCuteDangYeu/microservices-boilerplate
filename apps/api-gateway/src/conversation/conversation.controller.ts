@@ -1,11 +1,13 @@
 import { CurrentUser } from '@common/auth/decorators/current-user.decorator';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { BOT_USER_ID } from '@common/constants/seed.constants';
+import { AddConversationMemberDto, AddConversationMemberSchema } from '@common/conversation/dtos/add-conversation-member.dto';
 import { ChatWithBotDto } from '@common/conversation/dtos/chat-with-bot.dto';
 import { ConversationDto } from '@common/conversation/dtos/conversation.dto';
-import { CreateConversationDto } from '@common/conversation/dtos/create-conversation.dto';
+import { CreateConversationDto, CreateConversationSchema } from '@common/conversation/dtos/create-conversation.dto';
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import { MessageDto } from '@common/conversation/dtos/message.dto';
+import { UpdateGroupConversationDto, UpdateGroupConversationSchema } from '@common/conversation/dtos/update-group-conversation.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
 import { MessageAnchorExpansionResponse } from '@common/conversation/interfaces/message-anchor-expansion.interface';
 import { MessageAnchorWindowResponse } from '@common/conversation/interfaces/message-anchor-window.interface';
@@ -253,33 +255,40 @@ export class ConversationController {
   @ApiOperation({ summary: 'Tạo cuộc hội thoại mới' })
   @ApiBody({ type: CreateConversationDto })
   async createConversation(
-    @Body()
-    body: {
-      participantIds?: string[];
-      isGroup?: boolean;
-      type?: 'DIRECT' | 'GROUP';
-      name?: string;
-    },
+    @Body() body: unknown,
     @CurrentUser() user: AuthUser,
   ): Promise<{ id: string }> {
-    const participantIds = Array.isArray(body?.participantIds)
-      ? body.participantIds.filter(
-          (participantId): participantId is string =>
-            typeof participantId === 'string' &&
-            participantId.trim().length > 0,
-        )
+    const rawBody =
+      body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const participantIds = Array.isArray(rawBody.participantIds)
+      ? rawBody.participantIds
+          .filter(
+            (participantId): participantId is string =>
+              typeof participantId === 'string',
+          )
+          .map((participantId) => participantId.trim())
+          .filter(Boolean)
       : [];
 
-    if (participantIds.length === 0) {
-      throw new BadRequestException(
-        'participantIds must contain at least one target user id',
-      );
+    const parsed = CreateConversationSchema.safeParse({
+      ...rawBody,
+      participantIds,
+    });
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
     }
 
     return await lastValueFrom(
       this.conversationClient.send<{ id: string }>('create_conversation', {
-        participantIds,
-        isGroup: body?.isGroup === true || body?.type === 'GROUP',
+        participantIds: parsed.data.participantIds,
+        ...(parsed.data.type !== undefined ? { type: parsed.data.type } : {}),
+        ...(parsed.data.isGroup !== undefined
+          ? { isGroup: parsed.data.isGroup }
+          : {}),
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+        ...(parsed.data.picture !== undefined
+          ? { picture: parsed.data.picture }
+          : {}),
         creatorId: user.id,
       }),
     );
@@ -539,29 +548,49 @@ export class ConversationController {
     );
   }
 
+  @Patch(':id')
+  @ApiOperation({ summary: 'Cập nhật metadata của group conversation' })
+  @ApiBody({ type: UpdateGroupConversationDto })
+  async updateGroupConversation(
+    @Param('id') conversationId: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ConversationDto> {
+    const parsed = UpdateGroupConversationSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return await lastValueFrom(
+      this.conversationClient.send<ConversationDto>(
+        'update_group_conversation',
+        {
+          conversationId,
+          actorUserId: user.id,
+          ...parsed.data,
+        },
+      ),
+    );
+  }
+
   @Get(':id/members')
   @ApiOperation({ summary: 'Lấy danh sách thành viên hội thoại' })
   async getConversationMembers(
     @Param('id') conversationId: string,
     @CurrentUser() user: AuthUser,
-  ): Promise<
-    Array<{
-      userId: string;
-      user: { id: string; email: string; picture?: string };
-      joinedAt: string;
-    }>
-  > {
+  ) {
     const conversation = await lastValueFrom(
       this.conversationClient.send<{
         createdAt?: string;
         participants?: ConversationParticipantPayload[];
+        memberJoinedAt?: Record<string, string>;
       }>('get_conversation_detail', {
         id: conversationId,
         userId: user.id,
       }),
     );
 
-    const joinedAt = conversation?.createdAt ?? new Date(0).toISOString();
+    const fallbackJoinedAt = conversation?.createdAt ?? new Date(0).toISOString();
 
     return Array.isArray(conversation?.participants)
       ? conversation.participants.map((participant) => ({
@@ -573,24 +602,86 @@ export class ConversationController {
               ? { picture: participant.picture ?? participant.avatar }
               : {}),
           },
-          joinedAt,
+          joinedAt:
+            conversation.memberJoinedAt?.[participant.id] ?? fallbackJoinedAt,
         }))
       : [];
   }
 
   @Post(':id/members')
-  @ApiOperation({ summary: 'Thêm thành viên (chưa được hỗ trợ)' })
-  addMember(): never {
-    throw new NotImplementedException(
-      'Adding conversation members is not implemented by conversation-service yet',
+  @ApiOperation({ summary: 'Thêm thành viên vào group conversation' })
+  @ApiBody({ type: AddConversationMemberDto })
+  async addMember(
+    @Param('id') conversationId: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{
+    userId: string;
+    user: { id: string; email: string; picture?: string };
+    joinedAt: string;
+  }> {
+    const parsed = AddConversationMemberSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    const conversation = await lastValueFrom(
+      this.conversationClient.send<{
+        createdAt?: string;
+        participants?: ConversationParticipantPayload[];
+        memberJoinedAt?: Record<string, string>;
+      }>('add_conversation_member', {
+        conversationId,
+        actorUserId: user.id,
+        userId: parsed.data.userId,
+      }),
     );
+    const participant = conversation.participants?.find(
+      (candidate) => candidate.id === parsed.data.userId,
+    );
+    const fallbackJoinedAt = conversation.createdAt ?? new Date(0).toISOString();
+
+    return {
+      userId: parsed.data.userId,
+      user: {
+        id: parsed.data.userId,
+        email: participant?.email ?? '',
+        ...(participant?.picture || participant?.avatar
+          ? { picture: participant.picture ?? participant.avatar }
+          : {}),
+      },
+      joinedAt:
+        conversation.memberJoinedAt?.[parsed.data.userId] ?? fallbackJoinedAt,
+    };
   }
 
   @Delete(':id/members/:userId')
-  @ApiOperation({ summary: 'Xóa thành viên (chưa được hỗ trợ)' })
-  removeMember(): never {
-    throw new NotImplementedException(
-      'Removing conversation members is not implemented by conversation-service yet',
+  @ApiOperation({ summary: 'Xóa thành viên khỏi group conversation' })
+  async removeMember(
+    @Param('id') conversationId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return await lastValueFrom(
+      this.conversationClient.send('remove_conversation_member', {
+        conversationId,
+        actorUserId: user.id,
+        userId,
+      }),
+    );
+  }
+
+  @Post(':id/leave')
+  @ApiOperation({ summary: 'Rời group conversation' })
+  async leaveGroup(
+    @Param('id') conversationId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return await lastValueFrom(
+      this.conversationClient.send('leave_group_conversation', {
+        conversationId,
+        actorUserId: user.id,
+      }),
     );
   }
 
