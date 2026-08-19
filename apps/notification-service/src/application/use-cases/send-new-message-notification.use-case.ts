@@ -4,7 +4,7 @@ import { INotificationJobRepository } from '../../domain/interfaces/notification
 import { ProcessNotificationJobUseCase } from './process-notification-job.use-case';
 
 export type SendNewMessageNotificationInput = {
-  recipientUserId: string;
+  recipientUserIds: string[];
   actorUserId: string;
   conversationId: string;
   messageId: string;
@@ -21,19 +21,39 @@ export class SendNewMessageNotificationUseCase {
   ) {}
 
   async execute(input: SendNewMessageNotificationInput) {
-    const job = await this.notificationJobRepository.create({
-      type: 'NEW_MESSAGE',
-      recipientUserId: input.recipientUserId,
-      actorUserId: input.actorUserId,
-      conversationId: input.conversationId,
-      messageId: input.messageId,
-      title: input.title,
-      body: input.body,
-      dataJson: {
-        type: 'NEW_MESSAGE',
-      },
-    });
+    const recipientUserIds = Array.from(
+      new Set(
+        input.recipientUserIds
+          .map((recipientUserId) => recipientUserId.trim())
+          .filter(Boolean),
+      ),
+    );
 
-    return this.processNotificationJob.execute(job);
+    const results = await Promise.all(
+      recipientUserIds.map(async (recipientUserId) => {
+        const job = await this.notificationJobRepository.create({
+          type: 'NEW_MESSAGE',
+          recipientUserId,
+          actorUserId: input.actorUserId,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          title: input.title,
+          body: input.body,
+          dataJson: {
+            type: 'NEW_MESSAGE',
+          },
+        });
+
+        return {
+          recipientUserId,
+          result: await this.processNotificationJob.execute(job),
+        };
+      }),
+    );
+
+    return {
+      recipientCount: recipientUserIds.length,
+      results,
+    };
   }
 }

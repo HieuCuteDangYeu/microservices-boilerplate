@@ -3,6 +3,13 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import type { IUserService } from 'apps/conversation-service/src/domain/interfaces/user-service.interface';
 import { Conversation } from '../../domain/entities/conversation.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
+import {
+  assertValidConversationUserIds,
+  normalizeConversationParticipantIds,
+  normalizeGroupName,
+  normalizeGroupPicture,
+  resolveConversationKind,
+} from '../policies/conversation-rules';
 
 export type CreateConversationResult = {
   conversation: Conversation;
@@ -21,11 +28,15 @@ export class CreateConversationUseCase {
     dto: CreateConversationDto,
     creatorId: string,
   ): Promise<CreateConversationResult> {
-    const participantIds = [...new Set(dto.participantIds)];
-
-    if (!participantIds.includes(creatorId)) {
-      participantIds.push(creatorId);
-    }
+    const participantIds = normalizeConversationParticipantIds(
+      dto.participantIds,
+      creatorId,
+    );
+    const kind = resolveConversationKind({
+      type: dto.type,
+      isGroup: dto.isGroup,
+    });
+    const isGroup = kind === 'GROUP';
 
     if (participantIds.length < 2) {
       throw new BadRequestException(
@@ -33,42 +44,56 @@ export class CreateConversationUseCase {
       );
     }
 
-    const isValidFormat = participantIds.every((id) => {
-      const isObjectId = /^[0-9a-fA-F]{24}$/.test(id);
-      const isUUID =
-        /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i.test(
-          id,
-        );
-      return isObjectId || isUUID;
-    });
-    if (!isValidFormat) throw new BadRequestException('Invalid User ID format');
+    if (!isGroup && participantIds.length !== 2) {
+      throw new BadRequestException(
+        'Direct conversations must have exactly 2 participants',
+      );
+    }
+
+    if (!isGroup && (dto.name !== undefined || dto.picture !== undefined)) {
+      throw new BadRequestException(
+        'Group metadata is only supported for group conversations',
+      );
+    }
+
+    assertValidConversationUserIds(participantIds);
 
     const isValid = await this.userService.validateUsers(participantIds);
-
     if (!isValid) {
       throw new BadRequestException('One or more participants do not exist');
     }
 
-    const isGroup = participantIds.length > 2;
-
     if (!isGroup) {
-      // Nếu chỉ có 2 người, kiểm tra xem đã từng chat chưa
-      const existingConv = await this.chatRepository.findPrivateConversation(
-        participantIds[0],
-        participantIds[1],
-      );
+      const existingConversation =
+        await this.chatRepository.findPrivateConversation(
+          participantIds[0],
+          participantIds[1],
+        );
 
-      if (existingConv) {
-        return { conversation: existingConv, created: false };
+      if (existingConversation) {
+        return { conversation: existingConversation, created: false };
       }
     }
 
+    const createdAt = new Date();
+    const memberJoinedAt = Object.fromEntries(
+      participantIds.map((participantId) => [
+        participantId,
+        createdAt.toISOString(),
+      ]),
+    );
+    const name = isGroup ? normalizeGroupName(dto.name) : undefined;
+    const picture = isGroup ? normalizeGroupPicture(dto.picture) : undefined;
+
     const newConversation = new Conversation({
-      creatorId: creatorId,
-      participantIds: participantIds,
-      isGroup: isGroup,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      creatorId,
+      participantIds,
+      isGroup,
+      ...(name !== undefined ? { name } : {}),
+      ...(picture !== undefined ? { picture } : {}),
+      memberJoinedAt,
+      createdAt,
+      updatedAt: createdAt,
     });
 
     return {

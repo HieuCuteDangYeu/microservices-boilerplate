@@ -33,6 +33,13 @@ model Conversation {
   creatorId      String   @map("creator_id")
   participantIds String[]
 
+  // Group metadata is nullable so existing direct/group records remain valid.
+  name           String?
+  picture        String?
+  // JSON map keyed by userId -> ISO joined-at timestamp. participantIds remains
+  // the canonical membership list; this map only stores per-member metadata.
+  memberJoinedAt Json?
+
   // lastMessage chỉ lưu text hiển thị preview (ví dụ: "Tin nhắn mới", "[Hình ảnh]")
   // Vì nội dung thật đã bị mã hóa
   lastMessage   String?
