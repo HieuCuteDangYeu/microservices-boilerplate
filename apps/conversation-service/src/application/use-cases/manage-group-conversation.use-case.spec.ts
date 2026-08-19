@@ -26,6 +26,7 @@ describe('ManageGroupConversationUseCase', () => {
   let mutationRepository: {
     updateMetadata: jest.Mock;
     addParticipant: jest.Mock;
+    transferOwnership: jest.Mock;
     removeParticipant: jest.Mock;
   };
   let userService: { validateUsers: jest.Mock };
@@ -36,6 +37,7 @@ describe('ManageGroupConversationUseCase', () => {
     mutationRepository = {
       updateMetadata: jest.fn().mockResolvedValue(undefined),
       addParticipant: jest.fn().mockResolvedValue(undefined),
+      transferOwnership: jest.fn().mockResolvedValue(true),
       removeParticipant: jest.fn().mockResolvedValue(undefined),
     };
     userService = { validateUsers: jest.fn().mockResolvedValue(true) };
@@ -117,6 +119,70 @@ describe('ManageGroupConversationUseCase', () => {
     expect(mutationRepository.addParticipant).not.toHaveBeenCalled();
   });
 
+  it('transfers ownership to an existing group member', async () => {
+    const before = group();
+    const after = new Conversation({ ...before, creatorId: MEMBER_ID });
+    chatRepository.findConversation
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+
+    const result = await useCase.transferOwnership({
+      conversationId: before.id,
+      actorUserId: OWNER_ID,
+      userId: MEMBER_ID,
+    });
+
+    expect(mutationRepository.transferOwnership).toHaveBeenCalledWith(
+      before.id,
+      OWNER_ID,
+      MEMBER_ID,
+    );
+    expect(result.creatorId).toBe(MEMBER_ID);
+  });
+
+  it('blocks ownership transfer by a non-owner member', async () => {
+    chatRepository.findConversation.mockResolvedValue(group());
+
+    await expect(
+      useCase.transferOwnership({
+        conversationId: 'group-id',
+        actorUserId: MEMBER_ID,
+        userId: THIRD_ID,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(mutationRepository.transferOwnership).not.toHaveBeenCalled();
+  });
+
+  it('requires the new owner to already be a group member', async () => {
+    chatRepository.findConversation.mockResolvedValue(group());
+
+    await expect(
+      useCase.transferOwnership({
+        conversationId: 'group-id',
+        actorUserId: OWNER_ID,
+        userId: NEW_MEMBER_ID,
+      }),
+    ).rejects.toThrow('New owner must be an existing group member');
+
+    expect(mutationRepository.transferOwnership).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale ownership transfer when membership changed concurrently', async () => {
+    chatRepository.findConversation.mockResolvedValue(group());
+    mutationRepository.transferOwnership.mockResolvedValue(false);
+
+    await expect(
+      useCase.transferOwnership({
+        conversationId: 'group-id',
+        actorUserId: OWNER_ID,
+        userId: MEMBER_ID,
+      }),
+    ).rejects.toThrow(
+      'Group membership or ownership changed; refresh and try again',
+    );
+  });
+
   it('never allows the owner to be removed', async () => {
     chatRepository.findConversation.mockResolvedValue(group());
 
@@ -164,7 +230,7 @@ describe('ManageGroupConversationUseCase', () => {
     expect(result.participantIds).not.toContain(MEMBER_ID);
   });
 
-  it('blocks the owner from leaving until ownership transfer exists', async () => {
+  it('requires the current owner to transfer ownership before leaving', async () => {
     chatRepository.findConversation.mockResolvedValue(group());
 
     await expect(
@@ -172,8 +238,6 @@ describe('ManageGroupConversationUseCase', () => {
         conversationId: 'group-id',
         actorUserId: OWNER_ID,
       }),
-    ).rejects.toThrow(
-      'The group owner cannot leave before ownership transfer is supported',
-    );
+    ).rejects.toThrow('The group owner must transfer ownership before leaving');
   });
 });

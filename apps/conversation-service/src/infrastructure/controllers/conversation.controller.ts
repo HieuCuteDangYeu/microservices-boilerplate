@@ -257,6 +257,27 @@ export class ConversationMicroserviceController {
     }
   }
 
+  @MessagePattern('transfer_group_ownership')
+  async handleTransferGroupOwnership(
+    @Payload()
+    data: {
+      conversationId: string;
+      actorUserId: string;
+      userId: string;
+    },
+  ) {
+    try {
+      const conversation =
+        await this.manageGroupConversationUseCase.transferOwnership(data);
+      this.chatGateway.emitConversationUpdated(conversation);
+      return ChatMapper.conversationToDto(conversation);
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error('❌ [TransferGroupOwnership] Error: ' + error.message);
+      throw new RpcException(error.message);
+    }
+  }
+
   @MessagePattern('add_conversation_member')
   async handleAddConversationMember(
     @Payload()

@@ -15,6 +15,12 @@ export abstract class IConversationMutationRepository {
     joinedAt: Date,
   ): Promise<void>;
 
+  abstract transferOwnership(
+    conversationId: string,
+    currentOwnerUserId: string,
+    newOwnerUserId: string,
+  ): Promise<boolean>;
+
   abstract removeParticipant(
     conversationId: string,
     userId: string,

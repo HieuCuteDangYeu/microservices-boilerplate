@@ -1,13 +1,26 @@
 import { CurrentUser } from '@common/auth/decorators/current-user.decorator';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { BOT_USER_ID } from '@common/constants/seed.constants';
-import { AddConversationMemberDto, AddConversationMemberSchema } from '@common/conversation/dtos/add-conversation-member.dto';
+import {
+  AddConversationMemberDto,
+  AddConversationMemberSchema,
+} from '@common/conversation/dtos/add-conversation-member.dto';
 import { ChatWithBotDto } from '@common/conversation/dtos/chat-with-bot.dto';
 import { ConversationDto } from '@common/conversation/dtos/conversation.dto';
-import { CreateConversationDto, CreateConversationSchema } from '@common/conversation/dtos/create-conversation.dto';
+import {
+  CreateConversationDto,
+  CreateConversationSchema,
+} from '@common/conversation/dtos/create-conversation.dto';
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import { MessageDto } from '@common/conversation/dtos/message.dto';
-import { UpdateGroupConversationDto, UpdateGroupConversationSchema } from '@common/conversation/dtos/update-group-conversation.dto';
+import {
+  TransferGroupOwnershipDto,
+  TransferGroupOwnershipSchema,
+} from '@common/conversation/dtos/transfer-group-ownership.dto';
+import {
+  UpdateGroupConversationDto,
+  UpdateGroupConversationSchema,
+} from '@common/conversation/dtos/update-group-conversation.dto';
 import { CreateMessageResponse } from '@common/conversation/interfaces/create-message-response.interface';
 import { MessageAnchorExpansionResponse } from '@common/conversation/interfaces/message-anchor-expansion.interface';
 import { MessageAnchorWindowResponse } from '@common/conversation/interfaces/message-anchor-window.interface';
@@ -573,6 +586,31 @@ export class ConversationController {
     );
   }
 
+  @Patch(':id/owner')
+  @ApiOperation({ summary: 'Chuyển quyền sở hữu group conversation' })
+  @ApiBody({ type: TransferGroupOwnershipDto })
+  async transferGroupOwnership(
+    @Param('id') conversationId: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ConversationDto> {
+    const parsed = TransferGroupOwnershipSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return await lastValueFrom(
+      this.conversationClient.send<ConversationDto>(
+        'transfer_group_ownership',
+        {
+          conversationId,
+          actorUserId: user.id,
+          userId: parsed.data.userId,
+        },
+      ),
+    );
+  }
+
   @Get(':id/members')
   @ApiOperation({ summary: 'Lấy danh sách thành viên hội thoại' })
   async getConversationMembers(
@@ -590,7 +628,8 @@ export class ConversationController {
       }),
     );
 
-    const fallbackJoinedAt = conversation?.createdAt ?? new Date(0).toISOString();
+    const fallbackJoinedAt =
+      conversation?.createdAt ?? new Date(0).toISOString();
 
     return Array.isArray(conversation?.participants)
       ? conversation.participants.map((participant) => ({
@@ -639,7 +678,8 @@ export class ConversationController {
     const participant = conversation.participants?.find(
       (candidate) => candidate.id === parsed.data.userId,
     );
-    const fallbackJoinedAt = conversation.createdAt ?? new Date(0).toISOString();
+    const fallbackJoinedAt =
+      conversation.createdAt ?? new Date(0).toISOString();
 
     return {
       userId: parsed.data.userId,
