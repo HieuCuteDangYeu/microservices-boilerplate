@@ -1,10 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { IndexQualityAgentUseCase } from './application/agents/index-quality-agent.use-case';
-import { MetadataCuratorAgentUseCase } from './application/agents/metadata-curator-agent.use-case';
-import { SectioningAgentUseCase } from './application/agents/sectioning-agent.use-case';
-import { VisualUnderstandingAgentUseCase } from './application/agents/visual-understanding-agent.use-case';
 import { AnalyzeVisualFrameManifestUseCase } from './application/use-cases/analyze-visual-frame-manifest.use-case';
 import { BuildAdaptiveTranscriptSectionsUseCase } from './application/use-cases/build-adaptive-transcript-sections.use-case';
 import { BuildHierarchicalIndexUseCase } from './application/use-cases/build-hierarchical-index.use-case';
@@ -13,6 +9,7 @@ import { BuildShortEvidenceChunksUseCase } from './application/use-cases/build-s
 import { BuildTranscriptSectionsUseCase } from './application/use-cases/build-transcript-sections.use-case';
 import { CommitSemanticCandidateUseCase } from './application/use-cases/commit-semantic-candidate.use-case';
 import { ExtractHierarchicalMetadataUseCase } from './application/use-cases/extract-hierarchical-metadata.use-case';
+import { IndexQualityAgentUseCase } from './application/use-cases/index-quality-agent.use-case';
 import { MergeTranscriptSegmentsUseCase } from './application/use-cases/merge-transcript-segments.use-case';
 import { ProcessReelIndexJobUseCase } from './application/use-cases/process-reel-index-job.use-case';
 import { SelectHealthyTranscriptSectionsUseCase } from './application/use-cases/select-healthy-transcript-sections.use-case';
@@ -71,32 +68,61 @@ const rabbitClient = (name: string, queue: string) => ({
   providers: [
     PrismaService,
     TranscribeAudioManifestUseCase,
+    AnalyzeVisualFrameManifestUseCase,
     MergeTranscriptSegmentsUseCase,
     BuildTranscriptSectionsUseCase,
+    BuildAdaptiveTranscriptSectionsUseCase,
     SelectHealthyTranscriptSectionsUseCase,
     BuildShortEvidenceChunksUseCase,
     BuildLongEvidenceChunksUseCase,
+    ExtractHierarchicalMetadataUseCase,
     BuildHierarchicalIndexUseCase,
     ValidateEmbeddingQualityUseCase,
     ValidateEvidenceIndexCandidateUseCase,
     CommitSemanticCandidateUseCase,
 
-    VisualUnderstandingAgentUseCase,
-    MetadataCuratorAgentUseCase,
-    SectioningAgentUseCase,
+    {
+      provide: 'IIndexQualityAgentPolicy',
+      useFactory: (config: ConfigService) => {
+        const configured = config
+          .get<string>('INDEX_QUALITY_AGENT_ENABLED')
+          ?.trim()
+          .toLowerCase();
+        const enabled =
+          configured === 'true'
+            ? true
+            : configured === 'false'
+              ? false
+              : config.get<string>('NODE_ENV')?.trim().toLowerCase() !==
+                'production';
+        const readBoolean = (key: string, fallback: boolean) => {
+          const value = config.get<string>(key)?.trim().toLowerCase();
+          if (value === 'true') return true;
+          if (value === 'false') return false;
+          return fallback;
+        };
+        const parsedMaxDocuments = Number(
+          config.get<string>('INDEX_QUALITY_AGENT_MAX_DOCUMENTS') ?? '36',
+        );
+
+        return {
+          enabled,
+          enforced: readBoolean('INDEX_QUALITY_AGENT_ENFORCE', false),
+          required: readBoolean('INDEX_QUALITY_AGENT_REQUIRED', false),
+          maxDocuments: Number.isFinite(parsedMaxDocuments)
+            ? Math.min(80, Math.max(8, Math.round(parsedMaxDocuments)))
+            : 36,
+        };
+      },
+      inject: [ConfigService],
+    },
+    {
+      provide: 'IPersistedSemanticCandidateValidator',
+      useFactory: (inspector) =>
+        new ValidatePersistedSemanticCandidateUseCase(inspector),
+      inject: ['ISemanticCandidateInspector'],
+    },
     IndexQualityAgentUseCase,
-    {
-      provide: AnalyzeVisualFrameManifestUseCase,
-      useExisting: VisualUnderstandingAgentUseCase,
-    },
-    {
-      provide: ExtractHierarchicalMetadataUseCase,
-      useExisting: MetadataCuratorAgentUseCase,
-    },
-    {
-      provide: BuildAdaptiveTranscriptSectionsUseCase,
-      useExisting: SectioningAgentUseCase,
-    },
     {
       provide: ValidatePersistedSemanticCandidateUseCase,
       useExisting: IndexQualityAgentUseCase,

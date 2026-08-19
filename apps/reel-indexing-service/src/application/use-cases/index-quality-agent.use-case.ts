@@ -1,29 +1,32 @@
-import type { IndexQualityReviewRequest } from '@common/ai/interfaces/index-quality-review.interface';
-import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
-import { ValidatePersistedSemanticCandidateUseCase } from '@indexing/application/use-cases/validate-persisted-semantic-candidate.use-case';
-import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
-import type { ISemanticCandidateInspector } from '@indexing/domain/interfaces/semantic-candidate-inspector.interface';
+import type {
+  IIndexingAiService,
+  IndexQualityReviewInput,
+} from '@indexing/domain/interfaces/ai-service.interface';
+import type { IIndexQualityAgentPolicy } from '@indexing/domain/interfaces/index-quality-agent-policy.interface';
+import type { IPersistedSemanticCandidateValidator } from '@indexing/domain/interfaces/persisted-semantic-candidate-validator.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+
+type PersistedCandidateInput = Parameters<
+  IPersistedSemanticCandidateValidator['execute']
+>[0];
+type PersistedCandidateDocument = PersistedCandidateInput['documents'][number];
 
 @Injectable()
-export class IndexQualityAgentUseCase extends ValidatePersistedSemanticCandidateUseCase {
+export class IndexQualityAgentUseCase {
   private readonly agentLogger = new Logger(IndexQualityAgentUseCase.name);
 
   constructor(
-    @Inject('ISemanticCandidateInspector') inspector: ISemanticCandidateInspector,
+    @Inject('IPersistedSemanticCandidateValidator')
+    private readonly validator: IPersistedSemanticCandidateValidator,
     @Inject('IIndexingAiService') private readonly ai: IIndexingAiService,
-    private readonly config: ConfigService,
-  ) {
-    super(inspector);
-  }
+    @Inject('IIndexQualityAgentPolicy')
+    private readonly policy: IIndexQualityAgentPolicy,
+  ) {}
 
-  override async execute(
-    input: Parameters<ValidatePersistedSemanticCandidateUseCase['execute']>[0],
-  ): Promise<void> {
+  async execute(input: PersistedCandidateInput): Promise<void> {
     // Structural/integrity validation remains authoritative and always runs first.
-    await super.execute(input);
-    if (!this.enabled()) return;
+    await this.validator.execute(input);
+    if (!this.policy.enabled) return;
 
     let review;
     try {
@@ -32,7 +35,7 @@ export class IndexQualityAgentUseCase extends ValidatePersistedSemanticCandidate
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      if (this.required()) throw error;
+      if (this.policy.required) throw error;
       this.agentLogger.warn(
         `[IndexQualityAgent] review unavailable; structural gate remains authoritative: ${message}`,
       );
@@ -46,7 +49,7 @@ export class IndexQualityAgentUseCase extends ValidatePersistedSemanticCandidate
       `[IndexQualityAgent] reelId=${input.job.reelId} acceptable=${review.acceptable} confidence=${review.confidence.toFixed(2)} issues=${issueSummary || 'none'}`,
     );
 
-    if (!review.acceptable && this.enforced()) {
+    if (!review.acceptable && this.policy.enforced) {
       const details = review.issues
         .filter((issue) => issue.severity !== 'LOW')
         .slice(0, 4)
@@ -65,18 +68,15 @@ export class IndexQualityAgentUseCase extends ValidatePersistedSemanticCandidate
   }
 
   private toReviewRequest(
-    job: Parameters<ValidatePersistedSemanticCandidateUseCase['execute']>[0]['job'],
-    documents: ReelIndexDocument[],
-  ): IndexQualityReviewRequest {
+    job: PersistedCandidateInput['job'],
+    documents: PersistedCandidateInput['documents'],
+  ): IndexQualityReviewInput {
     const prioritized = [...documents]
       .sort(
         (left, right) =>
           this.kindPriority(left.kind) - this.kindPriority(right.kind),
       )
-      .slice(
-        0,
-        this.positiveInt('INDEX_QUALITY_AGENT_MAX_DOCUMENTS', 36, 8, 80),
-      );
+      .slice(0, this.policy.maxDocuments);
 
     return {
       reelId: job.reelId,
@@ -103,49 +103,10 @@ export class IndexQualityAgentUseCase extends ValidatePersistedSemanticCandidate
     };
   }
 
-  private kindPriority(kind: ReelIndexDocument['kind']): number {
+  private kindPriority(kind: PersistedCandidateDocument['kind']): number {
     if (kind === 'REEL') return 0;
     if (kind === 'SECTION') return 1;
     if (kind === 'VISUAL_SCENE') return 2;
     return 3;
-  }
-
-  private enabled(): boolean {
-    const configured = this.config
-      .get<string>('INDEX_QUALITY_AGENT_ENABLED')
-      ?.trim()
-      .toLowerCase();
-    if (configured === 'true') return true;
-    if (configured === 'false') return false;
-    return (
-      this.config.get<string>('NODE_ENV')?.trim().toLowerCase() !== 'production'
-    );
-  }
-
-  private enforced(): boolean {
-    return this.boolean('INDEX_QUALITY_AGENT_ENFORCE', false);
-  }
-
-  private required(): boolean {
-    return this.boolean('INDEX_QUALITY_AGENT_REQUIRED', false);
-  }
-
-  private boolean(key: string, fallback: boolean): boolean {
-    const value = this.config.get<string>(key)?.trim().toLowerCase();
-    if (value === 'true') return true;
-    if (value === 'false') return false;
-    return fallback;
-  }
-
-  private positiveInt(
-    key: string,
-    fallback: number,
-    minimum: number,
-    maximum: number,
-  ): number {
-    const value = Number(this.config.get<string>(key) ?? fallback);
-    return Number.isFinite(value)
-      ? Math.min(maximum, Math.max(minimum, Math.round(value)))
-      : fallback;
   }
 }

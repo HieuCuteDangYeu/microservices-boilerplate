@@ -1,3 +1,4 @@
+import { IndexQualityReviewSchema } from '@common/ai/dtos/index-quality-review.dto';
 import type {
   CountDocumentTokensRequest,
   CountDocumentTokensResult,
@@ -6,23 +7,23 @@ import type {
   GenerateEmbeddingBatchRequest,
   GenerateEmbeddingBatchResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
-import type {
-  IndexQualityReviewRequest,
-  IndexQualityReviewResult,
-} from '@common/ai/interfaces/index-quality-review.interface';
+import type { IndexQualityReviewResult as IndexQualityReviewTransportResult } from '@common/ai/interfaces/index-quality-review.interface';
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import type {
   AnalyzeVisualFrameRequest,
   VisualFrameAnalysis,
 } from '@common/ai/interfaces/visual-analysis.interface';
+import { isRpcError } from '@common/constants/rpc-error.types';
 import type {
   IIndexingAiService,
   IndexingVisualFrameInput,
+  IndexQualityReviewInput,
+  IndexQualityReviewResult,
 } from '@indexing/domain/interfaces/ai-service.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ClientProxy } from '@nestjs/microservices';
-import { firstValueFrom, timeout } from 'rxjs';
+import { catchError, firstValueFrom, throwError, timeout } from 'rxjs';
 
 @Injectable()
 export class AiServiceAdapter implements IIndexingAiService {
@@ -77,12 +78,32 @@ export class AiServiceAdapter implements IIndexingAiService {
   }
 
   async reviewIndexQuality(
-    input: IndexQualityReviewRequest,
+    input: IndexQualityReviewInput,
   ): Promise<IndexQualityReviewResult> {
+    const payload = IndexQualityReviewSchema.parse(input);
+
     return await firstValueFrom(
       this.client
-        .send<IndexQualityReviewResult>('ai.review_index_quality', input)
-        .pipe(timeout(120_000)),
+        .send<IndexQualityReviewTransportResult>(
+          'ai.review_index_quality',
+          payload,
+        )
+        .pipe(
+          timeout(120_000),
+          catchError((error: unknown) => {
+            if (isRpcError(error)) {
+              const message = Array.isArray(error.message)
+                ? error.message.join(', ')
+                : error.message;
+              return throwError(() => new Error(message));
+            }
+            return throwError(() =>
+              error instanceof Error
+                ? error
+                : new Error('AI index quality review failed'),
+            );
+          }),
+        ),
     );
   }
 

@@ -1,11 +1,11 @@
-import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
 import type {
   IndexQualityIssueCategory,
   IndexQualityIssueSeverity,
+  IndexQualityReviewInput,
   IndexQualityReviewIssue,
-  IndexQualityReviewRequest,
   IndexQualityReviewResult,
-} from '@common/ai/interfaces/index-quality-review.interface';
+} from '@ai/domain/interfaces/index-quality-review.interface';
+import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable } from '@nestjs/common';
 
 interface RawIndexQualityReview {
@@ -22,9 +22,7 @@ export class ReviewIndexQualityUseCase {
     private readonly structuredLlm: IStructuredLlmService,
   ) {}
 
-  async execute(
-    input: IndexQualityReviewRequest,
-  ): Promise<IndexQualityReviewResult> {
+  async execute(input: IndexQualityReviewInput): Promise<IndexQualityReviewResult> {
     const raw = await this.structuredLlm.generateObject<RawIndexQualityReview>({
       systemPrompt: this.systemPrompt(),
       userPrompt: JSON.stringify(input, null, 2),

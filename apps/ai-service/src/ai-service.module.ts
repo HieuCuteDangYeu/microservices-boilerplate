@@ -46,7 +46,7 @@ import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/lan
 import { ReelSemanticIndexAdapter } from '@ai/infrastructure/adapters/reel-semantic-index.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
-import { IndexQualityAgentController } from '@ai/infrastructure/controller/index-quality-agent.controller';
+import { IndexQualityAgentController } from '@ai/infrastructure/controllers/index-quality-agent.controller';
 import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
 import { PrismaConversationMemoryRepository } from '@ai/infrastructure/repositories/prisma-conversation-memory.repository';
 import { PrismaRagHierarchyShadowObservationRepository } from '@ai/infrastructure/repositories/prisma-rag-hierarchy-shadow-observation.repository';
@@ -144,6 +144,82 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     BackfillUserMemoryEmbeddingsUseCase,
 
     QueryRouterAgentUseCase,
+    {
+      provide: 'IRetrievalAgentPolicy',
+      useFactory: (config: ConfigService) => {
+        const configured = config
+          .get<string>('RAG_TOOL_CALLING_ENABLED')
+          ?.trim()
+          .toLowerCase();
+        const enabled =
+          configured === 'true'
+            ? true
+            : configured === 'false'
+              ? false
+              : config.get<string>('NODE_ENV')?.trim().toLowerCase() !==
+                'production';
+        const boundedInt = (
+          key: string,
+          fallback: number,
+          minimum: number,
+          maximum: number,
+        ) => {
+          const value = Number(config.get<string>(key) ?? fallback);
+          return Number.isFinite(value)
+            ? Math.min(maximum, Math.max(minimum, Math.round(value)))
+            : fallback;
+        };
+
+        return {
+          enabled,
+          model: config.get<string>('CLOUDFLARE_TOOL_MODEL'),
+          maxSteps: boundedInt('RAG_TOOL_MAX_STEPS', 3, 1, 5),
+          maxParallelCalls: boundedInt(
+            'RAG_TOOL_MAX_PARALLEL_CALLS',
+            2,
+            1,
+            4,
+          ),
+          callTimeoutMs: boundedInt(
+            'RAG_TOOL_CALL_TIMEOUT_MS',
+            8_000,
+            1_000,
+            30_000,
+          ),
+        };
+      },
+      inject: [ConfigService],
+    },
+    {
+      provide: 'IRetrievalEngine',
+      useFactory: (
+        structuredLlmService,
+        embeddingService,
+        contentService,
+        semanticIndexService,
+        rerankerService,
+        hierarchyObservationRepository,
+        config: ConfigService,
+      ) =>
+        new RetrievalAgentUseCase(
+          structuredLlmService,
+          embeddingService,
+          contentService,
+          semanticIndexService,
+          rerankerService,
+          hierarchyObservationRepository,
+          config,
+        ),
+      inject: [
+        'IStructuredLlmService',
+        'IEmbeddingService',
+        'IContentService',
+        'IReelSemanticIndexService',
+        'IRerankerService',
+        'IRagHierarchyShadowObservationRepository',
+        ConfigService,
+      ],
+    },
     ToolCallingRetrievalAgentUseCase,
     {
       provide: RetrievalAgentUseCase,

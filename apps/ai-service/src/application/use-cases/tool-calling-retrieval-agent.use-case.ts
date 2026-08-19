@@ -1,19 +1,15 @@
-import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
 import type {
   IContentService,
   TranscriptMatch,
 } from '@ai/domain/interfaces/content-service.interface';
-import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type {
   RagChatRouteDecision,
   RagRequiredEvidence,
   RagRetrievalMode,
   RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
-import type { IRagHierarchyShadowObservationRepository } from '@ai/domain/interfaces/rag-hierarchy-shadow-observation.repository.interface';
-import type { IReelSemanticIndexService } from '@ai/domain/interfaces/reel-semantic-index.service.interface';
-import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
-import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
+import type { IRetrievalAgentPolicy } from '@ai/domain/interfaces/retrieval-agent-policy.interface';
+import type { IRetrievalEngine } from '@ai/domain/interfaces/retrieval-engine.interface';
 import type {
   IToolCallingLlmService,
   LlmToolCall,
@@ -21,7 +17,6 @@ import type {
   ToolCallingMessage,
 } from '@ai/domain/interfaces/tool-calling-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 interface RetrievalToolResult {
   items: TranscriptMatch[];
@@ -29,51 +24,65 @@ interface RetrievalToolResult {
 }
 
 @Injectable()
-export class ToolCallingRetrievalAgentUseCase extends RetrievalAgentUseCase {
+export class ToolCallingRetrievalAgentUseCase {
   private readonly toolLogger = new Logger(ToolCallingRetrievalAgentUseCase.name);
 
   constructor(
-    @Inject('IStructuredLlmService')
-    structuredLlmService: IStructuredLlmService,
-    @Inject('IEmbeddingService')
-    embeddingService: IEmbeddingService,
+    @Inject('IRetrievalEngine')
+    private readonly retrievalEngine: IRetrievalEngine,
     @Inject('IContentService')
-    private readonly toolContentService: IContentService,
-    @Inject('IReelSemanticIndexService')
-    semanticIndexService: IReelSemanticIndexService,
-    @Inject('IRerankerService')
-    rerankerService: IRerankerService,
-    @Inject('IRagHierarchyShadowObservationRepository')
-    hierarchyObservationRepository: IRagHierarchyShadowObservationRepository,
+    private readonly contentService: IContentService,
     @Inject('IToolCallingLlmService')
     private readonly toolLlm: IToolCallingLlmService,
-    private readonly toolConfig: ConfigService,
-  ) {
-    super(
-      structuredLlmService,
-      embeddingService,
-      toolContentService,
-      semanticIndexService,
-      rerankerService,
-      hierarchyObservationRepository,
-      toolConfig,
-    );
+    @Inject('IRetrievalAgentPolicy')
+    private readonly policy: IRetrievalAgentPolicy,
+  ) {}
+
+  async execute(input: {
+    userId: string;
+    conversationId: string;
+    message: string;
+    route: RagChatRouteDecision;
+  }): Promise<{
+    plan: RagRetrievalPlan;
+    retrievedChunks: TranscriptMatch[];
+    rerankedChunks: TranscriptMatch[];
+  }> {
+    const plan = await this.plan({
+      message: input.message,
+      route: input.route,
+    });
+    const retrievedChunks = await this.retrieve({
+      userId: input.userId,
+      conversationId: input.conversationId,
+      route: input.route,
+      plan,
+    });
+    const rerankedChunks = await this.rerank({ plan, retrievedChunks });
+    return { plan, retrievedChunks, rerankedChunks };
   }
 
-  override async retrieve(input: {
+  async plan(input: {
+    message: string;
+    route: RagChatRouteDecision;
+  }): Promise<RagRetrievalPlan> {
+    return await this.retrievalEngine.plan(input);
+  }
+
+  async retrieve(input: {
     userId: string;
     conversationId: string;
     route: RagChatRouteDecision;
     plan: RagRetrievalPlan;
     accessibleReelIds?: string[];
   }): Promise<TranscriptMatch[]> {
-    if (input.plan.mode === 'NONE' || !this.toolCallingEnabled()) {
-      return await super.retrieve(input);
+    if (input.plan.mode === 'NONE' || !this.policy.enabled) {
+      return await this.retrievalEngine.retrieve(input);
     }
 
     const accessibleReelIds =
       input.accessibleReelIds ??
-      (await this.toolContentService.resolveReelContextAccess({
+      (await this.contentService.resolveReelContextAccess({
         userId: input.userId,
         conversationId: input.conversationId,
       }));
@@ -91,22 +100,16 @@ export class ToolCallingRetrievalAgentUseCase extends RetrievalAgentUseCase {
         },
       ];
       const accumulated = new Map<string, TranscriptMatch>();
-      const maxSteps = this.positiveInt('RAG_TOOL_MAX_STEPS', 3, 1, 5);
 
-      for (let step = 0; step < maxSteps; step += 1) {
+      for (let step = 0; step < this.policy.maxSteps; step += 1) {
         const completion = await this.toolLlm.complete({
-          model: this.toolConfig.get<string>('CLOUDFLARE_TOOL_MODEL'),
+          model: this.policy.model,
           messages,
           tools: this.getTools(),
           toolChoice: step === 0 ? 'required' : 'auto',
           maxTokens: 500,
           temperature: 0.1,
-          timeoutMs: this.positiveInt(
-            'RAG_TOOL_CALL_TIMEOUT_MS',
-            8_000,
-            1_000,
-            30_000,
-          ),
+          timeoutMs: this.policy.callTimeoutMs,
         });
 
         messages.push({
@@ -119,7 +122,7 @@ export class ToolCallingRetrievalAgentUseCase extends RetrievalAgentUseCase {
 
         const calls = completion.toolCalls.slice(
           0,
-          this.positiveInt('RAG_TOOL_MAX_PARALLEL_CALLS', 2, 1, 4),
+          this.policy.maxParallelCalls,
         );
         for (const call of calls) {
           const result = await this.executeToolCall({
@@ -153,14 +156,27 @@ export class ToolCallingRetrievalAgentUseCase extends RetrievalAgentUseCase {
       this.toolLogger.warn(
         '[RetrievalToolAgent] no tool evidence returned; falling back to deterministic retrieval plan',
       );
-      return await super.retrieve({ ...input, accessibleReelIds });
+      return await this.retrievalEngine.retrieve({
+        ...input,
+        accessibleReelIds,
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.toolLogger.warn(
         `[RetrievalToolAgent] tool loop failed; deterministic fallback used: ${message}`,
       );
-      return await super.retrieve({ ...input, accessibleReelIds });
+      return await this.retrievalEngine.retrieve({
+        ...input,
+        accessibleReelIds,
+      });
     }
+  }
+
+  async rerank(input: {
+    plan: RagRetrievalPlan;
+    retrievedChunks: TranscriptMatch[];
+  }): Promise<TranscriptMatch[]> {
+    return await this.retrievalEngine.rerank(input);
   }
 
   private async executeToolCall(input: {
@@ -197,7 +213,8 @@ export class ToolCallingRetrievalAgentUseCase extends RetrievalAgentUseCase {
       };
     }
 
-    const query = this.readString(input.call.arguments['query']) ||
+    const query =
+      this.readString(input.call.arguments['query']) ||
       input.input.plan.rewrittenQuery?.trim() ||
       input.input.plan.query;
     const requestedMode = input.call.arguments['mode'];
@@ -224,7 +241,7 @@ export class ToolCallingRetrievalAgentUseCase extends RetrievalAgentUseCase {
       searchLimit: limit,
     };
 
-    const items = await super.retrieve({
+    const items = await this.retrievalEngine.retrieve({
       userId: input.input.userId,
       conversationId: input.input.conversationId,
       route,
@@ -385,30 +402,5 @@ Rules:
     return Number.isFinite(parsed)
       ? Math.min(upper, Math.max(1, Math.floor(parsed)))
       : upper;
-  }
-
-  private toolCallingEnabled(): boolean {
-    const configured = this.toolConfig
-      .get<string>('RAG_TOOL_CALLING_ENABLED')
-      ?.trim()
-      .toLowerCase();
-    if (configured === 'true') return true;
-    if (configured === 'false') return false;
-    return (
-      this.toolConfig.get<string>('NODE_ENV')?.trim().toLowerCase() !==
-      'production'
-    );
-  }
-
-  private positiveInt(
-    key: string,
-    fallback: number,
-    minimum: number,
-    maximum: number,
-  ): number {
-    const value = Number(this.toolConfig.get<string>(key) ?? fallback);
-    return Number.isFinite(value)
-      ? Math.min(maximum, Math.max(minimum, Math.round(value)))
-      : fallback;
   }
 }

@@ -7,10 +7,6 @@ import type {
   GenerateEmbeddingBatchResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
 import type {
-  IndexQualityReviewRequest,
-  IndexQualityReviewResult,
-} from '@common/ai/interfaces/index-quality-review.interface';
-import type {
   ExtractedReelMetadata,
   ReelMetadataExtractionInput,
 } from '@common/ai/interfaces/reel-metadata-extraction.interface';
@@ -21,6 +17,42 @@ export interface IndexingVisualFrameInput {
   imageBytes: Uint8Array;
   mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
   timestampMs: number;
+}
+
+export interface IndexQualityReviewInput {
+  reelId: string;
+  sourceLengthClass: 'SHORT' | 'LONG';
+  durationMs: number;
+  title?: string;
+  description?: string;
+  tags: string[];
+  documents: Array<{
+    id: string;
+    kind: 'REEL' | 'SECTION' | 'CHUNK' | 'VISUAL_SCENE';
+    ordinal: number;
+    parentId?: string;
+    startTime?: number;
+    endTime?: number;
+    evidenceQuality: 'VERIFIED' | 'LOW_CONFIDENCE' | 'METADATA_ONLY';
+    text: string;
+  }>;
+}
+
+export interface IndexQualityReviewResult {
+  acceptable: boolean;
+  confidence: number;
+  summary: string;
+  issues: Array<{
+    category:
+      | 'METADATA'
+      | 'SECTIONING'
+      | 'GROUNDING'
+      | 'VISUAL_CONTEXT'
+      | 'RETRIEVAL_QUALITY';
+    severity: 'LOW' | 'MEDIUM' | 'HIGH';
+    message: string;
+    documentId?: string;
+  }>;
 }
 
 export interface IIndexingAiService {
@@ -38,7 +70,7 @@ export interface IIndexingAiService {
   ): Promise<ExtractedReelMetadata>;
 
   reviewIndexQuality(
-    input: IndexQualityReviewRequest,
+    input: IndexQualityReviewInput,
   ): Promise<IndexQualityReviewResult>;
 
   generateEmbeddingBatch(
