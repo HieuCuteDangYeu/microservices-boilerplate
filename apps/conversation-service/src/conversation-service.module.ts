@@ -13,6 +13,7 @@ import { GetConversationUseCase } from 'apps/conversation-service/src/applicatio
 import { GetMessagesAroundUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages-around.use-case';
 import { GetMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages.use-case';
 import { GetUserConversationsUseCase } from 'apps/conversation-service/src/application/use-cases/get-user-conversations.use-case';
+import { ManageGroupConversationUseCase } from 'apps/conversation-service/src/application/use-cases/manage-group-conversation.use-case';
 import { ProcessBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/process-bot-reply.use-case';
 import { TriggerBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/trigger-bot-reply.use-case';
 import { AiServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/ai-service.adapter';
@@ -23,7 +24,7 @@ import { ConversationMicroserviceController } from 'apps/conversation-service/sr
 import { KeyMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/key.controller';
 import { PrismaService } from 'apps/conversation-service/src/infrastructure/prisma/prisma.service';
 import { AesEncryptionRepository } from 'apps/conversation-service/src/infrastructure/repositories/aes-encryption.repository';
-import { PrismaChatRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-chat.repository';
+import { PrismaConversationChatRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-conversation-chat.repository';
 import { PrismaKeyBundleRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-key-bundle.repository';
 import { SendMessageUseCase } from './application/use-cases/send-message.use-case';
 import { ChatGateway } from './infrastructure/gateways/chat.gateway';
@@ -110,6 +111,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     GetMessagesUseCase,
     GetConversationUseCase,
     CreateConversationUseCase,
+    ManageGroupConversationUseCase,
     GetUserConversationsUseCase,
     ProcessBotReplyUseCase,
     TriggerBotReplyUseCase,
@@ -117,7 +119,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     BuildCompletedTurnMemoryContextUseCase,
 
     // --- Repositories ---
-    PrismaChatRepository,
+    PrismaConversationChatRepository,
     PrismaKeyBundleRepository,
 
     {
@@ -126,7 +128,11 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     },
     {
       provide: 'IChatRepository',
-      useClass: PrismaChatRepository,
+      useExisting: PrismaConversationChatRepository,
+    },
+    {
+      provide: 'IConversationMutationRepository',
+      useExisting: PrismaConversationChatRepository,
     },
     {
       provide: 'IEncryptionRepository', // Token để inject

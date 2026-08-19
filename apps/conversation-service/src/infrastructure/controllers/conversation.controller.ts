@@ -19,6 +19,7 @@ import { GetAnchorOlderMessagesUseCase } from '../../application/use-cases/get-a
 import { GetConversationUseCase } from '../../application/use-cases/get-conversation.use-case';
 import { GetMessagesAroundUseCase } from '../../application/use-cases/get-messages-around.use-case';
 import { GetMessagesUseCase } from '../../application/use-cases/get-messages.use-case';
+import { ManageGroupConversationUseCase } from '../../application/use-cases/manage-group-conversation.use-case';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
@@ -40,6 +41,7 @@ export class ConversationMicroserviceController {
     private readonly getAnchorNewerMessagesUseCase: GetAnchorNewerMessagesUseCase,
     private readonly getConversationUseCase: GetConversationUseCase,
     private readonly createConversationUseCase: CreateConversationUseCase,
+    private readonly manageGroupConversationUseCase: ManageGroupConversationUseCase,
     private readonly getUserConversationsUseCase: GetUserConversationsUseCase,
     private readonly chatGateway: ChatGateway,
     private readonly triggerBotReplyUseCase: TriggerBotReplyUseCase,
@@ -54,7 +56,10 @@ export class ConversationMicroserviceController {
     @Payload()
     payload: {
       participantIds: string[];
-      isGroup: boolean;
+      isGroup?: boolean;
+      type?: 'DIRECT' | 'GROUP';
+      name?: string;
+      picture?: string;
       creatorId?: string;
     },
   ) {
@@ -62,7 +67,17 @@ export class ConversationMicroserviceController {
       const creatorId = payload.creatorId ?? payload.participantIds[0];
       const { conversation, created } =
         await this.createConversationUseCase.execute(
-          { participantIds: payload.participantIds, isGroup: payload.isGroup },
+          {
+            participantIds: payload.participantIds,
+            ...(payload.isGroup !== undefined
+              ? { isGroup: payload.isGroup }
+              : {}),
+            ...(payload.type !== undefined ? { type: payload.type } : {}),
+            ...(payload.name !== undefined ? { name: payload.name } : {}),
+            ...(payload.picture !== undefined
+              ? { picture: payload.picture }
+              : {}),
+          },
           creatorId,
         );
 
@@ -221,6 +236,75 @@ export class ConversationMicroserviceController {
     } catch (err: unknown) {
       const error = err as Error;
       this.logger.error(`❌ [GetConversation] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+
+  @MessagePattern('update_group_conversation')
+  async handleUpdateGroupConversation(
+    @Payload()
+    data: {
+      conversationId: string;
+      actorUserId: string;
+      name?: string;
+      picture?: string | null;
+    },
+  ) {
+    try {
+      const conversation =
+        await this.manageGroupConversationUseCase.updateMetadata(data);
+      return ChatMapper.conversationToDto(conversation);
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [UpdateGroupConversation] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('add_conversation_member')
+  async handleAddConversationMember(
+    @Payload()
+    data: { conversationId: string; actorUserId: string; userId: string },
+  ) {
+    try {
+      const conversation =
+        await this.manageGroupConversationUseCase.addMember(data);
+      return ChatMapper.conversationToDto(conversation);
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [AddConversationMember] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('remove_conversation_member')
+  async handleRemoveConversationMember(
+    @Payload()
+    data: { conversationId: string; actorUserId: string; userId: string },
+  ) {
+    try {
+      const conversation =
+        await this.manageGroupConversationUseCase.removeMember(data);
+      return ChatMapper.conversationToDto(conversation);
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [RemoveConversationMember] Error: ${error.message}`);
+      throw new RpcException(error.message);
+    }
+  }
+
+  @MessagePattern('leave_group_conversation')
+  async handleLeaveGroupConversation(
+    @Payload() data: { conversationId: string; actorUserId: string },
+  ) {
+    try {
+      const conversation =
+        await this.manageGroupConversationUseCase.leave(data);
+      return ChatMapper.conversationToDto(conversation);
+    } catch (err: unknown) {
+      const error = err as Error;
+      this.logger.error(`❌ [LeaveGroupConversation] Error: ${error.message}`);
       throw new RpcException(error.message);
     }
   }
