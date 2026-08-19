@@ -1,7 +1,16 @@
-import { ConfigService } from '@nestjs/config';
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Conversation } from '../../domain/entities/conversation.entity';
 import { Message } from '../../domain/entities/message.entity';
+
+type NewMessageNotificationPayload = {
+  recipientUserIds: string[];
+  actorUserId: string;
+  conversationId: string;
+  messageId: string;
+  title: string;
+  body: string;
+};
 
 @Injectable()
 export class NotificationServiceAdapter {
@@ -24,25 +33,43 @@ export class NotificationServiceAdapter {
     message: Message,
     actorUserId: string,
   ) {
-    if (!conversation || conversation.isGroup) {
+    if (!conversation) {
       return;
     }
 
-    if (conversation.participantIds.length !== 2) {
+    // Preserve the existing direct-chat guard exactly. PR3 only broadens group
+    // delivery and must not change how malformed legacy direct rows behave.
+    if (!conversation.isGroup && conversation.participantIds.length !== 2) {
       return;
     }
 
-    const recipientUserId = conversation.participantIds.find(
-      (participantId) => participantId !== actorUserId,
+    const recipientUserIds = Array.from(
+      new Set(
+        conversation.participantIds.filter(
+          (participantId) =>
+            Boolean(participantId) && participantId !== actorUserId,
+        ),
+      ),
     );
 
-    if (!recipientUserId) {
+    if (recipientUserIds.length === 0) {
+      return;
+    }
+
+    if (!conversation.isGroup && recipientUserIds.length !== 1) {
       return;
     }
 
     const actorName = conversation.participants?.find(
       (participant) => participant.id === actorUserId,
     )?.name;
+    const messageBody = this.buildNotificationBody(message);
+    const title = conversation.isGroup
+      ? conversation.name?.trim() || 'Group chat'
+      : actorName?.trim() || 'New message';
+    const body = conversation.isGroup
+      ? `${actorName?.trim() || 'Someone'}: ${messageBody}`
+      : messageBody;
 
     if (!this.internalSecret) {
       this.logger.warn(
@@ -51,38 +78,35 @@ export class NotificationServiceAdapter {
       return;
     }
 
+    const payload: NewMessageNotificationPayload = {
+      recipientUserIds,
+      actorUserId,
+      conversationId: message.conversationId,
+      messageId: message.id,
+      title,
+      body,
+    };
+
     let response: Response;
 
     try {
-      response = await fetch(
-        `${this.notificationServiceUrl}/notifications/internal/new-message`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-internal-secret': this.internalSecret,
-          },
-          body: JSON.stringify({
-            recipientUserId,
-            actorUserId,
-            conversationId: message.conversationId,
-            messageId: message.id,
-            title: actorName?.trim() || 'New message',
-            body: this.buildNotificationBody(message),
-          }),
-        },
-      );
+      response = await this.postNewMessageNotification(payload);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-
-      this.logger.warn(
-        `Failed to call notification-service for message ${message.id}: ${errorMessage}`,
-      );
+      this.logRequestFailure(message.id, error);
       return;
     }
 
     if (response.ok) {
+      return;
+    }
+
+    // Rolling-deploy compatibility: an older notification-service only knows
+    // recipientUserId. A 400 is the only status where we safely retry with the
+    // legacy contract because the old schema rejects the batch before creating
+    // any jobs. Never fallback on 5xx/network errors: the batch may have been
+    // partially processed and retrying could duplicate notifications.
+    if (response.status === 400) {
+      await this.notifyUsingLegacyContract(payload);
       return;
     }
 
@@ -91,6 +115,74 @@ export class NotificationServiceAdapter {
     this.logger.warn(
       `notification-service rejected message ${message.id} with status ${response.status}: ${responseText}`,
     );
+  }
+
+  private postNewMessageNotification(payload: NewMessageNotificationPayload) {
+    return fetch(
+      `${this.notificationServiceUrl}/notifications/internal/new-message`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-secret': this.internalSecret!,
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  private async notifyUsingLegacyContract(
+    payload: NewMessageNotificationPayload,
+  ): Promise<void> {
+    const responses = await Promise.allSettled(
+      payload.recipientUserIds.map((recipientUserId) =>
+        fetch(
+          `${this.notificationServiceUrl}/notifications/internal/new-message`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-internal-secret': this.internalSecret!,
+            },
+            body: JSON.stringify({
+              recipientUserId,
+              actorUserId: payload.actorUserId,
+              conversationId: payload.conversationId,
+              messageId: payload.messageId,
+              title: payload.title,
+              body: payload.body,
+            }),
+          },
+        ),
+      ),
+    );
+
+    responses.forEach((result, index) => {
+      const recipientUserId = payload.recipientUserIds[index];
+
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Failed legacy new-message notification for message ${payload.messageId} recipient ${recipientUserId}: ${this.readErrorMessage(result.reason)}`,
+        );
+        return;
+      }
+
+      if (!result.value.ok) {
+        this.logger.warn(
+          `notification-service rejected legacy message ${payload.messageId} recipient ${recipientUserId} with status ${result.value.status}`,
+        );
+      }
+    });
+  }
+
+  private logRequestFailure(messageId: string, error: unknown): void {
+    this.logger.warn(
+      `Failed to call notification-service for message ${messageId}: ${this.readErrorMessage(error)}`,
+    );
+  }
+
+  private readErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private buildNotificationBody(message: Message) {

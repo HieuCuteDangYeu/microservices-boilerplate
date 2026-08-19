@@ -13,14 +13,37 @@ import { SendCallStateUpdateUseCase } from '../../application/use-cases/send-cal
 import { SendIncomingCallNotificationUseCase } from '../../application/use-cases/send-incoming-call-notification.use-case';
 import { SendNewMessageNotificationUseCase } from '../../application/use-cases/send-new-message-notification.use-case';
 
-const newMessageNotificationSchema = z.object({
-  recipientUserId: z.string().uuid(),
-  actorUserId: z.string().min(1),
-  conversationId: z.string().min(1),
-  messageId: z.string().min(1),
-  title: z.string().min(1),
-  body: z.string().min(1),
-});
+const newMessageNotificationSchema = z
+  .object({
+    recipientUserId: z.string().uuid().optional(),
+    recipientUserIds: z.array(z.string().uuid()).optional(),
+    actorUserId: z.string().min(1),
+    conversationId: z.string().min(1),
+    messageId: z.string().min(1),
+    title: z.string().min(1),
+    body: z.string().min(1),
+  })
+  .superRefine((value, context) => {
+    const recipientCount =
+      (value.recipientUserIds?.length ?? 0) + (value.recipientUserId ? 1 : 0);
+
+    if (recipientCount === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recipientUserIds'],
+        message: 'At least one recipient user id is required',
+      });
+    }
+  })
+  .transform(({ recipientUserId, recipientUserIds, ...rest }) => ({
+    ...rest,
+    recipientUserIds: Array.from(
+      new Set([
+        ...(recipientUserIds ?? []),
+        ...(recipientUserId ? [recipientUserId] : []),
+      ]),
+    ),
+  }));
 
 const incomingCallNotificationSchema = z.object({
   recipientUserId: z.string().uuid(),
