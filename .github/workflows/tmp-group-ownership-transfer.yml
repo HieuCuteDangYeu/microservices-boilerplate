@@ -32,6 +32,7 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      - run: node scripts/tmp-fix-group-ownership-helper.cjs
       - run: node scripts/tmp-group-ownership-transfer.cjs
       - run: pnpm exec prettier --write apps/conversation-service/src/application/use-cases/manage-group-conversation.use-case.ts apps/conversation-service/src/application/use-cases/manage-group-conversation.use-case.spec.ts apps/conversation-service/src/domain/interfaces/conversation-mutation.repository.interface.ts apps/conversation-service/src/infrastructure/controllers/conversation.controller.ts apps/conversation-service/src/infrastructure/controllers/conversation.realtime.controller.spec.ts apps/conversation-service/src/infrastructure/repositories/prisma-conversation-chat.repository.ts apps/api-gateway/src/conversation/conversation.controller.ts libs/common/src/conversation/dtos/transfer-group-ownership.dto.ts
       - run: pnpm prisma:generate:conversation
