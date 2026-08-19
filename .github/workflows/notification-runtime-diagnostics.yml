@@ -1,0 +1,117 @@
+name: Notification Runtime Diagnostics
+
+on:
+  push:
+    branches:
+      - diag/notification-runtime
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect production notification runtime
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd /var/www/microservices
+
+            echo "production_sha=$(git rev-parse HEAD)"
+            echo "--- container status ---"
+            docker compose ps conversation-service notification-service api-gateway
+
+            echo "--- env presence (values are never printed) ---"
+            for service in conversation-service notification-service api-gateway; do
+              echo "service=${service}"
+              docker compose exec -T "$service" sh -lc '
+                for key in NOTIFICATION_SERVICE_URL NOTIFICATION_INTERNAL_SECRET NOTIFICATION_GATEWAY_SECRET NOTIFICATION_FIREBASE_SERVICE_ACCOUNT_PATH; do
+                  if [ -n "$(printenv "$key" 2>/dev/null)" ]; then
+                    echo "$key=set"
+                  else
+                    echo "$key=missing"
+                  fi
+                done
+              ' || echo "env_probe_failed=${service}"
+            done
+
+            echo "--- conversation -> notification internal probe ---"
+            docker compose exec -T conversation-service node -e '
+              const base=(process.env.NOTIFICATION_SERVICE_URL||"http://notification-service:3015").replace(/\/$/,"");
+              const secret=process.env.NOTIFICATION_INTERNAL_SECRET||"";
+              fetch(base+"/notifications/internal/new-message",{
+                method:"POST",
+                headers:{"Content-Type":"application/json","x-internal-secret":secret},
+                body:JSON.stringify({})
+              }).then(async (r)=>{
+                const klass=r.status===400?"validation-ok":r.status===401?"unauthorized":r.status>=500?"server-error":"other";
+                console.log(`internal_probe_status=${r.status}`);
+                console.log(`internal_probe_class=${klass}`);
+              }).catch((error)=>{
+                console.log(`internal_probe_network_error=${error?.code||error?.name||"unknown"}`);
+                process.exitCode=2;
+              });
+            ' || true
+
+            echo "--- api-gateway -> notification token-registration probe ---"
+            docker compose exec -T api-gateway node -e '
+              const base=(process.env.NOTIFICATION_SERVICE_URL||"http://notification-service:3015").replace(/\/$/,"");
+              const secret=process.env.NOTIFICATION_GATEWAY_SECRET||"";
+              fetch(base+"/notifications/push-tokens",{
+                method:"POST",
+                headers:{
+                  "Content-Type":"application/json",
+                  "x-user-id":"11111111-1111-4111-8111-111111111111",
+                  "x-notification-gateway-secret":secret
+                },
+                body:JSON.stringify({})
+              }).then(async (r)=>{
+                const klass=r.status===400?"validation-ok":r.status===401?"unauthorized":r.status>=500?"server-error":"other";
+                console.log(`gateway_probe_status=${r.status}`);
+                console.log(`gateway_probe_class=${klass}`);
+              }).catch((error)=>{
+                console.log(`gateway_probe_network_error=${error?.code||error?.name||"unknown"}`);
+                process.exitCode=2;
+              });
+            ' || true
+
+            echo "--- notification database aggregates ---"
+            docker compose exec -T notification-service node -e '
+              const {PrismaClient}=require("@prisma/notification-client");
+              const prisma=new PrismaClient();
+              (async()=>{
+                const since=new Date(Date.now()-2*60*60*1000);
+                const [activeFcm,totalFcm,recentJobs,statuses]=await Promise.all([
+                  prisma.pushToken.count({where:{provider:"fcm",isActive:true}}),
+                  prisma.pushToken.count({where:{provider:"fcm"}}),
+                  prisma.notificationJob.count({where:{type:"NEW_MESSAGE",createdAt:{gte:since}}}),
+                  prisma.notificationJob.groupBy({by:["status"],where:{type:"NEW_MESSAGE",createdAt:{gte:since}},_count:{_all:true}})
+                ]);
+                console.log(`active_fcm_tokens=${activeFcm}`);
+                console.log(`total_fcm_tokens=${totalFcm}`);
+                console.log(`new_message_jobs_last_2h=${recentJobs}`);
+                console.log(`new_message_job_statuses=${JSON.stringify(statuses.map((x)=>({status:x.status,count:x._count._all})))}`);
+              })().catch((error)=>{
+                console.log(`notification_db_probe_error=${error?.name||"unknown"}`);
+                process.exitCode=2;
+              }).finally(()=>prisma.$disconnect());
+            ' || true
+
+            echo "--- recent notification error category counts ---"
+            logs="$(docker compose logs --since=2h --tail=1500 conversation-service notification-service api-gateway 2>&1 || true)"
+            printf 'missing_internal_secret=%s\n' "$(printf '%s' "$logs" | grep -c 'Missing NOTIFICATION_INTERNAL_SECRET' || true)"
+            printf 'invalid_internal_secret=%s\n' "$(printf '%s' "$logs" | grep -c 'Invalid x-internal-secret' || true)"
+            printf 'adapter_request_failures=%s\n' "$(printf '%s' "$logs" | grep -c 'Failed to call notification-service for message' || true)"
+            printf 'adapter_rejections=%s\n' "$(printf '%s' "$logs" | grep -c 'notification-service rejected message' || true)"
+            printf 'no_active_fcm=%s\n' "$(printf '%s' "$logs" | grep -c 'No active FCM tokens for recipient user' || true)"
+            printf 'firebase_unregistered=%s\n' "$(printf '%s' "$logs" | grep -c 'registration-token-not-registered' || true)"
+            printf 'firebase_invalid_token=%s\n' "$(printf '%s' "$logs" | grep -c 'invalid-registration-token' || true)"
