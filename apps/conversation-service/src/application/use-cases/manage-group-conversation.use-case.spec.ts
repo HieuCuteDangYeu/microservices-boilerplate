@@ -98,7 +98,8 @@ describe('ManageGroupConversationUseCase', () => {
       NEW_MEMBER_ID,
       expect.any(Date),
     );
-    expect(result.participantIds).toContain(NEW_MEMBER_ID);
+    expect(result.added).toBe(true);
+    expect(result.conversation.participantIds).toContain(NEW_MEMBER_ID);
   });
 
   it('treats adding an existing member as an idempotent no-op', async () => {
@@ -111,7 +112,7 @@ describe('ManageGroupConversationUseCase', () => {
       userId: MEMBER_ID,
     });
 
-    expect(result).toBe(before);
+    expect(result).toEqual({ conversation: before, added: false });
     expect(userService.validateUsers).not.toHaveBeenCalled();
     expect(mutationRepository.addParticipant).not.toHaveBeenCalled();
   });
