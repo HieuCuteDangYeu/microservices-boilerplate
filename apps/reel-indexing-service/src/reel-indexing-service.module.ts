@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { IndexQualityAgentUseCase } from './application/agents/index-quality-agent.use-case';
+import { MetadataCuratorAgentUseCase } from './application/agents/metadata-curator-agent.use-case';
+import { SectioningAgentUseCase } from './application/agents/sectioning-agent.use-case';
+import { VisualUnderstandingAgentUseCase } from './application/agents/visual-understanding-agent.use-case';
 import { AnalyzeVisualFrameManifestUseCase } from './application/use-cases/analyze-visual-frame-manifest.use-case';
 import { BuildAdaptiveTranscriptSectionsUseCase } from './application/use-cases/build-adaptive-transcript-sections.use-case';
 import { BuildHierarchicalIndexUseCase } from './application/use-cases/build-hierarchical-index.use-case';
@@ -67,19 +71,37 @@ const rabbitClient = (name: string, queue: string) => ({
   providers: [
     PrismaService,
     TranscribeAudioManifestUseCase,
-    AnalyzeVisualFrameManifestUseCase,
     MergeTranscriptSegmentsUseCase,
     BuildTranscriptSectionsUseCase,
-    BuildAdaptiveTranscriptSectionsUseCase,
     SelectHealthyTranscriptSectionsUseCase,
     BuildShortEvidenceChunksUseCase,
     BuildLongEvidenceChunksUseCase,
-    ExtractHierarchicalMetadataUseCase,
     BuildHierarchicalIndexUseCase,
     ValidateEmbeddingQualityUseCase,
     ValidateEvidenceIndexCandidateUseCase,
-    ValidatePersistedSemanticCandidateUseCase,
     CommitSemanticCandidateUseCase,
+
+    VisualUnderstandingAgentUseCase,
+    MetadataCuratorAgentUseCase,
+    SectioningAgentUseCase,
+    IndexQualityAgentUseCase,
+    {
+      provide: AnalyzeVisualFrameManifestUseCase,
+      useExisting: VisualUnderstandingAgentUseCase,
+    },
+    {
+      provide: ExtractHierarchicalMetadataUseCase,
+      useExisting: MetadataCuratorAgentUseCase,
+    },
+    {
+      provide: BuildAdaptiveTranscriptSectionsUseCase,
+      useExisting: SectioningAgentUseCase,
+    },
+    {
+      provide: ValidatePersistedSemanticCandidateUseCase,
+      useExisting: IndexQualityAgentUseCase,
+    },
+
     PrismaLangGraphCheckpointSaver,
     ReelIndexLangGraphWorkflow,
     ProcessReelIndexJobUseCase,

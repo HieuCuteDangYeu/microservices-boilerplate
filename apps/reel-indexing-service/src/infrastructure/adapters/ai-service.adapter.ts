@@ -6,6 +6,10 @@ import type {
   GenerateEmbeddingBatchRequest,
   GenerateEmbeddingBatchResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
+import type {
+  IndexQualityReviewRequest,
+  IndexQualityReviewResult,
+} from '@common/ai/interfaces/index-quality-review.interface';
 import type { ExtractedReelMetadata } from '@common/ai/interfaces/reel-metadata-extraction.interface';
 import type { TranscriptionResult } from '@common/ai/interfaces/transcription-result.interface';
 import type {
@@ -70,6 +74,16 @@ export class AiServiceAdapter implements IIndexingAiService {
         .pipe(timeout(120_000)),
     );
     return response.metadata;
+  }
+
+  async reviewIndexQuality(
+    input: IndexQualityReviewRequest,
+  ): Promise<IndexQualityReviewResult> {
+    return await firstValueFrom(
+      this.client
+        .send<IndexQualityReviewResult>('ai.review_index_quality', input)
+        .pipe(timeout(120_000)),
+    );
   }
 
   async generateEmbeddingBatch(

@@ -7,6 +7,10 @@ import type {
   GenerateEmbeddingBatchResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
 import type {
+  IndexQualityReviewRequest,
+  IndexQualityReviewResult,
+} from '@common/ai/interfaces/index-quality-review.interface';
+import type {
   ExtractedReelMetadata,
   ReelMetadataExtractionInput,
 } from '@common/ai/interfaces/reel-metadata-extraction.interface';
@@ -32,6 +36,10 @@ export interface IIndexingAiService {
   extractReelMetadata(
     input: ReelMetadataExtractionInput,
   ): Promise<ExtractedReelMetadata>;
+
+  reviewIndexQuality(
+    input: IndexQualityReviewRequest,
+  ): Promise<IndexQualityReviewResult>;
 
   generateEmbeddingBatch(
     input: GenerateEmbeddingBatchRequest,
