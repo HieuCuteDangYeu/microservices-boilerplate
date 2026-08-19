@@ -27,6 +27,7 @@ describe('ManageGroupConversationUseCase', () => {
     updateMetadata: jest.Mock;
     addParticipant: jest.Mock;
     transferOwnership: jest.Mock;
+    removeParticipantAsOwner: jest.Mock;
     removeParticipant: jest.Mock;
   };
   let userService: { validateUsers: jest.Mock };
@@ -38,6 +39,7 @@ describe('ManageGroupConversationUseCase', () => {
       updateMetadata: jest.fn().mockResolvedValue(undefined),
       addParticipant: jest.fn().mockResolvedValue(undefined),
       transferOwnership: jest.fn().mockResolvedValue(true),
+      removeParticipantAsOwner: jest.fn().mockResolvedValue(true),
       removeParticipant: jest.fn().mockResolvedValue(undefined),
     };
     userService = { validateUsers: jest.fn().mockResolvedValue(true) };
@@ -194,7 +196,7 @@ describe('ManageGroupConversationUseCase', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(mutationRepository.removeParticipant).not.toHaveBeenCalled();
+    expect(mutationRepository.removeParticipantAsOwner).not.toHaveBeenCalled();
   });
 
   it('keeps the minimum two-member invariant', async () => {
@@ -209,6 +211,42 @@ describe('ManageGroupConversationUseCase', () => {
         userId: MEMBER_ID,
       }),
     ).rejects.toThrow('A group must keep at least 2 participants');
+  });
+
+  it('allows the current owner to remove a regular member', async () => {
+    const before = group();
+    const after = group([OWNER_ID, THIRD_ID]);
+    chatRepository.findConversation
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+
+    const result = await useCase.removeMember({
+      conversationId: before.id,
+      actorUserId: OWNER_ID,
+      userId: MEMBER_ID,
+    });
+
+    expect(mutationRepository.removeParticipantAsOwner).toHaveBeenCalledWith(
+      before.id,
+      OWNER_ID,
+      MEMBER_ID,
+    );
+    expect(result.participantIds).not.toContain(MEMBER_ID);
+  });
+
+  it('rejects a stale owner removal if ownership changes concurrently', async () => {
+    chatRepository.findConversation.mockResolvedValue(group());
+    mutationRepository.removeParticipantAsOwner.mockResolvedValue(false);
+
+    await expect(
+      useCase.removeMember({
+        conversationId: 'group-id',
+        actorUserId: OWNER_ID,
+        userId: MEMBER_ID,
+      }),
+    ).rejects.toThrow(
+      'Group membership or ownership changed; refresh and try again',
+    );
   });
 
   it('allows a non-owner member to leave a group with three or more members', async () => {

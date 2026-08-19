@@ -21,6 +21,12 @@ export abstract class IConversationMutationRepository {
     newOwnerUserId: string,
   ): Promise<boolean>;
 
+  abstract removeParticipantAsOwner(
+    conversationId: string,
+    currentOwnerUserId: string,
+    userId: string,
+  ): Promise<boolean>;
+
   abstract removeParticipant(
     conversationId: string,
     userId: string,

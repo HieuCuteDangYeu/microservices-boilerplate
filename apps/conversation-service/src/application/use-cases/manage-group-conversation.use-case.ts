@@ -158,10 +158,17 @@ export class ManageGroupConversationUseCase {
 
     this.assertGroupWillKeepMinimumMembers(conversation);
 
-    await this.mutationRepository.removeParticipant(
+    const removed = await this.mutationRepository.removeParticipantAsOwner(
       input.conversationId,
+      input.actorUserId,
       userId,
     );
+
+    if (!removed) {
+      throw new ConflictException(
+        'Group membership or ownership changed; refresh and try again',
+      );
+    }
 
     return await this.getUpdatedConversation(input.conversationId);
   }

@@ -152,6 +152,57 @@ export class PrismaConversationChatRepository
     return result.count === 1;
   }
 
+  async removeParticipantAsOwner(
+    conversationId: string,
+    currentOwnerUserId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const conversation = await this.conversationPrisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        creatorId: true,
+        participantIds: true,
+        memberJoinedAt: true,
+        createdAt: true,
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (
+      conversation.creatorId !== currentOwnerUserId ||
+      !conversation.participantIds.includes(userId)
+    ) {
+      return false;
+    }
+
+    const participantIds = conversation.participantIds.filter(
+      (participantId) => participantId !== userId,
+    );
+    const memberJoinedAt = normalizeMemberJoinedAt(
+      conversation.memberJoinedAt,
+      conversation.participantIds,
+      conversation.createdAt,
+    );
+    delete memberJoinedAt[userId];
+
+    const result = await this.conversationPrisma.conversation.updateMany({
+      where: {
+        id: conversationId,
+        creatorId: currentOwnerUserId,
+        participantIds: { has: userId },
+      },
+      data: {
+        participantIds: { set: participantIds },
+        memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
+      },
+    });
+
+    return result.count === 1;
+  }
+
   async removeParticipant(
     conversationId: string,
     userId: string,
