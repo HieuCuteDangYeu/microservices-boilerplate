@@ -16,6 +16,7 @@ import Redis from 'ioredis';
 import { Server, Socket } from 'socket.io';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
+import { Conversation } from '../../domain/entities/conversation.entity';
 import { type MessageMedia } from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { NotificationServiceAdapter } from '../adapters/notification-service.adapter';
@@ -50,7 +51,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (userId) {
       const wasOnlineBefore = await this.isUserOnline(userId);
 
-      await client.join(userId);
+      await client.join(this.userRoom(userId));
       await this.clearLastSeenAt(userId);
 
       if (!wasOnlineBefore) {
@@ -81,6 +82,68 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`Client disconnected: ${client.id}`);
   }
 
+  emitToConversation(
+    conversationId: string,
+    eventName: string,
+    payload: unknown,
+  ): void {
+    this.server
+      .to(this.conversationRoom(conversationId))
+      .emit(eventName, payload);
+  }
+
+  emitToUsers(userIds: string[], eventName: string, payload: unknown): void {
+    const rooms = Array.from(new Set(userIds.filter(Boolean))).map((userId) =>
+      this.userRoom(userId),
+    );
+
+    if (rooms.length === 0) {
+      return;
+    }
+
+    this.server.to(rooms).emit(eventName, payload);
+  }
+
+  emitConversationCreated(
+    conversation: Conversation,
+    userIds: string[] = conversation.participantIds,
+  ): void {
+    this.emitToUsers(
+      userIds,
+      'conversation_created',
+      ChatMapper.conversationToDto(conversation),
+    );
+  }
+
+  emitConversationUpdated(
+    conversation: Conversation,
+    userIds: string[] = conversation.participantIds,
+  ): void {
+    this.emitToUsers(
+      userIds,
+      'conversation_updated',
+      ChatMapper.conversationToDto(conversation),
+    );
+  }
+
+  evictConversationMember(input: {
+    conversationId: string;
+    userId: string;
+    reason: 'removed' | 'left';
+  }): void {
+    this.emitToUsers([input.userId], 'conversation_removed', {
+      conversationId: input.conversationId,
+      reason: input.reason,
+    });
+
+    // The user-specific room targets all devices for the account. With the
+    // Redis adapter, socketsLeave propagates this eviction across Socket.IO
+    // nodes without disconnecting the user's underlying socket connection.
+    this.server
+      .in(this.userRoom(input.userId))
+      .socketsLeave(this.conversationRoom(input.conversationId));
+  }
+
   emitMediaProcessingCompleted(
     conversationId: string,
     payload: {
@@ -89,7 +152,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       media: MessageMedia;
     },
   ) {
-    this.server.to(conversationId).emit('media_processing_completed', {
+    this.emitToConversation(conversationId, 'media_processing_completed', {
       conversationId,
       ...payload,
     });
@@ -103,7 +166,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       media: MessageMedia;
     },
   ) {
-    this.server.to(conversationId).emit('media_processing_failed', {
+    this.emitToConversation(conversationId, 'media_processing_failed', {
       conversationId,
       ...payload,
     });
@@ -155,7 +218,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      client.to(payload.conversationId).emit('new_message', savedMessageDto);
+      client
+        .to(this.conversationRoom(payload.conversationId))
+        .emit('new_message', savedMessageDto);
 
       // Update conversation sidebar for all participants (lastMessage, ordering)
       const conversation = await this.chatRepository.findConversation(
@@ -163,12 +228,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       if (conversation) {
         conversation.lastMessageAt = savedMessage.createdAt;
-        this.server
-          .to(payload.conversationId)
-          .emit(
-            'conversation_updated',
-            ChatMapper.conversationToDto(conversation),
-          );
+        this.emitToConversation(
+          payload.conversationId,
+          'conversation_updated',
+          ChatMapper.conversationToDto(conversation),
+        );
       }
 
       void this.notificationService.notifyNewMessage(
@@ -180,9 +244,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
         async (botResult) => {
           if (botResult.botReply) {
-            this.server
-              .to(savedMessage.conversationId)
-              .emit('new_message', ChatMapper.toDto(botResult.botReply));
+            this.emitToConversation(
+              savedMessage.conversationId,
+              'new_message',
+              ChatMapper.toDto(botResult.botReply),
+            );
 
             // Update conversation sidebar with bot reply as lastMessage
             const botConversation = await this.chatRepository.findConversation(
@@ -190,12 +256,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             );
             if (botConversation) {
               botConversation.lastMessageAt = botResult.botReply.createdAt;
-              this.server
-                .to(savedMessage.conversationId)
-                .emit(
-                  'conversation_updated',
-                  ChatMapper.conversationToDto(botConversation),
-                );
+              this.emitToConversation(
+                savedMessage.conversationId,
+                'conversation_updated',
+                ChatMapper.conversationToDto(botConversation),
+              );
             }
           }
         },
@@ -233,7 +298,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    void client.join(conversationId);
+    void client.join(this.conversationRoom(conversationId));
     console.log(`Client ${client.id} joined room ${conversationId}`);
   }
 
@@ -286,7 +351,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    client.to(conversationId).emit('user_typing', {
+    client.to(this.conversationRoom(conversationId)).emit('user_typing', {
       conversationId,
       userId,
       isTyping: true,
@@ -313,7 +378,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    client.to(conversationId).emit('user_typing', {
+    client.to(this.conversationRoom(conversationId)).emit('user_typing', {
       conversationId,
       userId,
       isTyping: false,
@@ -360,6 +425,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // --- PRIVATE HELPERS ---
+  // Keep legacy raw room keys for this PR so rolling deployments remain
+  // compatible with older conversation-service instances. All addressing now
+  // goes through these helpers so a future dual-room migration has one seam.
+  private userRoom(userId: string): string {
+    return userId;
+  }
+
+  private conversationRoom(conversationId: string): string {
+    return conversationId;
+  }
+
   private getLastSeenKey(userId: string): string {
     return `${ChatGateway.LAST_SEEN_KEY_PREFIX}${userId}`;
   }
@@ -452,9 +528,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const eventName = lastSeenAt ? 'user:offline' : 'user:online';
 
-    audienceUserIds.forEach((audienceUserId) => {
-      this.server.to(audienceUserId).emit(eventName, payload);
-    });
+    this.emitToUsers(audienceUserIds, eventName, payload);
   }
 
   private normalizePresenceTargets(
@@ -494,7 +568,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    const sockets = await this.server.in(userId).fetchSockets();
+    const sockets = await this.server.in(this.userRoom(userId)).fetchSockets();
     return sockets.length > 0;
   }
 
@@ -506,7 +580,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): void {
     const toUserId = String(data['toUserId']);
     if (toUserId && senderId) {
-      client.to(toUserId).emit(event, { ...data, fromUserId: senderId });
+      client
+        .to(this.userRoom(toUserId))
+        .emit(event, { ...data, fromUserId: senderId });
     }
   }
 
@@ -606,7 +682,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
 
     if (result.seenUpTo) {
-      client.to(conversationId).emit('messages_seen', {
+      client.to(this.conversationRoom(conversationId)).emit('messages_seen', {
         conversationId,
         readByUserId: userId,
         frontierCreatedAt: result.seenUpTo.createdAt.toISOString(),

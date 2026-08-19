@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 
 import { Conversation } from '../../domain/entities/conversation.entity';
+
+export type AddGroupMemberResult = {
+  conversation: Conversation;
+  added: boolean;
+};
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { IConversationMutationRepository } from '../../domain/interfaces/conversation-mutation.repository.interface';
 import type { IUserService } from '../../domain/interfaces/user-service.interface';
@@ -40,7 +45,9 @@ export class ManageGroupConversationUseCase {
     this.assertOwner(conversation, input.actorUserId);
 
     if (input.name === undefined && input.picture === undefined) {
-      throw new BadRequestException('At least one group field must be provided');
+      throw new BadRequestException(
+        'At least one group field must be provided',
+      );
     }
 
     const name = normalizeGroupName(input.name);
@@ -58,7 +65,7 @@ export class ManageGroupConversationUseCase {
     conversationId: string;
     actorUserId: string;
     userId: string;
-  }): Promise<Conversation> {
+  }): Promise<AddGroupMemberResult> {
     const conversation = await this.getGroupConversationForMember(
       input.conversationId,
       input.actorUserId,
@@ -69,7 +76,7 @@ export class ManageGroupConversationUseCase {
     assertValidConversationUserId(userId);
 
     if (conversation.participantIds.includes(userId)) {
-      return conversation;
+      return { conversation, added: false };
     }
 
     const isValidUser = await this.userService.validateUsers([userId]);
@@ -83,7 +90,10 @@ export class ManageGroupConversationUseCase {
       new Date(),
     );
 
-    return await this.getUpdatedConversation(input.conversationId);
+    return {
+      conversation: await this.getUpdatedConversation(input.conversationId),
+      added: true,
+    };
   }
 
   async removeMember(input: {
@@ -147,7 +157,8 @@ export class ManageGroupConversationUseCase {
     conversationId: string,
     userId: string,
   ): Promise<Conversation> {
-    const conversation = await this.chatRepository.findConversation(conversationId);
+    const conversation =
+      await this.chatRepository.findConversation(conversationId);
 
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
@@ -170,20 +181,25 @@ export class ManageGroupConversationUseCase {
 
   private assertOwner(conversation: Conversation, userId: string): void {
     if (conversation.creatorId !== userId) {
-      throw new ForbiddenException('Only the group owner can manage this group');
+      throw new ForbiddenException(
+        'Only the group owner can manage this group',
+      );
     }
   }
 
   private assertGroupWillKeepMinimumMembers(conversation: Conversation): void {
     if (conversation.participantIds.length <= 2) {
-      throw new BadRequestException('A group must keep at least 2 participants');
+      throw new BadRequestException(
+        'A group must keep at least 2 participants',
+      );
     }
   }
 
   private async getUpdatedConversation(
     conversationId: string,
   ): Promise<Conversation> {
-    const conversation = await this.chatRepository.findConversation(conversationId);
+    const conversation =
+      await this.chatRepository.findConversation(conversationId);
 
     if (!conversation) {
       throw new NotFoundException('Conversation not found after update');

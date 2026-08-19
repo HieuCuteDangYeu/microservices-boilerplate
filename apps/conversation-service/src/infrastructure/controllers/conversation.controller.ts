@@ -94,12 +94,7 @@ export class ConversationMicroserviceController {
           );
         }
 
-        const conversationDto = ChatMapper.conversationToDto(eventConversation);
-        conversation.participantIds.forEach((participantId) => {
-          this.chatGateway.server
-            .to(participantId)
-            .emit('conversation_created', conversationDto);
-        });
+        this.chatGateway.emitConversationCreated(eventConversation);
       }
 
       return { id: conversation.id };
@@ -240,7 +235,6 @@ export class ConversationMicroserviceController {
     }
   }
 
-
   @MessagePattern('update_group_conversation')
   async handleUpdateGroupConversation(
     @Payload()
@@ -254,6 +248,7 @@ export class ConversationMicroserviceController {
     try {
       const conversation =
         await this.manageGroupConversationUseCase.updateMetadata(data);
+      this.chatGateway.emitConversationUpdated(conversation);
       return ChatMapper.conversationToDto(conversation);
     } catch (err: unknown) {
       const error = err as Error;
@@ -265,11 +260,27 @@ export class ConversationMicroserviceController {
   @MessagePattern('add_conversation_member')
   async handleAddConversationMember(
     @Payload()
-    data: { conversationId: string; actorUserId: string; userId: string },
+    data: {
+      conversationId: string;
+      actorUserId: string;
+      userId: string;
+    },
   ) {
     try {
-      const conversation =
+      const memberUserId = data.userId.trim();
+      const { conversation, added } =
         await this.manageGroupConversationUseCase.addMember(data);
+
+      if (added) {
+        this.chatGateway.emitConversationCreated(conversation, [memberUserId]);
+        this.chatGateway.emitConversationUpdated(
+          conversation,
+          conversation.participantIds.filter(
+            (participantId) => participantId !== memberUserId,
+          ),
+        );
+      }
+
       return ChatMapper.conversationToDto(conversation);
     } catch (err: unknown) {
       const error = err as Error;
@@ -281,15 +292,30 @@ export class ConversationMicroserviceController {
   @MessagePattern('remove_conversation_member')
   async handleRemoveConversationMember(
     @Payload()
-    data: { conversationId: string; actorUserId: string; userId: string },
+    data: {
+      conversationId: string;
+      actorUserId: string;
+      userId: string;
+    },
   ) {
     try {
+      const removedUserId = data.userId.trim();
       const conversation =
         await this.manageGroupConversationUseCase.removeMember(data);
+
+      this.chatGateway.evictConversationMember({
+        conversationId: data.conversationId,
+        userId: removedUserId,
+        reason: 'removed',
+      });
+      this.chatGateway.emitConversationUpdated(conversation);
+
       return ChatMapper.conversationToDto(conversation);
     } catch (err: unknown) {
       const error = err as Error;
-      this.logger.error(`❌ [RemoveConversationMember] Error: ${error.message}`);
+      this.logger.error(
+        `❌ [RemoveConversationMember] Error: ${error.message}`,
+      );
       throw new RpcException(error.message);
     }
   }
@@ -301,6 +327,14 @@ export class ConversationMicroserviceController {
     try {
       const conversation =
         await this.manageGroupConversationUseCase.leave(data);
+
+      this.chatGateway.evictConversationMember({
+        conversationId: data.conversationId,
+        userId: data.actorUserId,
+        reason: 'left',
+      });
+      this.chatGateway.emitConversationUpdated(conversation);
+
       return ChatMapper.conversationToDto(conversation);
     } catch (err: unknown) {
       const error = err as Error;
@@ -327,9 +361,11 @@ export class ConversationMicroserviceController {
         };
       }
 
-      this.chatGateway.server
-        .to(dto.conversationId)
-        .emit('new_message', ChatMapper.toDto(savedMessage));
+      this.chatGateway.emitToConversation(
+        dto.conversationId,
+        'new_message',
+        ChatMapper.toDto(savedMessage),
+      );
 
       const conversation = await this.chatRepository.findConversation(
         dto.conversationId,
@@ -338,12 +374,11 @@ export class ConversationMicroserviceController {
         conversation.lastMessage =
           savedMessage.content ?? savedMessage.type ?? null;
         conversation.lastMessageAt = savedMessage.createdAt;
-        this.chatGateway.server
-          .to(dto.conversationId)
-          .emit(
-            'conversation_updated',
-            ChatMapper.conversationToDto(conversation),
-          );
+        this.chatGateway.emitToConversation(
+          dto.conversationId,
+          'conversation_updated',
+          ChatMapper.conversationToDto(conversation),
+        );
       }
 
       void this.notificationService.notifyNewMessage(
@@ -355,9 +390,11 @@ export class ConversationMicroserviceController {
       void this.triggerBotReplyUseCase.execute(savedMessage, senderId).then(
         async (result) => {
           if (result.botReply) {
-            this.chatGateway.server
-              .to(savedMessage.conversationId)
-              .emit('new_message', ChatMapper.toDto(result.botReply));
+            this.chatGateway.emitToConversation(
+              savedMessage.conversationId,
+              'new_message',
+              ChatMapper.toDto(result.botReply),
+            );
 
             // Update conversation sidebar with bot reply as lastMessage
             const conversation = await this.chatRepository.findConversation(
@@ -367,12 +404,11 @@ export class ConversationMicroserviceController {
               conversation.lastMessage =
                 result.botReply.content ?? result.botReply.type ?? null;
               conversation.lastMessageAt = result.botReply.createdAt;
-              this.chatGateway.server
-                .to(savedMessage.conversationId)
-                .emit(
-                  'conversation_updated',
-                  ChatMapper.conversationToDto(conversation),
-                );
+              this.chatGateway.emitToConversation(
+                savedMessage.conversationId,
+                'conversation_updated',
+                ChatMapper.conversationToDto(conversation),
+              );
             }
           }
         },
@@ -442,9 +478,11 @@ export class ConversationMicroserviceController {
         data.emoji,
       );
 
-      this.chatGateway.server
-        .to(message.conversationId)
-        .emit('message_reaction_updated', message);
+      this.chatGateway.emitToConversation(
+        message.conversationId,
+        'message_reaction_updated',
+        message,
+      );
 
       return message;
     } catch (err: unknown) {
@@ -464,9 +502,11 @@ export class ConversationMicroserviceController {
         data.userId,
       );
 
-      this.chatGateway.server
-        .to(message.conversationId)
-        .emit('message_reaction_updated', message);
+      this.chatGateway.emitToConversation(
+        message.conversationId,
+        'message_reaction_updated',
+        message,
+      );
 
       return message;
     } catch (err: unknown) {
@@ -486,21 +526,25 @@ export class ConversationMicroserviceController {
         data.userId,
       );
 
-      this.chatGateway.server
-        .to(result.message.conversationId)
-        .emit('message_recalled', {
+      this.chatGateway.emitToConversation(
+        result.message.conversationId,
+        'message_recalled',
+        {
           messageId: result.message.id,
           conversationId: result.message.conversationId,
           recalledAt: result.message.recalledAt,
-        });
+        },
+      );
 
       if (result.updatedReplyMessageIds.length > 0) {
-        this.chatGateway.server
-          .to(result.message.conversationId)
-          .emit('reply_previews_updated', {
+        this.chatGateway.emitToConversation(
+          result.message.conversationId,
+          'reply_previews_updated',
+          {
             updatedMessageIds: result.updatedReplyMessageIds,
             previewContent: result.previewContent,
-          });
+          },
+        );
       }
 
       const conversation = await this.chatRepository.findConversation(
@@ -508,12 +552,7 @@ export class ConversationMicroserviceController {
       );
 
       if (conversation?.participantIds?.length) {
-        const conversationDto = ChatMapper.conversationToDto(conversation);
-        conversation.participantIds.forEach((participantId) => {
-          this.chatGateway.server
-            .to(participantId)
-            .emit('conversation_updated', conversationDto);
-        });
+        this.chatGateway.emitConversationUpdated(conversation);
       }
 
       return result.message;
@@ -604,7 +643,7 @@ export class ConversationMicroserviceController {
       `[AI_STREAM_TOKEN] conversation=${data.conversationId} tokenLength=${data.token.length}`,
     );
 
-    this.chatGateway.server.to(data.conversationId).emit('bot_token', {
+    this.chatGateway.emitToConversation(data.conversationId, 'bot_token', {
       conversationId: data.conversationId,
       token: data.token,
     });
