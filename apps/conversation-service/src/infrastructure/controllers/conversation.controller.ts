@@ -379,6 +379,11 @@ export class ConversationMicroserviceController {
           'conversation_updated',
           ChatMapper.conversationToDto(conversation),
         );
+        this.chatGateway.emitConversationMessageActivity(
+          conversation,
+          savedMessage,
+          senderId,
+        );
       }
 
       void this.notificationService.notifyNewMessage(
@@ -408,6 +413,11 @@ export class ConversationMicroserviceController {
                 savedMessage.conversationId,
                 'conversation_updated',
                 ChatMapper.conversationToDto(conversation),
+              );
+              this.chatGateway.emitConversationMessageActivity(
+                conversation,
+                result.botReply,
+                result.botReply.senderId,
               );
             }
           }
