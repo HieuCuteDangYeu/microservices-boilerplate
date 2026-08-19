@@ -16,10 +16,12 @@ import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-c
 import { MemoryWriterAgentUseCase } from '@ai/application/use-cases/memory-writer-agent.use-case';
 import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
 import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
+import { ReviewIndexQualityUseCase } from '@ai/application/use-cases/review-index-quality.use-case';
 import { RewriteRetrievalQueryUseCase } from '@ai/application/use-cases/rewrite-retrieval-query.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
+import { ToolCallingRetrievalAgentUseCase } from '@ai/application/use-cases/tool-calling-retrieval-agent.use-case';
 import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/update-conversation-memory.use-case';
@@ -32,6 +34,7 @@ import { CloudflareCrossEncoderRerankerAdapter } from '@ai/infrastructure/adapte
 import { CloudflareLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-llm.adapter';
 import { CloudflareMemoryExtractorAdapter } from '@ai/infrastructure/adapters/cloudflare-memory-extractor.adapter';
 import { CloudflareStructuredLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-structured-llm.adapter';
+import { CloudflareToolCallingLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-tool-calling-llm.adapter';
 import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { CloudflareVisionAdapter } from '@ai/infrastructure/adapters/cloudflare-vision.adapter';
 import { CloudflareWorkersAiTextClient } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
@@ -43,6 +46,7 @@ import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/lan
 import { ReelSemanticIndexAdapter } from '@ai/infrastructure/adapters/reel-semantic-index.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
+import { IndexQualityAgentController } from '@ai/infrastructure/controllers/index-quality-agent.controller';
 import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
 import { PrismaConversationMemoryRepository } from '@ai/infrastructure/repositories/prisma-conversation-memory.repository';
 import { PrismaRagHierarchyShadowObservationRepository } from '@ai/infrastructure/repositories/prisma-rag-hierarchy-shadow-observation.repository';
@@ -118,7 +122,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
       },
     ]),
   ],
-  controllers: [AiController],
+  controllers: [AiController, IndexQualityAgentController],
   providers: [
     PrismaService,
     SimpleRerankerAdapter,
@@ -140,7 +144,87 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     BackfillUserMemoryEmbeddingsUseCase,
 
     QueryRouterAgentUseCase,
-    RetrievalAgentUseCase,
+    {
+      provide: 'IRetrievalAgentPolicy',
+      useFactory: (config: ConfigService) => {
+        const configured = config
+          .get<string>('RAG_TOOL_CALLING_ENABLED')
+          ?.trim()
+          .toLowerCase();
+        const enabled =
+          configured === 'true'
+            ? true
+            : configured === 'false'
+              ? false
+              : config.get<string>('NODE_ENV')?.trim().toLowerCase() !==
+                'production';
+        const boundedInt = (
+          key: string,
+          fallback: number,
+          minimum: number,
+          maximum: number,
+        ) => {
+          const value = Number(config.get<string>(key) ?? fallback);
+          return Number.isFinite(value)
+            ? Math.min(maximum, Math.max(minimum, Math.round(value)))
+            : fallback;
+        };
+
+        return {
+          enabled,
+          model: config.get<string>('CLOUDFLARE_TOOL_MODEL'),
+          maxSteps: boundedInt('RAG_TOOL_MAX_STEPS', 3, 1, 5),
+          maxParallelCalls: boundedInt(
+            'RAG_TOOL_MAX_PARALLEL_CALLS',
+            2,
+            1,
+            4,
+          ),
+          callTimeoutMs: boundedInt(
+            'RAG_TOOL_CALL_TIMEOUT_MS',
+            8_000,
+            1_000,
+            30_000,
+          ),
+        };
+      },
+      inject: [ConfigService],
+    },
+    {
+      provide: 'IRetrievalEngine',
+      useFactory: (
+        structuredLlmService,
+        embeddingService,
+        contentService,
+        semanticIndexService,
+        rerankerService,
+        hierarchyObservationRepository,
+        config: ConfigService,
+      ) =>
+        new RetrievalAgentUseCase(
+          structuredLlmService,
+          embeddingService,
+          contentService,
+          semanticIndexService,
+          rerankerService,
+          hierarchyObservationRepository,
+          config,
+        ),
+      inject: [
+        'IStructuredLlmService',
+        'IEmbeddingService',
+        'IContentService',
+        'IReelSemanticIndexService',
+        'IRerankerService',
+        'IRagHierarchyShadowObservationRepository',
+        ConfigService,
+      ],
+    },
+    ToolCallingRetrievalAgentUseCase,
+    {
+      provide: RetrievalAgentUseCase,
+      useExisting: ToolCallingRetrievalAgentUseCase,
+    },
     RewriteRetrievalQueryUseCase,
     MemoryAgentUseCase,
     GenerateDraftAnswerUseCase,
@@ -152,6 +236,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     SaveRagTraceUseCase,
     MemoryWriterAgentUseCase,
     ExtractReelMetadataUseCase,
+    ReviewIndexQualityUseCase,
 
     {
       provide: 'IEmbeddingService',
@@ -219,6 +304,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'IStructuredLlmService',
       useClass: CloudflareStructuredLlmAdapter,
+    },
+    {
+      provide: 'IToolCallingLlmService',
+      useClass: CloudflareToolCallingLlmAdapter,
     },
     {
       provide: 'ICitationAttributionService',
