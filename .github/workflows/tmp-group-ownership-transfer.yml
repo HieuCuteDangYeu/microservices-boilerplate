@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feat/group-ownership-transfer
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: write
