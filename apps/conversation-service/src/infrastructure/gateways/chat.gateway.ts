@@ -22,7 +22,10 @@ import { Server, Socket } from 'socket.io';
 import { SendMessageUseCase } from '../../application/use-cases/send-message.use-case';
 import { TriggerBotReplyUseCase } from '../../application/use-cases/trigger-bot-reply.use-case';
 import { Conversation } from '../../domain/entities/conversation.entity';
-import { type MessageMedia } from '../../domain/entities/message.entity';
+import {
+  type Message,
+  type MessageMedia,
+} from '../../domain/entities/message.entity';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { NotificationServiceAdapter } from '../adapters/notification-service.adapter';
 import { ChatMapper } from '../repositories/chat.mapper';
@@ -131,6 +134,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
   }
 
+  emitConversationMessageActivity(
+    conversation: Conversation,
+    message: Message,
+    actorUserId: string,
+  ): void {
+    const recipientUserIds = conversation.participantIds.filter(
+      (participantId) => participantId !== actorUserId,
+    );
+
+    this.emitToUsers(recipientUserIds, 'conversation_message_activity', {
+      conversation: ChatMapper.conversationToDto(conversation),
+      message: ChatMapper.toDto(message),
+    });
+  }
+
   evictConversationMember(input: {
     conversationId: string;
     userId: string;
@@ -232,11 +250,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         payload.conversationId,
       );
       if (conversation) {
+        conversation.lastMessage =
+          savedMessage.content ?? savedMessage.type ?? null;
         conversation.lastMessageAt = savedMessage.createdAt;
         this.emitToConversation(
           payload.conversationId,
           'conversation_updated',
           ChatMapper.conversationToDto(conversation),
+        );
+        this.emitConversationMessageActivity(
+          conversation,
+          savedMessage,
+          senderId,
         );
       }
 
@@ -260,11 +285,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               savedMessage.conversationId,
             );
             if (botConversation) {
+              botConversation.lastMessage =
+                botResult.botReply.content ?? botResult.botReply.type ?? null;
               botConversation.lastMessageAt = botResult.botReply.createdAt;
               this.emitToConversation(
                 savedMessage.conversationId,
                 'conversation_updated',
                 ChatMapper.conversationToDto(botConversation),
+              );
+              this.emitConversationMessageActivity(
+                botConversation,
+                botResult.botReply,
+                botResult.botReply.senderId,
               );
             }
           }

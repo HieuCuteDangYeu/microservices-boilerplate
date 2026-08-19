@@ -1,6 +1,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { Conversation } from '../../domain/entities/conversation.entity';
+import { Message } from '../../domain/entities/message.entity';
 import type { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { ChatGateway } from './chat.gateway';
 
@@ -151,6 +152,37 @@ describe('ChatGateway realtime membership helpers', () => {
       expect.objectContaining({
         id: CONVERSATION_ID,
         participantIds: [OWNER_ID, MEMBER_ID],
+      }),
+    );
+  });
+
+  it('fans message activity out through recipient account rooms only', () => {
+    const group = conversation();
+    const message = new Message({
+      id: 'message-id',
+      conversationId: CONVERSATION_ID,
+      senderId: OWNER_ID,
+      content: 'hello group',
+      signalType: 0,
+      type: 'text',
+      createdAt: new Date('2026-08-19T00:01:00.000Z'),
+    });
+
+    gateway.emitConversationMessageActivity(group, message, OWNER_ID);
+
+    expect(to).toHaveBeenCalledWith([MEMBER_ID]);
+    expect(emit).toHaveBeenCalledWith(
+      'conversation_message_activity',
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          id: CONVERSATION_ID,
+          participantIds: [OWNER_ID, MEMBER_ID],
+        }),
+        message: expect.objectContaining({
+          id: 'message-id',
+          conversationId: CONVERSATION_ID,
+          senderId: OWNER_ID,
+        }),
       }),
     );
   });
