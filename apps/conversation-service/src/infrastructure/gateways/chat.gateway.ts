@@ -1,6 +1,11 @@
 import { CreateMessageDto } from '@common/conversation/dtos/create-message.dto';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
-import { Inject, Logger } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import {
   ConnectedSocket,
@@ -295,6 +300,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(
         `Rejected join_conversation for socket ${client.id}: ${(error as Error).message}`,
       );
+
+      if (
+        error instanceof ForbiddenException ||
+        error instanceof NotFoundException
+      ) {
+        client.emit('conversation_removed', {
+          conversationId,
+          reason: 'removed',
+        });
+      }
       return;
     }
 
