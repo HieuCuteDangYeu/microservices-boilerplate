@@ -1,3 +1,4 @@
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { Conversation } from '../../domain/entities/conversation.entity';
 import type { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
@@ -87,6 +88,56 @@ describe('ChatGateway realtime membership helpers', () => {
       MEMBER_ID,
     );
     expect(client.join).toHaveBeenCalledWith(CONVERSATION_ID);
+  });
+
+  it.each([
+    ['forbidden membership', new ForbiddenException('not a participant')],
+    ['missing conversation', new NotFoundException('conversation not found')],
+  ])(
+    'turns a rejected cached-room rejoin into conversation_removed for %s',
+    async (_label, rejection) => {
+      chatRepository.assertConversationParticipant.mockRejectedValueOnce(
+        rejection,
+      );
+      const clientEmit = jest.fn();
+      const clientJoin = jest.fn().mockResolvedValue(undefined);
+      const client = {
+        id: 'socket-revoked',
+        data: { userId: MEMBER_ID },
+        emit: clientEmit,
+        join: clientJoin,
+      } as unknown as Socket;
+
+      await gateway.handleJoinConversation(CONVERSATION_ID, client);
+
+      expect(clientEmit).toHaveBeenCalledWith('conversation_removed', {
+        conversationId: CONVERSATION_ID,
+        reason: 'removed',
+      });
+      expect(clientJoin).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not convert an unexpected join failure into a revocation event', async () => {
+    chatRepository.assertConversationParticipant.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+    const clientEmit = jest.fn();
+    const clientJoin = jest.fn().mockResolvedValue(undefined);
+    const client = {
+      id: 'socket-transient',
+      data: { userId: MEMBER_ID },
+      emit: clientEmit,
+      join: clientJoin,
+    } as unknown as Socket;
+
+    await gateway.handleJoinConversation(CONVERSATION_ID, client);
+
+    expect(clientEmit).not.toHaveBeenCalledWith(
+      'conversation_removed',
+      expect.anything(),
+    );
+    expect(clientJoin).not.toHaveBeenCalled();
   });
 
   it('emits conversation updates to all account rooms in one fanout', () => {
