@@ -27,6 +27,11 @@ export abstract class IConversationMutationRepository {
     userId: string,
   ): Promise<boolean>;
 
+  abstract removeParticipantAsMember(
+    conversationId: string,
+    userId: string,
+  ): Promise<boolean>;
+
   abstract removeParticipant(
     conversationId: string,
     userId: string,

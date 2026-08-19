@@ -28,6 +28,7 @@ describe('ManageGroupConversationUseCase', () => {
     addParticipant: jest.Mock;
     transferOwnership: jest.Mock;
     removeParticipantAsOwner: jest.Mock;
+    removeParticipantAsMember: jest.Mock;
     removeParticipant: jest.Mock;
   };
   let userService: { validateUsers: jest.Mock };
@@ -40,6 +41,7 @@ describe('ManageGroupConversationUseCase', () => {
       addParticipant: jest.fn().mockResolvedValue(undefined),
       transferOwnership: jest.fn().mockResolvedValue(true),
       removeParticipantAsOwner: jest.fn().mockResolvedValue(true),
+      removeParticipantAsMember: jest.fn().mockResolvedValue(true),
       removeParticipant: jest.fn().mockResolvedValue(undefined),
     };
     userService = { validateUsers: jest.fn().mockResolvedValue(true) };
@@ -261,11 +263,25 @@ describe('ManageGroupConversationUseCase', () => {
       actorUserId: MEMBER_ID,
     });
 
-    expect(mutationRepository.removeParticipant).toHaveBeenCalledWith(
+    expect(mutationRepository.removeParticipantAsMember).toHaveBeenCalledWith(
       before.id,
       MEMBER_ID,
     );
     expect(result.participantIds).not.toContain(MEMBER_ID);
+  });
+
+  it('rejects leave if the member becomes owner concurrently', async () => {
+    chatRepository.findConversation.mockResolvedValue(group());
+    mutationRepository.removeParticipantAsMember.mockResolvedValue(false);
+
+    await expect(
+      useCase.leave({
+        conversationId: 'group-id',
+        actorUserId: MEMBER_ID,
+      }),
+    ).rejects.toThrow(
+      'Group membership or ownership changed; refresh and try again',
+    );
   });
 
   it('requires the current owner to transfer ownership before leaving', async () => {
