@@ -10,6 +10,7 @@ import {
   normalizeGroupPicture,
   resolveConversationKind,
 } from '../policies/conversation-rules';
+import { GroupMembershipConsistencyService } from '../services/group-membership-consistency.service';
 
 export type CreateConversationResult = {
   conversation: Conversation;
@@ -22,6 +23,7 @@ export class CreateConversationUseCase {
     @Inject('IChatRepository') private readonly chatRepository: IChatRepository,
     @Inject('IUserService')
     private readonly userService: IUserService,
+    private readonly consistencyService: GroupMembershipConsistencyService,
   ) {}
 
   async execute(
@@ -96,9 +98,17 @@ export class CreateConversationUseCase {
       updatedAt: createdAt,
     });
 
+    const conversation =
+      await this.chatRepository.createConversation(newConversation);
+
+    if (isGroup) {
+      void this.consistencyService
+        .checkAfterMutation(conversation.id, 'create-group')
+        .catch(() => undefined);
+    }
+
     return {
-      conversation:
-        await this.chatRepository.createConversation(newConversation),
+      conversation,
       created: true,
     };
   }
