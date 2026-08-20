@@ -19,6 +19,9 @@ lerna-debug.log*
 /coverage
 /.nyc_output
 
+# Reel integration/load-test fixtures and reports
+/test-data/reel-integration/
+
 # IDEs and editors
 /.idea
 .project
