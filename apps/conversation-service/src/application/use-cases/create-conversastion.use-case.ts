@@ -10,6 +10,7 @@ import {
   normalizeGroupPicture,
   resolveConversationKind,
 } from '../policies/conversation-rules';
+import { GroupActivityService } from '../services/group-activity.service';
 import { GroupMembershipConsistencyService } from '../services/group-membership-consistency.service';
 
 export type CreateConversationResult = {
@@ -24,6 +25,7 @@ export class CreateConversationUseCase {
     @Inject('IUserService')
     private readonly userService: IUserService,
     private readonly consistencyService: GroupMembershipConsistencyService,
+    private readonly groupActivityService: GroupActivityService,
   ) {}
 
   async execute(
@@ -105,6 +107,11 @@ export class CreateConversationUseCase {
       void this.consistencyService
         .checkAfterMutation(conversation.id, 'create-group')
         .catch(() => undefined);
+      this.groupActivityService.publish({
+        conversationId: conversation.id,
+        type: 'GROUP_CREATED',
+        actorUserId: creatorId,
+      });
     }
 
     return {
