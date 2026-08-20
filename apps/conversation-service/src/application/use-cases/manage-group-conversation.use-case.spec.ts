@@ -24,8 +24,8 @@ const group = (participantIds = [OWNER_ID, MEMBER_ID, THIRD_ID]) =>
 describe('ManageGroupConversationUseCase', () => {
   let chatRepository: { findConversation: jest.Mock };
   let mutationRepository: {
-    updateMetadata: jest.Mock;
-    addParticipant: jest.Mock;
+    updateMetadataAsOwner: jest.Mock;
+    addParticipantAsOwner: jest.Mock;
     transferOwnership: jest.Mock;
     removeParticipantAsOwner: jest.Mock;
     removeParticipantAsMember: jest.Mock;
@@ -37,8 +37,8 @@ describe('ManageGroupConversationUseCase', () => {
   beforeEach(() => {
     chatRepository = { findConversation: jest.fn() };
     mutationRepository = {
-      updateMetadata: jest.fn().mockResolvedValue(undefined),
-      addParticipant: jest.fn().mockResolvedValue(undefined),
+      updateMetadataAsOwner: jest.fn().mockResolvedValue(true),
+      addParticipantAsOwner: jest.fn().mockResolvedValue(true),
       transferOwnership: jest.fn().mockResolvedValue(true),
       removeParticipantAsOwner: jest.fn().mockResolvedValue(true),
       removeParticipantAsMember: jest.fn().mockResolvedValue(true),
@@ -65,10 +65,27 @@ describe('ManageGroupConversationUseCase', () => {
       name: '  Renamed  ',
     });
 
-    expect(mutationRepository.updateMetadata).toHaveBeenCalledWith(before.id, {
-      name: 'Renamed',
-    });
+    expect(mutationRepository.updateMetadataAsOwner).toHaveBeenCalledWith(
+      before.id,
+      OWNER_ID,
+      { name: 'Renamed' },
+    );
     expect(result.name).toBe('Renamed');
+  });
+
+  it('rejects a stale metadata write after ownership changes', async () => {
+    chatRepository.findConversation.mockResolvedValue(group());
+    mutationRepository.updateMetadataAsOwner.mockResolvedValue(false);
+
+    await expect(
+      useCase.updateMetadata({
+        conversationId: 'group-id',
+        actorUserId: OWNER_ID,
+        name: 'Stale rename',
+      }),
+    ).rejects.toThrow(
+      'Group membership or ownership changed; refresh and try again',
+    );
   });
 
   it('blocks metadata mutation by a non-owner group member', async () => {
@@ -82,7 +99,7 @@ describe('ManageGroupConversationUseCase', () => {
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
-    expect(mutationRepository.updateMetadata).not.toHaveBeenCalled();
+    expect(mutationRepository.updateMetadataAsOwner).not.toHaveBeenCalled();
   });
 
   it('adds a validated member and returns the refreshed conversation', async () => {
@@ -99,13 +116,53 @@ describe('ManageGroupConversationUseCase', () => {
     });
 
     expect(userService.validateUsers).toHaveBeenCalledWith([NEW_MEMBER_ID]);
-    expect(mutationRepository.addParticipant).toHaveBeenCalledWith(
+    expect(mutationRepository.addParticipantAsOwner).toHaveBeenCalledWith(
       before.id,
+      OWNER_ID,
       NEW_MEMBER_ID,
       expect.any(Date),
     );
     expect(result.added).toBe(true);
     expect(result.conversation.participantIds).toContain(NEW_MEMBER_ID);
+  });
+
+  it('rejects a stale add-member write after ownership changes', async () => {
+    const before = group();
+    const afterOwnershipTransfer = new Conversation({
+      ...before,
+      creatorId: MEMBER_ID,
+    });
+    chatRepository.findConversation
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(afterOwnershipTransfer);
+    mutationRepository.addParticipantAsOwner.mockResolvedValue(false);
+
+    await expect(
+      useCase.addMember({
+        conversationId: before.id,
+        actorUserId: OWNER_ID,
+        userId: NEW_MEMBER_ID,
+      }),
+    ).rejects.toThrow(
+      'Group membership or ownership changed; refresh and try again',
+    );
+  });
+
+  it('treats a concurrently-added member as an idempotent no-op', async () => {
+    const before = group();
+    const after = group([...before.participantIds, NEW_MEMBER_ID]);
+    chatRepository.findConversation
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+    mutationRepository.addParticipantAsOwner.mockResolvedValue(false);
+
+    const result = await useCase.addMember({
+      conversationId: before.id,
+      actorUserId: OWNER_ID,
+      userId: NEW_MEMBER_ID,
+    });
+
+    expect(result).toEqual({ conversation: after, added: false });
   });
 
   it('treats adding an existing member as an idempotent no-op', async () => {
@@ -120,7 +177,7 @@ describe('ManageGroupConversationUseCase', () => {
 
     expect(result).toEqual({ conversation: before, added: false });
     expect(userService.validateUsers).not.toHaveBeenCalled();
-    expect(mutationRepository.addParticipant).not.toHaveBeenCalled();
+    expect(mutationRepository.addParticipantAsOwner).not.toHaveBeenCalled();
   });
 
   it('transfers ownership to an existing group member', async () => {
