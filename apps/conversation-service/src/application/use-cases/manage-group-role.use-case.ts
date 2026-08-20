@@ -15,6 +15,7 @@ import type {
   IConversationMemberRepository,
 } from '../../domain/interfaces/conversation-member.repository.interface';
 import { evaluateGroupPermission } from '../policies/group-permission.policy';
+import { GroupMembershipConsistencyService } from '../services/group-membership-consistency.service';
 import type { GroupMemberProjectionDto } from './get-group-members.use-case';
 
 export type GroupRoleMutationResult = {
@@ -30,6 +31,7 @@ export class ManageGroupRoleUseCase {
     @Inject('IConversationMemberRepository')
     private readonly memberRepository: IConversationMemberRepository,
     private readonly configService: ConfigService,
+    private readonly consistencyService: GroupMembershipConsistencyService,
   ) {}
 
   async updateRole(input: {
@@ -69,6 +71,7 @@ export class ManageGroupRoleUseCase {
     }
 
     if (targetMember.role === input.role) {
+      this.scheduleConsistencyCheck(conversationId);
       return {
         conversation,
         member: this.toDto(targetMember),
@@ -107,6 +110,7 @@ export class ManageGroupRoleUseCase {
         currentConversation.participantIds.includes(targetUserId) &&
         currentTarget?.role === input.role
       ) {
+        this.scheduleConsistencyCheck(conversationId);
         return {
           conversation: currentConversation,
           member: this.toDto(currentTarget),
@@ -131,6 +135,8 @@ export class ManageGroupRoleUseCase {
         'Group role projection did not converge after the mutation',
       );
     }
+
+    this.scheduleConsistencyCheck(conversationId);
 
     return {
       conversation: updatedConversation,
@@ -213,5 +219,11 @@ export class ManageGroupRoleUseCase {
         ? { invitedBy: member.invitedBy }
         : {}),
     };
+  }
+
+  private scheduleConsistencyCheck(conversationId: string): void {
+    void this.consistencyService
+      .checkAfterMutation(conversationId, 'role-change')
+      .catch(() => undefined);
   }
 }
