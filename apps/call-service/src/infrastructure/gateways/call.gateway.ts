@@ -21,6 +21,7 @@ import {
 import { catchError, lastValueFrom, of, timeout } from 'rxjs';
 import { Server, Socket } from 'socket.io';
 import { AnswerCallUseCase } from '../../application/use-cases/answer-call.use-case';
+import { ChangeCallTypeUseCase } from '../../application/use-cases/change-call-type.use-case';
 import { ConnectTransportUseCase } from '../../application/use-cases/connect-transport.use-case';
 import { ConsumeUseCase } from '../../application/use-cases/consume.use-case';
 import { CreateTransportUseCase } from '../../application/use-cases/create-transport.use-case';
@@ -94,6 +95,11 @@ type ResumeConsumerPayload = {
 type RestartIcePayload = {
   callId: string;
   transportId: string;
+};
+
+type SetCallTypePayload = {
+  callId: string;
+  callType: 'VOICE' | 'VIDEO';
 };
 
 type AudioBitrateProfile = 'normal' | 'constrained';
@@ -173,6 +179,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly answerCallUseCase: AnswerCallUseCase,
     private readonly resumeConsumerUseCase: ResumeConsumerUseCase,
     private readonly restartIceUseCase: RestartIceUseCase,
+    private readonly changeCallTypeUseCase: ChangeCallTypeUseCase,
     @Inject('ICallMediaEngine')
     private readonly mediaEngine: ICallMediaEngine,
     @Inject('ICallSessionRepository')
@@ -314,9 +321,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         result.session.callId,
         result.role,
       ),
-      ...(result.session.callType === 'VOICE'
-        ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
-        : {}),
+      noAnswerTimeoutMs: this.noAnswerTimeoutMs,
     } satisfies CallJoinedSocketPayload);
 
     this.server.to(result.session.targetUserId).emit('incoming_call', {
@@ -335,9 +340,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       callType: result.session.callType,
     });
 
-    if (result.session.callType === 'VOICE') {
-      this.scheduleUnansweredCallTimeout(result.session.callId);
-    }
+    this.scheduleUnansweredCallTimeout(result.session.callId);
   }
 
   @SubscribeMessage('join_call')
@@ -373,9 +376,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         payload.callId,
         result.role,
       ),
-      ...(result.session.callType === 'VOICE'
-        ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
-        : {}),
+      noAnswerTimeoutMs: this.noAnswerTimeoutMs,
     } satisfies CallJoinedSocketPayload);
 
     if (result.shouldEmitNewPeer) {
@@ -626,7 +627,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       throw new NotFoundException('Call not found');
     }
 
-    if (session.status !== 'active' || session.callType !== 'VOICE') {
+    if (session.status !== 'active') {
       throw new ForbiddenException('Audio bitrate cannot be adjusted');
     }
 
@@ -641,6 +642,39 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       callId: payload.callId,
       transportId: payload.transportId,
       profile: payload.profile,
+    });
+  }
+
+  @SubscribeMessage('set_call_type')
+  async handleSetCallType(
+    @MessageBody() payload: SetCallTypePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = await this.resolveUserId(client);
+    if (!userId) return;
+
+    if (payload.callType !== 'VOICE' && payload.callType !== 'VIDEO') {
+      throw new BadRequestException('Invalid call type');
+    }
+
+    const result = await this.changeCallTypeUseCase.execute(
+      payload.callId,
+      userId,
+      payload.callType,
+    );
+
+    for (const producerId of result.closedVideoProducerIds) {
+      this.server.to(payload.callId).emit('producer_closed', {
+        callId: payload.callId,
+        producerId,
+        kind: 'video',
+      });
+    }
+
+    this.server.to(payload.callId).emit('call_type_changed', {
+      callId: result.callId,
+      callType: result.callType,
+      changedByUserId: result.changedByUserId,
     });
   }
 
@@ -847,7 +881,6 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const session = await this.sessionRepository.findByCallId(callId);
           if (
             !session ||
-            session.callType !== 'VOICE' ||
             (session.status !== 'initiated' && session.status !== 'ringing')
           ) {
             return;
