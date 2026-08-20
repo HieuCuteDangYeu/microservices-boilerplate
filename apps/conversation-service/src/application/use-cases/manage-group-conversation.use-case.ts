@@ -21,6 +21,7 @@ import {
   normalizeGroupName,
   normalizeGroupPicture,
 } from '../policies/conversation-rules';
+import { GroupMembershipConsistencyService } from '../services/group-membership-consistency.service';
 
 @Injectable()
 export class ManageGroupConversationUseCase {
@@ -31,6 +32,7 @@ export class ManageGroupConversationUseCase {
     private readonly mutationRepository: IConversationMutationRepository,
     @Inject('IUserService')
     private readonly userService: IUserService,
+    private readonly consistencyService: GroupMembershipConsistencyService,
   ) {}
 
   async updateMetadata(input: {
@@ -111,6 +113,7 @@ export class ManageGroupConversationUseCase {
         currentConversation.creatorId === input.actorUserId &&
         currentConversation.participantIds.includes(userId)
       ) {
+        this.scheduleConsistencyCheck(input.conversationId, 'add-member');
         return { conversation: currentConversation, added: false };
       }
 
@@ -119,8 +122,13 @@ export class ManageGroupConversationUseCase {
       );
     }
 
+    const updatedConversation = await this.getUpdatedConversation(
+      input.conversationId,
+    );
+    this.scheduleConsistencyCheck(input.conversationId, 'add-member');
+
     return {
-      conversation: await this.getUpdatedConversation(input.conversationId),
+      conversation: updatedConversation,
       added: true,
     };
   }
@@ -159,7 +167,11 @@ export class ManageGroupConversationUseCase {
       );
     }
 
-    return await this.getUpdatedConversation(input.conversationId);
+    const updatedConversation = await this.getUpdatedConversation(
+      input.conversationId,
+    );
+    this.scheduleConsistencyCheck(input.conversationId, 'transfer-ownership');
+    return updatedConversation;
   }
 
   async removeMember(input: {
@@ -198,7 +210,11 @@ export class ManageGroupConversationUseCase {
       );
     }
 
-    return await this.getUpdatedConversation(input.conversationId);
+    const updatedConversation = await this.getUpdatedConversation(
+      input.conversationId,
+    );
+    this.scheduleConsistencyCheck(input.conversationId, 'remove-member');
+    return updatedConversation;
   }
 
   async leave(input: {
@@ -229,7 +245,11 @@ export class ManageGroupConversationUseCase {
       );
     }
 
-    return await this.getUpdatedConversation(input.conversationId);
+    const updatedConversation = await this.getUpdatedConversation(
+      input.conversationId,
+    );
+    this.scheduleConsistencyCheck(input.conversationId, 'leave-group');
+    return updatedConversation;
   }
 
   private async getGroupConversationForMember(
@@ -285,5 +305,14 @@ export class ManageGroupConversationUseCase {
     }
 
     return conversation;
+  }
+
+  private scheduleConsistencyCheck(
+    conversationId: string,
+    trigger: 'add-member' | 'remove-member' | 'leave-group' | 'transfer-ownership',
+  ): void {
+    void this.consistencyService
+      .checkAfterMutation(conversationId, trigger)
+      .catch(() => undefined);
   }
 }
