@@ -1,3 +1,7 @@
+import {
+  AiRagCitationSchema,
+  AiRecommendedReelSchema,
+} from '@common/ai/dtos/ask-question-response.dto';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { ConversationMessageTypeSchema } from './create-message.dto';
@@ -34,8 +38,8 @@ export const MessageMetadataSchema = z
         'group_system_activity',
       ])
       .optional(),
-    citations: z.array(z.unknown()).optional(),
-    recommendedReels: z.array(z.unknown()).optional(),
+    citations: z.array(AiRagCitationSchema).optional(),
+    recommendedReels: z.array(AiRecommendedReelSchema).optional(),
     suggestedQueries: z.array(z.string()).optional(),
     groupActivity: GroupSystemActivitySchema.optional(),
   })
