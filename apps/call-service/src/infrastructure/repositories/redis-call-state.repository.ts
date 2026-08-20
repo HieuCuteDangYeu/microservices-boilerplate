@@ -169,6 +169,16 @@ export class RedisCallStateRepository implements ICallStateRepository {
     await this.redis.expire(this.producerIndexKey(state.callId), 60 * 60 * 6);
   }
 
+  async removeProducerState(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const key = this.producerKey(callId, userId, producerId);
+    await this.redis.del(key);
+    await this.redis.srem(this.producerIndexKey(callId), key);
+  }
+
   private roomKey(callId: string): string {
     return `call:${callId}:room`;
   }

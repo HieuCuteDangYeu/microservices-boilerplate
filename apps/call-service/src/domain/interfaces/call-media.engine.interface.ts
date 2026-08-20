@@ -22,6 +22,7 @@ export interface ActiveProducerResult {
   producerId: string;
   userId: string;
   kind: 'audio' | 'video';
+  paused?: boolean;
 }
 
 export interface ConsumedMediaResult {
@@ -93,5 +94,20 @@ export abstract class ICallMediaEngine {
     callId: string,
     excludingUserId?: string,
   ): Promise<ActiveProducerResult[]>;
+  abstract pauseProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void>;
+  abstract resumeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void>;
+  abstract closeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void>;
   abstract closeRoom(callId: string): Promise<void>;
 }

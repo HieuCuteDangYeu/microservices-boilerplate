@@ -21,6 +21,7 @@ import {
 import { catchError, lastValueFrom, of, timeout } from 'rxjs';
 import { Server, Socket } from 'socket.io';
 import { AnswerCallUseCase } from '../../application/use-cases/answer-call.use-case';
+import { ChangeCallTypeUseCase } from '../../application/use-cases/change-call-type.use-case';
 import { ConnectTransportUseCase } from '../../application/use-cases/connect-transport.use-case';
 import { ConsumeUseCase } from '../../application/use-cases/consume.use-case';
 import { CreateTransportUseCase } from '../../application/use-cases/create-transport.use-case';
@@ -94,6 +95,17 @@ type ResumeConsumerPayload = {
 type RestartIcePayload = {
   callId: string;
   transportId: string;
+};
+
+type SetCallTypePayload = {
+  callId: string;
+  callType: 'VOICE' | 'VIDEO';
+};
+
+type SetVideoEnabledPayload = {
+  callId: string;
+  producerId: string;
+  enabled: boolean;
 };
 
 type AudioBitrateProfile = 'normal' | 'constrained';
@@ -173,6 +185,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly answerCallUseCase: AnswerCallUseCase,
     private readonly resumeConsumerUseCase: ResumeConsumerUseCase,
     private readonly restartIceUseCase: RestartIceUseCase,
+    private readonly changeCallTypeUseCase: ChangeCallTypeUseCase,
     @Inject('ICallMediaEngine')
     private readonly mediaEngine: ICallMediaEngine,
     @Inject('ICallSessionRepository')
@@ -237,11 +250,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           continue;
         }
 
-        if (
-          session.status === 'initiated' ||
-          session.status === 'ringing' ||
-          session.status === 'active'
-        ) {
+        if (session.status === 'active') {
           const reconnectDeadlineAt = new Date(
             Date.now() + this.reconnectGraceMs,
           );
@@ -254,14 +263,26 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
               reconnectDeadlineAt,
             }),
           );
-          if (session.status === 'active') {
-            this.server.to(callId).emit('peer_reconnecting', {
-              callId,
-              userId,
-              reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
-            });
-          }
+          this.server.to(callId).emit('peer_reconnecting', {
+            callId,
+            userId,
+            reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
+          });
           this.scheduleDisconnectFinalization(callId, userId);
+          continue;
+        }
+
+        if (session.status === 'initiated' || session.status === 'ringing') {
+          await this.stateRepository.removeParticipant(callId, userId);
+          const result = await this.leaveCallUseCase.execute(
+            callId,
+            userId,
+            'disconnected',
+          );
+          if (result.shouldEmitPeerLeft) {
+            this.emitPeerLeft(callId, userId, 'disconnected');
+          }
+          this.emitCallEnded(result.session, result.endedReason);
           continue;
         }
 
@@ -314,9 +335,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         result.session.callId,
         result.role,
       ),
-      ...(result.session.callType === 'VOICE'
-        ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
-        : {}),
+      noAnswerTimeoutMs: this.noAnswerTimeoutMs,
     } satisfies CallJoinedSocketPayload);
 
     this.server.to(result.session.targetUserId).emit('incoming_call', {
@@ -335,9 +354,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       callType: result.session.callType,
     });
 
-    if (result.session.callType === 'VOICE') {
-      this.scheduleUnansweredCallTimeout(result.session.callId);
-    }
+    this.scheduleUnansweredCallTimeout(result.session.callId);
   }
 
   @SubscribeMessage('join_call')
@@ -373,9 +390,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         payload.callId,
         result.role,
       ),
-      ...(result.session.callType === 'VOICE'
-        ? { noAnswerTimeoutMs: this.noAnswerTimeoutMs }
-        : {}),
+      noAnswerTimeoutMs: this.noAnswerTimeoutMs,
     } satisfies CallJoinedSocketPayload);
 
     if (result.shouldEmitNewPeer) {
@@ -457,6 +472,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId: producer.userId,
         producerId: producer.producerId,
         kind: producer.kind,
+        paused: producer.paused ?? false,
       });
     });
 
@@ -470,6 +486,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId: producer.userId,
         producerId: producer.producerId,
         kind: producer.kind,
+        paused: producer.paused ?? false,
       });
     });
   }
@@ -626,7 +643,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       throw new NotFoundException('Call not found');
     }
 
-    if (session.status !== 'active' || session.callType !== 'VOICE') {
+    if (session.status !== 'active') {
       throw new ForbiddenException('Audio bitrate cannot be adjusted');
     }
 
@@ -641,6 +658,94 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       callId: payload.callId,
       transportId: payload.transportId,
       profile: payload.profile,
+    });
+  }
+
+  @SubscribeMessage('set_video_enabled')
+  async handleSetVideoEnabled(
+    @MessageBody() payload: SetVideoEnabledPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = await this.resolveUserId(client);
+    if (!userId) return;
+
+    const session = await this.sessionRepository.findByCallId(payload.callId);
+    if (!session) {
+      throw new NotFoundException('Call not found');
+    }
+
+    if (session.status !== 'active' || session.callType !== 'VIDEO') {
+      throw new ForbiddenException('Video state cannot be changed');
+    }
+
+    if (session.initiatorId !== userId && session.targetUserId !== userId) {
+      throw new ForbiddenException('You are not part of this call');
+    }
+
+    const producer = (
+      await this.mediaEngine.listActiveProducers(payload.callId)
+    ).find(
+      (entry) =>
+        entry.producerId === payload.producerId &&
+        entry.userId === userId &&
+        entry.kind === 'video',
+    );
+    if (!producer) {
+      throw new NotFoundException('Video producer not found');
+    }
+
+    if (payload.enabled) {
+      await this.mediaEngine.resumeProducer(
+        payload.callId,
+        userId,
+        payload.producerId,
+      );
+    } else {
+      await this.mediaEngine.pauseProducer(
+        payload.callId,
+        userId,
+        payload.producerId,
+      );
+    }
+
+    this.server.to(payload.callId).emit('video_state_changed', {
+      callId: payload.callId,
+      userId,
+      producerId: payload.producerId,
+      enabled: payload.enabled,
+    });
+  }
+
+  @SubscribeMessage('set_call_type')
+  async handleSetCallType(
+    @MessageBody() payload: SetCallTypePayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = await this.resolveUserId(client);
+    if (!userId) return;
+
+    if (payload.callType !== 'VOICE' && payload.callType !== 'VIDEO') {
+      throw new BadRequestException('Invalid call type');
+    }
+
+    const result = await this.changeCallTypeUseCase.execute(
+      payload.callId,
+      userId,
+      payload.callType,
+    );
+
+    for (const producerId of result.closedVideoProducerIds) {
+      this.server.to(payload.callId).emit('producer_closed', {
+        callId: payload.callId,
+        producerId,
+        kind: 'video',
+      });
+    }
+
+    this.server.to(payload.callId).emit('call_type_changed', {
+      callId: result.callId,
+      callType: result.callType,
+      changedByUserId: result.changedByUserId,
     });
   }
 
@@ -793,47 +898,64 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
-  private scheduleDisconnectFinalization(callId: string, userId: string): void {
+  private scheduleDisconnectFinalization(
+    callId: string,
+    userId: string,
+    delayMs = this.reconnectGraceMs,
+  ): void {
     this.clearPendingDisconnect(callId, userId);
 
-    const timeoutId = setTimeout(() => {
-      void (async () => {
-        try {
-          const participant = await this.stateRepository.getParticipant(
-            callId,
-            userId,
-          );
+    let rescheduled = false;
+    const timeoutId = setTimeout(
+      () => {
+        void (async () => {
+          try {
+            const participant = await this.stateRepository.getParticipant(
+              callId,
+              userId,
+            );
 
-          if (
-            !participant ||
-            participant.isConnected ||
-            !participant.reconnectDeadlineAt ||
-            participant.reconnectDeadlineAt.getTime() > Date.now()
-          ) {
-            return;
-          }
+            if (
+              !participant ||
+              participant.isConnected ||
+              !participant.reconnectDeadlineAt
+            ) {
+              return;
+            }
 
-          await this.stateRepository.removeParticipant(callId, userId);
-          const result = await this.leaveCallUseCase.execute(
-            callId,
-            userId,
-            'disconnected',
-          );
-          if (result.shouldEmitPeerLeft) {
-            this.emitPeerLeft(callId, userId, 'disconnected');
+            const remainingMs =
+              participant.reconnectDeadlineAt.getTime() - Date.now();
+            if (remainingMs > 0) {
+              rescheduled = true;
+              this.scheduleDisconnectFinalization(callId, userId, remainingMs);
+              return;
+            }
+
+            await this.stateRepository.removeParticipant(callId, userId);
+            const result = await this.leaveCallUseCase.execute(
+              callId,
+              userId,
+              'disconnected',
+            );
+            if (result.shouldEmitPeerLeft) {
+              this.emitPeerLeft(callId, userId, 'disconnected');
+            }
+            this.emitCallEnded(result.session, result.endedReason);
+          } catch (error) {
+            this.logger.warn(
+              `Deferred disconnect cleanup failed for call ${callId}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          } finally {
+            if (!rescheduled) {
+              this.clearPendingDisconnect(callId, userId);
+            }
           }
-          this.emitCallEnded(result.session, result.endedReason);
-        } catch (error) {
-          this.logger.warn(
-            `Deferred disconnect cleanup failed for call ${callId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        } finally {
-          this.clearPendingDisconnect(callId, userId);
-        }
-      })();
-    }, this.reconnectGraceMs);
+        })();
+      },
+      Math.max(1, delayMs),
+    );
 
     this.pendingDisconnects.set(this.disconnectKey(callId, userId), timeoutId);
   }
@@ -847,7 +969,6 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const session = await this.sessionRepository.findByCallId(callId);
           if (
             !session ||
-            session.callType !== 'VOICE' ||
             (session.status !== 'initiated' && session.status !== 'ringing')
           ) {
             return;

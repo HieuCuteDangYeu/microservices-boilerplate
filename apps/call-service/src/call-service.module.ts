@@ -15,6 +15,7 @@ import { RejectCallUseCase } from './application/use-cases/reject-call.use-case'
 import { AnswerCallUseCase } from './application/use-cases/answer-call.use-case';
 import { ResumeConsumerUseCase } from './application/use-cases/resume-consumer.use-case';
 import { RestartIceUseCase } from './application/use-cases/restart-ice.use-case';
+import { ChangeCallTypeUseCase } from './application/use-cases/change-call-type.use-case';
 import { CallGateway } from './infrastructure/gateways/call.gateway';
 import { CallStateController } from './infrastructure/controllers/call-state.controller';
 import { RedisCallStateRepository } from './infrastructure/repositories/redis-call-state.repository';
@@ -89,6 +90,7 @@ import { NotificationServiceAdapter } from './infrastructure/adapters/notificati
     AnswerCallUseCase,
     ResumeConsumerUseCase,
     RestartIceUseCase,
+    ChangeCallTypeUseCase,
     RedisCallSessionRepository,
     RedisCallStateRepository,
     RabbitCallEventPublisher,

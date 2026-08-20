@@ -282,6 +282,15 @@ export class MediasoupCallMediaEngine
     producer.on('transportclose', () => {
       room.producers.delete(producer.id);
       room.producerMeta.delete(producer.id);
+      void this.stateRepository
+        .removeProducerState(callId, userId, producer.id)
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `Failed to remove producer state after transport close producer=${producer.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
     });
 
     await this.stateRepository.saveProducerState({
@@ -406,8 +415,75 @@ export class MediasoupCallMediaEngine
           producerId,
           userId: meta.userId,
           kind: meta.kind,
+          paused: room.producers.get(producerId)?.paused ?? false,
         })),
     );
+  }
+
+  async pauseProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const room = this.getRoomOrThrow(callId);
+    const producer = room.producers.get(producerId);
+    const meta = room.producerMeta.get(producerId);
+
+    if (
+      !producer ||
+      !meta ||
+      meta.callId !== callId ||
+      meta.userId !== userId
+    ) {
+      throw new Error('Producer not found');
+    }
+
+    await producer.pause();
+  }
+
+  async resumeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const room = this.getRoomOrThrow(callId);
+    const producer = room.producers.get(producerId);
+    const meta = room.producerMeta.get(producerId);
+
+    if (
+      !producer ||
+      !meta ||
+      meta.callId !== callId ||
+      meta.userId !== userId
+    ) {
+      throw new Error('Producer not found');
+    }
+
+    await producer.resume();
+  }
+
+  async closeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const room = this.getRoomOrThrow(callId);
+    const producer = room.producers.get(producerId);
+    const meta = room.producerMeta.get(producerId);
+
+    if (
+      !producer ||
+      !meta ||
+      meta.callId !== callId ||
+      meta.userId !== userId
+    ) {
+      throw new Error('Producer not found');
+    }
+
+    producer.close();
+    room.producers.delete(producerId);
+    room.producerMeta.delete(producerId);
+    await this.stateRepository.removeProducerState(callId, userId, producerId);
   }
 
   closeRoom(callId: string): Promise<void> {
