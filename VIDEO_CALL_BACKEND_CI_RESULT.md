@@ -21,7 +21,7 @@ PASS apps/call-service/test/unit/application/video-call.use-case.spec.ts
 Test Suites: 2 passed, 2 total
 Tests:       14 passed, 14 total
 Snapshots:   0 total
-Time:        0.761 s
+Time:        1.028 s
 Ran all test suites matching apps/call-service/test/unit/application.
 ```
 
@@ -29,10 +29,10 @@ Ran all test suites matching apps/call-service/test/unit/application.
 ```text
 PASS apps/call-service/test/e2e/call-flow.e2e.spec.ts
   Call Service P0 flow (e2e)
-    ✓ auto-ends unanswered video calls after the backend no-answer timeout (206 ms)
-    ✓ switches VOICE to VIDEO and back on the same active call while enforcing media kind (46 ms)
-    ✓ rejoin advertises both active audio and video producers for a VIDEO call (31 ms)
-    ✓ broadcasts camera off/on without replacing the video producer (30 ms)
+    ✓ auto-ends unanswered video calls after the backend no-answer timeout (252 ms)
+    ✓ switches VOICE to VIDEO and back on the same active call while enforcing media kind (60 ms)
+    ✓ rejoin advertises both active audio and video producers for a VIDEO call (40 ms)
+    ✓ broadcasts camera off/on without replacing the video producer (37 ms)
     ○ skipped disconnects clients with missing or invalid tokens and joins valid clients to private rooms
     ○ skipped runs the happy-path call lifecycle from initiate to answer
     ○ skipped rejects forged target users before creating a call session
@@ -51,7 +51,7 @@ PASS apps/call-service/test/e2e/call-flow.e2e.spec.ts
 Test Suites: 1 passed, 1 total
 Tests:       14 skipped, 4 passed, 18 total
 Snapshots:   0 total
-Time:        1.393 s
+Time:        1.83 s
 Ran all test suites matching apps/call-service/test/e2e/call-flow.e2e.spec.ts with tests matching "auto-ends unanswered video|switches VOICE to VIDEO|rejoin advertises both active audio and video|broadcasts camera off/on".
 ```
 
@@ -59,28 +59,28 @@ Ran all test suites matching apps/call-service/test/e2e/call-flow.e2e.spec.ts wi
 ```text
 PASS apps/call-service/test/e2e/call-flow.e2e.spec.ts
   Call Service P0 flow (e2e)
-    ✓ disconnects clients with missing or invalid tokens and joins valid clients to private rooms (170 ms)
-    ✓ runs the happy-path call lifecycle from initiate to answer (45 ms)
-    ✓ rejects forged target users before creating a call session (23 ms)
-    ✓ runs the media flow from transport creation to consumer resume (29 ms)
-    ✓ cancels a call when the caller leaves before answer and clears redis/media state (25 ms)
-    ✓ auto-ends unanswered video calls after the backend no-answer timeout (74 ms)
-    ✓ switches VOICE to VIDEO and back on the same active call while enforcing media kind (31 ms)
-    ✓ rejoin advertises both active audio and video producers for a VIDEO call (34 ms)
-    ✓ broadcasts camera off/on without replacing the video producer (26 ms)
-    ✓ auto-ends unanswered voice calls after the backend no-answer timeout (74 ms)
-    ✓ does not let answer_call bypass join_call before the no-answer timeout (72 ms)
-    ✓ fails fast when a ringing call disconnects before answer (24 ms)
-    ✓ rejects rejoin attempts for calls that are not active (21 ms)
-    ✓ ends an active call after the reconnect grace window expires (73 ms)
-    ✓ rejoins an active call within the reconnect grace window (145 ms)
-    ✓ rejects rejoin attempts after the reconnect grace window has already expired (75 ms)
-    ✓ rejects rejoin attempts from users outside the active call (24 ms)
-    ✓ keeps the call active when one socket disconnects but the same user still has another socket in the call (325 ms)
+    ✓ disconnects clients with missing or invalid tokens and joins valid clients to private rooms (215 ms)
+    ✓ runs the happy-path call lifecycle from initiate to answer (54 ms)
+    ✓ rejects forged target users before creating a call session (28 ms)
+    ✓ runs the media flow from transport creation to consumer resume (37 ms)
+    ✓ cancels a call when the caller leaves before answer and clears redis/media state (31 ms)
+    ✓ auto-ends unanswered video calls after the backend no-answer timeout (81 ms)
+    ✓ switches VOICE to VIDEO and back on the same active call while enforcing media kind (41 ms)
+    ✓ rejoin advertises both active audio and video producers for a VIDEO call (44 ms)
+    ✓ broadcasts camera off/on without replacing the video producer (33 ms)
+    ✓ auto-ends unanswered voice calls after the backend no-answer timeout (80 ms)
+    ✓ does not let answer_call bypass join_call before the no-answer timeout (78 ms)
+    ✓ fails fast when a ringing call disconnects before answer (32 ms)
+    ✓ rejects rejoin attempts for calls that are not active (27 ms)
+    ✓ ends an active call after the reconnect grace window expires (77 ms)
+    ✓ rejoins an active call within the reconnect grace window (148 ms)
+    ✓ rejects rejoin attempts after the reconnect grace window has already expired (79 ms)
+    ✓ rejects rejoin attempts from users outside the active call (29 ms)
+    ✓ keeps the call active when one socket disconnects but the same user still has another socket in the call (332 ms)
 
 Test Suites: 1 passed, 1 total
 Tests:       18 passed, 18 total
 Snapshots:   0 total
-Time:        1.928 s, estimated 2 s
+Time:        2.339 s
 Ran all test suites matching apps/call-service/test/e2e/call-flow.e2e.spec.ts.
 ```
