@@ -9,8 +9,11 @@ const PEER_ID = '22222222-2222-4222-8222-222222222222';
 const THIRD_ID = '33333333-3333-4333-8333-333333333333';
 
 describe('CreateConversationUseCase', () => {
-  let chatRepository: jest.Mocked<Pick<IChatRepository, 'createConversation' | 'findPrivateConversation'>>;
+  let chatRepository: jest.Mocked<
+    Pick<IChatRepository, 'createConversation' | 'findPrivateConversation'>
+  >;
   let userService: jest.Mocked<Pick<IUserService, 'validateUsers'>>;
+  let consistencyService: { checkAfterMutation: jest.Mock };
   let useCase: CreateConversationUseCase;
 
   beforeEach(() => {
@@ -23,13 +26,17 @@ describe('CreateConversationUseCase', () => {
     userService = {
       validateUsers: jest.fn().mockResolvedValue(true),
     };
+    consistencyService = {
+      checkAfterMutation: jest.fn().mockResolvedValue(null),
+    };
     useCase = new CreateConversationUseCase(
       chatRepository as unknown as IChatRepository,
       userService as unknown as IUserService,
+      consistencyService as never,
     );
   });
 
-  it('creates a two-member GROUP when the explicit type is GROUP', async () => {
+  it('creates a two-member GROUP when the explicit type is GROUP and shadow checks its projection', async () => {
     const result = await useCase.execute(
       {
         participantIds: [PEER_ID],
@@ -49,6 +56,10 @@ describe('CreateConversationUseCase', () => {
     expect(created.name).toBe('Core Team');
     expect(created.memberJoinedAt?.[OWNER_ID]).toBeDefined();
     expect(created.memberJoinedAt?.[PEER_ID]).toBeDefined();
+    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
+      'conversation-id',
+      'create-group',
+    );
   });
 
   it('keeps legacy isGroup=false direct creation compatible and reuses an existing direct chat', async () => {
@@ -69,6 +80,17 @@ describe('CreateConversationUseCase', () => {
 
     expect(result).toEqual({ conversation: existing, created: false });
     expect(chatRepository.createConversation).not.toHaveBeenCalled();
+    expect(consistencyService.checkAfterMutation).not.toHaveBeenCalled();
+  });
+
+  it('does not shadow check a newly-created direct conversation', async () => {
+    await useCase.execute(
+      { participantIds: [PEER_ID], type: 'DIRECT' },
+      OWNER_ID,
+    );
+
+    expect(chatRepository.createConversation).toHaveBeenCalledTimes(1);
+    expect(consistencyService.checkAfterMutation).not.toHaveBeenCalled();
   });
 
   it('rejects conflicting type and legacy isGroup values', async () => {
