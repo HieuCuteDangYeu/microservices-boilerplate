@@ -10,6 +10,7 @@ import { CreateConversationUseCase } from 'apps/conversation-service/src/applica
 import { GetAnchorNewerMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-anchor-newer-messages.use-case';
 import { GetAnchorOlderMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-anchor-older-messages.use-case';
 import { GetConversationUseCase } from 'apps/conversation-service/src/application/use-cases/get-conversation.use-case';
+import { GetGroupMembersUseCase } from 'apps/conversation-service/src/application/use-cases/get-group-members.use-case';
 import { GetMessagesAroundUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages-around.use-case';
 import { GetMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages.use-case';
 import { GetUserConversationsUseCase } from 'apps/conversation-service/src/application/use-cases/get-user-conversations.use-case';
@@ -21,10 +22,12 @@ import { ChatMediaServiceAdapter } from 'apps/conversation-service/src/infrastru
 import { NotificationServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/notification-service.adapter';
 import { UserServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/user-service.adapter';
 import { ConversationMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/conversation.controller';
+import { GroupMembersMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/group-members.controller';
 import { KeyMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/key.controller';
 import { PrismaService } from 'apps/conversation-service/src/infrastructure/prisma/prisma.service';
 import { AesEncryptionRepository } from 'apps/conversation-service/src/infrastructure/repositories/aes-encryption.repository';
 import { PrismaConversationChatRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-conversation-chat.repository';
+import { PrismaConversationMemberRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-conversation-member.repository';
 import { PrismaKeyBundleRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-key-bundle.repository';
 import { SendMessageUseCase } from './application/use-cases/send-message.use-case';
 import { ChatGateway } from './infrastructure/gateways/chat.gateway';
@@ -98,7 +101,11 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
       },
     ]),
   ],
-  controllers: [ConversationMicroserviceController, KeyMicroserviceController],
+  controllers: [
+    ConversationMicroserviceController,
+    GroupMembersMicroserviceController,
+    KeyMicroserviceController,
+  ],
   providers: [
     PrismaService,
     ChatGateway, // Gateway vẫn phải có vì đây là nơi xử lý logic Socket
@@ -110,6 +117,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     GetAnchorNewerMessagesUseCase,
     GetMessagesUseCase,
     GetConversationUseCase,
+    GetGroupMembersUseCase,
     CreateConversationUseCase,
     ManageGroupConversationUseCase,
     GetUserConversationsUseCase,
@@ -120,6 +128,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
 
     // --- Repositories ---
     PrismaConversationChatRepository,
+    PrismaConversationMemberRepository,
     PrismaKeyBundleRepository,
 
     {
@@ -133,6 +142,10 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     {
       provide: 'IConversationMutationRepository',
       useExisting: PrismaConversationChatRepository,
+    },
+    {
+      provide: 'IConversationMemberRepository',
+      useExisting: PrismaConversationMemberRepository,
     },
     {
       provide: 'IEncryptionRepository', // Token để inject
