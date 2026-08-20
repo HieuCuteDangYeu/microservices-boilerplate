@@ -21,6 +21,27 @@ export type ConversationMessageType =
   | 'call'
   | 'reel';
 
+export type GroupSystemActivityType =
+  | 'GROUP_CREATED'
+  | 'MEMBER_ADDED'
+  | 'MEMBER_LEFT'
+  | 'MEMBER_REMOVED'
+  | 'MEMBER_PROMOTED'
+  | 'MEMBER_DEMOTED'
+  | 'OWNERSHIP_TRANSFERRED'
+  | 'GROUP_RENAMED'
+  | 'GROUP_PICTURE_CHANGED';
+
+export interface GroupSystemActivity {
+  type: GroupSystemActivityType;
+  actorUserId: string;
+  actorName?: string;
+  targetUserId?: string;
+  targetName?: string;
+  previousValue?: string | null;
+  nextValue?: string | null;
+}
+
 export interface MessageReplyPreview {
   senderName: string;
   content: string;
@@ -51,10 +72,14 @@ export interface MessageMedia {
 }
 
 export interface MessageMetadata {
-  kind?: 'velora_ai_response' | 'velora_ai_reel_recommendations';
+  kind?:
+    | 'velora_ai_response'
+    | 'velora_ai_reel_recommendations'
+    | 'group_system_activity';
   citations?: AiRagCitation[];
   recommendedReels?: AiRecommendedReel[];
   suggestedQueries?: string[];
+  groupActivity?: GroupSystemActivity;
 }
 
 export interface RecallMessageResult {
