@@ -350,6 +350,26 @@ class FakeCallMediaEngine {
     );
   }
 
+  closeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const room = this.getRoom(callId);
+    const producer = room.producers.get(producerId);
+    if (!producer || producer.userId !== userId || producer.closed) {
+      throw new Error('Producer not found');
+    }
+
+    producer.closed = true;
+    for (const consumer of room.consumers.values()) {
+      if (consumer.producerId === producerId) {
+        consumer.closed = true;
+      }
+    }
+    return Promise.resolve();
+  }
+
   closeRoom(callId: string): Promise<void> {
     const room = this.rooms.get(callId);
     if (!room) return Promise.resolve();
@@ -791,6 +811,262 @@ describe('Call Service P0 flow (e2e)', () => {
     ).toBeDefined();
   });
 
+  // VIDEO_CALL_1TO1_E2E
+  it('auto-ends unanswered video calls after the backend no-answer timeout', async () => {
+    const caller = await connectClient('caller-token');
+    const callee = await connectClient('callee-token');
+
+    const callerJoined = onceEvent<{
+      callId: string;
+      noAnswerTimeoutMs: number;
+    }>(caller, 'call_joined');
+    const incomingCall = onceEvent<{ callId: string }>(callee, 'incoming_call');
+
+    caller.emit('initiate_call', {
+      conversationId: 'conv-cancel',
+      targetUserId: calleeUser.id,
+      callType: 'VIDEO',
+    });
+
+    const [{ callId, noAnswerTimeoutMs }, incoming] = await Promise.all([
+      callerJoined,
+      incomingCall,
+    ]);
+    expect(incoming.callId).toBe(callId);
+    expect(noAnswerTimeoutMs).toBe(50);
+
+    const callerEnded = onceEvent<{ callId: string; reason: string }>(
+      caller,
+      'call_ended',
+    );
+    const calleeEnded = onceEvent<{ callId: string; reason: string }>(
+      callee,
+      'call_ended',
+    );
+
+    await expect(callerEnded).resolves.toEqual({ callId, reason: 'no_answer' });
+    await expect(calleeEnded).resolves.toEqual({ callId, reason: 'no_answer' });
+    await expectCallStateCleared(callId);
+  });
+
+  it('switches VOICE to VIDEO and back on the same active call while enforcing media kind', async () => {
+    const { caller, callee, callId } = await establishActiveCall('VOICE');
+    const callerSendTransport = await createAndConnectTransport(
+      caller,
+      callId,
+      'send',
+    );
+    const calleeRecvTransport = await createAndConnectTransport(
+      callee,
+      callId,
+      'recv',
+    );
+
+    const audioNoticePromise = onceEvent<{
+      callId: string;
+      userId: string;
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(callee, 'new_producer');
+    caller.emit('produce', {
+      callId,
+      transportId: callerSendTransport.transportId,
+      kind: 'audio',
+      rtpParameters: { codecs: validRtpCapabilities.codecs },
+    });
+    const audioNotice = await audioNoticePromise;
+    expect(audioNotice.kind).toBe('audio');
+
+    const forbiddenVideo = onceEvent<{ status: string; message: string }>(
+      caller,
+      'exception',
+    );
+    caller.emit('produce', {
+      callId,
+      transportId: callerSendTransport.transportId,
+      kind: 'video',
+      rtpParameters: { codecs: validRtpCapabilities.codecs },
+    });
+    await expect(forbiddenVideo).resolves.toEqual(
+      expect.objectContaining({ status: 'error' }),
+    );
+
+    const callerUpgraded = onceEvent<{
+      callId: string;
+      callType: string;
+      changedByUserId: string;
+    }>(caller, 'call_type_changed');
+    const calleeUpgraded = onceEvent<{
+      callId: string;
+      callType: string;
+      changedByUserId: string;
+    }>(callee, 'call_type_changed');
+    caller.emit('set_call_type', { callId, callType: 'VIDEO' });
+
+    await expect(callerUpgraded).resolves.toEqual({
+      callId,
+      callType: 'VIDEO',
+      changedByUserId: callerUser.id,
+    });
+    await expect(calleeUpgraded).resolves.toEqual({
+      callId,
+      callType: 'VIDEO',
+      changedByUserId: callerUser.id,
+    });
+
+    const videoNoticePromise = onceEvent<{
+      callId: string;
+      userId: string;
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(callee, 'new_producer');
+    caller.emit('produce', {
+      callId,
+      transportId: callerSendTransport.transportId,
+      kind: 'video',
+      rtpParameters: { codecs: validRtpCapabilities.codecs },
+    });
+    const videoNotice = await videoNoticePromise;
+    expect(videoNotice.kind).toBe('video');
+
+    const consumerCreated = onceEvent<{
+      callId: string;
+      consumerId: string;
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(callee, 'consumer_created');
+    callee.emit('consume', {
+      callId,
+      transportId: calleeRecvTransport.transportId,
+      producerId: videoNotice.producerId,
+      rtpCapabilities: validRtpCapabilities,
+    });
+    await expect(consumerCreated).resolves.toEqual(
+      expect.objectContaining({
+        callId,
+        producerId: videoNotice.producerId,
+        kind: 'video',
+      }),
+    );
+
+    const producerClosed = onceEvent<{
+      callId: string;
+      producerId: string;
+      kind: string;
+    }>(caller, 'producer_closed');
+    const callerDowngraded = onceEvent<{ callId: string; callType: string }>(
+      caller,
+      'call_type_changed',
+    );
+    const calleeDowngraded = onceEvent<{ callId: string; callType: string }>(
+      callee,
+      'call_type_changed',
+    );
+    caller.emit('set_call_type', { callId, callType: 'VOICE' });
+
+    await expect(producerClosed).resolves.toEqual({
+      callId,
+      producerId: videoNotice.producerId,
+      kind: 'video',
+    });
+    await expect(callerDowngraded).resolves.toEqual(
+      expect.objectContaining({ callId, callType: 'VOICE' }),
+    );
+    await expect(calleeDowngraded).resolves.toEqual(
+      expect.objectContaining({ callId, callType: 'VOICE' }),
+    );
+
+    const rawSession = await redis.get(`call:${callId}:session`);
+    expect(JSON.parse(rawSession as string)).toEqual(
+      expect.objectContaining({ callId, callType: 'VOICE', status: 'active' }),
+    );
+    expect(
+      mediaEngine.getRoomState(callId)?.producers.get(videoNotice.producerId)
+        ?.closed,
+    ).toBe(true);
+    expect(
+      mediaEngine.getRoomState(callId)?.producers.get(audioNotice.producerId)
+        ?.closed,
+    ).toBe(false);
+  });
+
+  it('rejoin advertises both active audio and video producers for a VIDEO call', async () => {
+    const { caller, callee, callId } = await establishActiveCall('VIDEO');
+    const calleeSendTransport = await createAndConnectTransport(
+      callee,
+      callId,
+      'send',
+    );
+
+    const audioNoticePromise = onceEvent<{
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(caller, 'new_producer');
+    callee.emit('produce', {
+      callId,
+      transportId: calleeSendTransport.transportId,
+      kind: 'audio',
+      rtpParameters: { codecs: validRtpCapabilities.codecs },
+    });
+    const audioNotice = await audioNoticePromise;
+
+    const videoNoticePromise = onceEvent<{
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(caller, 'new_producer');
+    callee.emit('produce', {
+      callId,
+      transportId: calleeSendTransport.transportId,
+      kind: 'video',
+      rtpParameters: { codecs: validRtpCapabilities.codecs },
+    });
+    const videoNotice = await videoNoticePromise;
+
+    const peerReconnecting = onceEvent(callee, 'peer_reconnecting');
+    const callerDisconnected = waitForDisconnect(caller);
+    caller.disconnect();
+    await callerDisconnected;
+    await peerReconnecting;
+
+    await waitForStoredParticipant(
+      callId,
+      callerUser.id,
+      (participant) => participant?.isConnected === false,
+    );
+
+    const callerReconnected = await connectClient('caller-token');
+    const rejoined = onceEvent<{
+      callId: string;
+      session: { status: string; callType: 'VOICE' | 'VIDEO' };
+      activeProducers?: Array<{
+        userId: string;
+        producerId: string;
+        kind: 'audio' | 'video';
+      }>;
+    }>(callerReconnected, 'call_rejoined');
+    callerReconnected.emit('rejoin_call', { callId });
+
+    const payload = await rejoined;
+    expect(payload.callId).toBe(callId);
+    expect(payload.session).toEqual(
+      expect.objectContaining({ status: 'active', callType: 'VIDEO' }),
+    );
+    expect(payload.activeProducers).toEqual(
+      expect.arrayContaining([
+        {
+          userId: calleeUser.id,
+          producerId: audioNotice.producerId,
+          kind: 'audio',
+        },
+        {
+          userId: calleeUser.id,
+          producerId: videoNotice.producerId,
+          kind: 'video',
+        },
+      ]),
+    );
+  });
+
   it('auto-ends unanswered voice calls after the backend no-answer timeout', async () => {
     const caller = await connectClient('caller-token');
     const callee = await connectClient('callee-token');
@@ -1138,7 +1414,7 @@ describe('Call Service P0 flow (e2e)', () => {
     expect(participantAfterDisconnect?.isConnected).toBe(true);
   });
 
-  async function establishActiveCall() {
+  async function establishActiveCall(callType: 'VOICE' | 'VIDEO' = 'VIDEO') {
     const caller = await connectClient('caller-token');
     const callee = await connectClient('callee-token');
 
@@ -1148,7 +1424,7 @@ describe('Call Service P0 flow (e2e)', () => {
     caller.emit('initiate_call', {
       conversationId: 'conv-active',
       targetUserId: calleeUser.id,
-      callType: 'VIDEO',
+      callType,
     });
 
     const [{ callId }] = await Promise.all([callerJoined, incomingCall]);
