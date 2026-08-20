@@ -10,6 +10,23 @@ const FOURTH_ID = '55555555-5555-4555-8555-555555555555';
 const joinedAtMap = (ids: string[], timestamp: Date) =>
   Object.fromEntries(ids.map((id) => [id, timestamp.toISOString()]));
 
+const projectionMember = (
+  id: string,
+  userId: string,
+  role: 'OWNER' | 'ADMIN' | 'MEMBER',
+  status: 'ACTIVE' | 'LEFT' | 'REMOVED' = 'ACTIVE',
+) => ({
+  id,
+  conversationId: 'conversation-id',
+  userId,
+  role,
+  status,
+  joinedAt: new Date('2026-08-19T00:00:00.000Z'),
+  invitedBy: null,
+  leftAt: null,
+  removedBy: null,
+});
+
 describe('PrismaConversationChatRepository', () => {
   const createdAt = new Date('2026-08-19T00:00:00.000Z');
   let prisma: any;
@@ -22,6 +39,11 @@ describe('PrismaConversationChatRepository', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
+      },
+      conversationMember: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
       },
     };
 
@@ -72,6 +94,67 @@ describe('PrismaConversationChatRepository', () => {
       }),
     });
     expect(result.name).toBe('Core Team');
+  });
+
+  it('projects a new group into OWNER and MEMBER V2 records', async () => {
+    const group = new Conversation({
+      creatorId: OWNER_ID,
+      participantIds: [OWNER_ID, MEMBER_ID],
+      isGroup: true,
+      name: 'Core Team',
+      memberJoinedAt: joinedAtMap([OWNER_ID, MEMBER_ID], createdAt),
+      createdAt,
+      updatedAt: createdAt,
+    });
+    prisma.conversation.create.mockResolvedValue({
+      id: 'conversation-id',
+      creatorId: OWNER_ID,
+      participantIds: [OWNER_ID, MEMBER_ID],
+      isGroup: true,
+      name: group.name,
+      picture: null,
+      memberJoinedAt: group.memberJoinedAt,
+      lastMessage: null,
+      lastMessageAt: null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    prisma.conversation.findUnique.mockResolvedValue({
+      creatorId: OWNER_ID,
+      participantIds: [OWNER_ID, MEMBER_ID],
+      memberJoinedAt: group.memberJoinedAt,
+      createdAt,
+      isGroup: true,
+    });
+
+    await repository.createConversation(group);
+
+    expect(prisma.conversationMember.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.conversationMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          conversationId_userId: {
+            conversationId: 'conversation-id',
+            userId: OWNER_ID,
+          },
+        },
+        create: expect.objectContaining({
+          userId: OWNER_ID,
+          role: 'OWNER',
+          status: 'ACTIVE',
+        }),
+      }),
+    );
+    expect(prisma.conversationMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          userId: MEMBER_ID,
+          role: 'MEMBER',
+          status: 'ACTIVE',
+          invitedBy: OWNER_ID,
+        }),
+      }),
+    );
   });
 
   it('guards metadata updates with the owner at the final database mutation', async () => {
@@ -306,5 +389,171 @@ describe('PrismaConversationChatRepository', () => {
         },
       },
     });
+  });
+
+  it('projects ownership transfer while preserving an existing ADMIN role', async () => {
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversation.findUnique.mockResolvedValue({
+      creatorId: MEMBER_ID,
+      participantIds: [OWNER_ID, MEMBER_ID, THIRD_ID],
+      memberJoinedAt: joinedAtMap([OWNER_ID, MEMBER_ID, THIRD_ID], createdAt),
+      createdAt,
+      isGroup: true,
+    });
+    prisma.conversationMember.findMany.mockResolvedValue([
+      projectionMember('owner-row', OWNER_ID, 'OWNER'),
+      projectionMember('member-row', MEMBER_ID, 'MEMBER'),
+      projectionMember('admin-row', THIRD_ID, 'ADMIN'),
+    ]);
+
+    await expect(
+      repository.transferOwnership('conversation-id', OWNER_ID, MEMBER_ID),
+    ).resolves.toBe(true);
+
+    expect(prisma.conversationMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ role: 'MEMBER', status: 'ACTIVE' }),
+        where: {
+          conversationId_userId: {
+            conversationId: 'conversation-id',
+            userId: OWNER_ID,
+          },
+        },
+      }),
+    );
+    expect(prisma.conversationMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ role: 'OWNER', status: 'ACTIVE' }),
+        where: {
+          conversationId_userId: {
+            conversationId: 'conversation-id',
+            userId: MEMBER_ID,
+          },
+        },
+      }),
+    );
+    expect(prisma.conversationMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ role: 'ADMIN', status: 'ACTIVE' }),
+        where: {
+          conversationId_userId: {
+            conversationId: 'conversation-id',
+            userId: THIRD_ID,
+          },
+        },
+      }),
+    );
+  });
+
+  it('projects a voluntary member leave as LEFT', async () => {
+    prisma.conversation.findUnique
+      .mockResolvedValueOnce({
+        creatorId: OWNER_ID,
+        participantIds: [OWNER_ID, MEMBER_ID, THIRD_ID],
+        memberJoinedAt: joinedAtMap([OWNER_ID, MEMBER_ID, THIRD_ID], createdAt),
+        createdAt,
+      })
+      .mockResolvedValueOnce({
+        creatorId: OWNER_ID,
+        participantIds: [OWNER_ID, THIRD_ID],
+        memberJoinedAt: joinedAtMap([OWNER_ID, THIRD_ID], createdAt),
+        createdAt,
+        isGroup: true,
+      });
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversationMember.findMany.mockResolvedValue([
+      projectionMember('owner-row', OWNER_ID, 'OWNER'),
+      projectionMember('member-row', MEMBER_ID, 'MEMBER'),
+      projectionMember('third-row', THIRD_ID, 'MEMBER'),
+    ]);
+
+    await expect(
+      repository.removeParticipantAsMember('conversation-id', MEMBER_ID),
+    ).resolves.toBe(true);
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith({
+      where: { id: 'member-row' },
+      data: {
+        role: 'MEMBER',
+        status: 'LEFT',
+        leftAt: expect.any(Date),
+        removedBy: null,
+      },
+    });
+  });
+
+  it('projects an owner removal as REMOVED with removedBy', async () => {
+    prisma.conversation.findUnique
+      .mockResolvedValueOnce({
+        creatorId: OWNER_ID,
+        participantIds: [OWNER_ID, MEMBER_ID, THIRD_ID],
+        memberJoinedAt: joinedAtMap([OWNER_ID, MEMBER_ID, THIRD_ID], createdAt),
+        createdAt,
+      })
+      .mockResolvedValueOnce({
+        creatorId: OWNER_ID,
+        participantIds: [OWNER_ID, THIRD_ID],
+        memberJoinedAt: joinedAtMap([OWNER_ID, THIRD_ID], createdAt),
+        createdAt,
+        isGroup: true,
+      });
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversationMember.findMany.mockResolvedValue([
+      projectionMember('owner-row', OWNER_ID, 'OWNER'),
+      projectionMember('member-row', MEMBER_ID, 'MEMBER'),
+      projectionMember('third-row', THIRD_ID, 'MEMBER'),
+    ]);
+
+    await expect(
+      repository.removeParticipantAsOwner(
+        'conversation-id',
+        OWNER_ID,
+        MEMBER_ID,
+      ),
+    ).resolves.toBe(true);
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith({
+      where: { id: 'member-row' },
+      data: {
+        role: 'MEMBER',
+        status: 'REMOVED',
+        leftAt: null,
+        removedBy: OWNER_ID,
+      },
+    });
+  });
+
+  it('does not fail an already-committed V1 mutation if projection sync fails', async () => {
+    const joinedAt = new Date('2026-08-19T01:00:00.000Z');
+    prisma.conversation.findUnique
+      .mockResolvedValueOnce({
+        creatorId: OWNER_ID,
+        participantIds: [OWNER_ID, MEMBER_ID],
+        memberJoinedAt: joinedAtMap([OWNER_ID, MEMBER_ID], createdAt),
+        createdAt,
+      })
+      .mockResolvedValueOnce({
+        creatorId: OWNER_ID,
+        participantIds: [OWNER_ID, MEMBER_ID, NEW_MEMBER_ID],
+        memberJoinedAt: {
+          ...joinedAtMap([OWNER_ID, MEMBER_ID], createdAt),
+          [NEW_MEMBER_ID]: joinedAt.toISOString(),
+        },
+        createdAt,
+        isGroup: true,
+      });
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversationMember.findMany.mockRejectedValue(
+      new Error('projection unavailable'),
+    );
+
+    await expect(
+      repository.addParticipantAsOwner(
+        'conversation-id',
+        OWNER_ID,
+        NEW_MEMBER_ID,
+        joinedAt,
+      ),
+    ).resolves.toBe(true);
   });
 });
