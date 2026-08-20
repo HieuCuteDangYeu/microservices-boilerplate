@@ -2,5 +2,5 @@ import { ValidateUserResponse } from '@common/user/interfaces/validate-user-resp
 
 export interface IUserService {
   validateUsers(ids: string[]): Promise<boolean>;
-  findUsersByIds(ids: string[]): Promise<ValidateUserResponse | null>;
+  findUsersByIds(ids: string[]): Promise<ValidateUserResponse[]>;
 }
