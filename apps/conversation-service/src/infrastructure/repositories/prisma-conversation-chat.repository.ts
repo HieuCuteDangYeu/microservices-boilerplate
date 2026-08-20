@@ -75,7 +75,7 @@ export class PrismaConversationChatRepository
   extends PrismaChatRepository
   implements IConversationMutationRepository
 {
-  private readonly logger = new Logger(PrismaConversationChatRepository.name);
+  private readonly projectionLogger = new Logger(PrismaConversationChatRepository.name);
 
   constructor(
     private readonly conversationPrisma: PrismaService,
@@ -498,7 +498,7 @@ export class PrismaConversationChatRepository
         });
       }
     } catch (error) {
-      this.logger.warn(
+      this.projectionLogger.warn(
         `ConversationMember projection sync failed for ${conversationId}: ${(error as Error).message}`,
       );
     }
