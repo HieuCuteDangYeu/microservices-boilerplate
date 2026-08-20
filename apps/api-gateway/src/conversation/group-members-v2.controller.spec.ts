@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { of } from 'rxjs';
 import { GroupMembersV2Controller } from './group-members-v2.controller';
 
@@ -62,12 +63,56 @@ describe('GroupMembersV2Controller', () => {
         requesterUserId: 'authenticated-user-id',
       },
     );
+  });
+
+  it('uses JWT identity for role mutation and never accepts actor identity from the body', async () => {
+    const conversationClient = {
+      send: jest.fn().mockReturnValue(
+        of({
+          userId: 'member-id',
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          joinedAt: '2026-08-19T00:00:00.000Z',
+        }),
+      ),
+    };
+    const controller = new GroupMembersV2Controller(conversationClient as never);
+
+    await expect(
+      controller.updateGroupMemberRole(
+        'conversation-id',
+        'member-id',
+        { role: 'ADMIN', actorUserId: 'spoofed-owner' },
+        { id: 'authenticated-owner-id' } as never,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ userId: 'member-id', role: 'ADMIN' }),
+    );
+
     expect(conversationClient.send).toHaveBeenCalledWith(
-      'get_conversation_detail',
+      'update_group_member_role',
       {
-        id: 'conversation-id',
-        userId: 'authenticated-user-id',
+        conversationId: 'conversation-id',
+        actorUserId: 'authenticated-owner-id',
+        targetUserId: 'member-id',
+        role: 'ADMIN',
       },
     );
+  });
+
+  it('rejects unsupported roles before sending an RMQ mutation', async () => {
+    const conversationClient = { send: jest.fn() };
+    const controller = new GroupMembersV2Controller(conversationClient as never);
+
+    await expect(
+      controller.updateGroupMemberRole(
+        'conversation-id',
+        'member-id',
+        { role: 'OWNER' },
+        { id: 'authenticated-owner-id' } as never,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(conversationClient.send).not.toHaveBeenCalled();
   });
 });
