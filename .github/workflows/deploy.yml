@@ -4,20 +4,17 @@ on:
   push:
     branches:
       - master
-  pull_request:
-    branches:
-      - master
-    types:
-      - closed
   workflow_dispatch:
 
+# Production uses mutable :latest image tags and a single Docker/containerd
+# store on one VPS. Queue the entire workflow so a newer build cannot overwrite
+# :latest while an older deployment is still pulling images.
 concurrency:
-  group: deploy-master-${{ github.event.pull_request.merge_commit_sha || github.sha }}
-  cancel-in-progress: true
+  group: deploy-production
+  cancel-in-progress: false
 
 jobs:
   detect-changes:
-    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
       build_services_json: ${{ steps.detect.outputs.build_services_json }}
@@ -28,7 +25,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Detect affected services
@@ -57,11 +54,6 @@ jobs:
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             changed_files="__BUILD_ALL__"
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            base_sha="${{ github.event.pull_request.base.sha }}"
-            head_sha="${{ github.event.pull_request.merge_commit_sha }}"
-            git fetch --no-tags --depth=1 origin "$base_sha"
-            changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
           else
             before_sha="${{ github.event.before }}"
             head_sha="${{ github.sha }}"
@@ -99,6 +91,7 @@ jobs:
 
           build_services=()
           deploy_services=()
+
           add_build_service() {
             local candidate="$1"
 
@@ -206,7 +199,7 @@ jobs:
 
   build-and-push:
     needs: detect-changes
-    if: (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && needs.detect-changes.outputs.build_services_json != '[]'
+    if: needs.detect-changes.outputs.build_services_json != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -216,7 +209,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -233,7 +226,7 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
 
   deploy:
-    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.merged == true) && (needs.detect-changes.outputs.deploy_services_json == '[]' || needs.detect-changes.outputs.build_services_json == '[]' || needs.build-and-push.result == 'success')
+    if: always() && (needs.detect-changes.outputs.deploy_services_json == '[]' || needs.detect-changes.outputs.build_services_json == '[]' || needs.build-and-push.result == 'success')
     needs: [detect-changes, build-and-push]
     runs-on: ubuntu-latest
     steps:
@@ -248,7 +241,7 @@ jobs:
           script: |
             set -e
 
-            DEPLOY_SHA="${{ github.event.pull_request.merge_commit_sha || github.sha }}"
+            DEPLOY_SHA="${{ github.sha }}"
 
             echo "Checking server..."
             whoami
@@ -295,8 +288,9 @@ jobs:
             echo "Build services: ${BUILD_SERVICES:-none}"
             echo "Deploy services: ${DEPLOY_SERVICES}"
 
-            echo "Compose config check:"
-            docker compose config
+            # Validate compose without printing resolved environment values.
+            echo "Validating Compose config..."
+            docker compose config --quiet
 
             PULL_SERVICES="${BUILD_SERVICES}"
             if [ -z "${PULL_SERVICES}" ]; then
@@ -305,7 +299,23 @@ jobs:
 
             if [ -n "${PULL_SERVICES}" ]; then
               echo "Pulling deploy images: ${PULL_SERVICES}"
-              docker compose pull ${PULL_SERVICES}
+              pull_ok=false
+              for attempt in 1 2 3; do
+                echo "Docker image pull attempt ${attempt}/3..."
+                if docker compose pull ${PULL_SERVICES}; then
+                  pull_ok=true
+                  break
+                fi
+
+                if [ "$attempt" -lt 3 ]; then
+                  sleep $((attempt * 5))
+                fi
+              done
+
+              if [ "$pull_ok" != true ]; then
+                echo "Failed to pull deploy images after 3 attempts."
+                exit 1
+              fi
             else
               echo "No deploy images to pull."
             fi
