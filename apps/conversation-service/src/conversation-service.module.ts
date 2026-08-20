@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 
 // Import UseCases & Infra
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { GroupMembershipConsistencyService } from 'apps/conversation-service/src/application/services/group-membership-consistency.service';
 import { BuildBotMemoryContextUseCase } from 'apps/conversation-service/src/application/use-cases/build-bot-memory-context.use-case';
 import { BuildCompletedTurnMemoryContextUseCase } from 'apps/conversation-service/src/application/use-cases/build-completed-turn-memory-context.use-case';
 import { CreateConversationUseCase } from 'apps/conversation-service/src/application/use-cases/create-conversastion.use-case';
@@ -111,7 +112,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     PrismaService,
     ChatGateway,
 
-    // --- Use Cases ---
+    // --- Use Cases / application services ---
     SendMessageUseCase,
     GetMessagesAroundUseCase,
     GetAnchorOlderMessagesUseCase,
@@ -122,6 +123,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     CreateConversationUseCase,
     ManageGroupConversationUseCase,
     ManageGroupRoleUseCase,
+    GroupMembershipConsistencyService,
     GetUserConversationsUseCase,
     ProcessBotReplyUseCase,
     TriggerBotReplyUseCase,
