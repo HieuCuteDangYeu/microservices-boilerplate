@@ -439,7 +439,7 @@ export class PrismaConversationChatRepository
         const role =
           userId === conversation.creatorId
             ? 'OWNER'
-            : existing?.role === 'ADMIN'
+            : existing?.status === 'ACTIVE' && existing.role === 'ADMIN'
               ? 'ADMIN'
               : 'MEMBER';
         const invitedBy =
