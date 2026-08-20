@@ -123,6 +123,27 @@ describe('GroupActivityService', () => {
     expect(realtimePublisher.emitConversationUpdated).toHaveBeenCalledTimes(1);
   });
 
+  it('resolves a missing activity actor name from the current conversation participants', async () => {
+    chatRepository.findConversation
+      .mockResolvedValueOnce(group())
+      .mockResolvedValueOnce(group());
+
+    await (service as any).persistAndPublish({
+      conversationId: CONVERSATION_ID,
+      type: 'GROUP_CREATED',
+      actorUserId: OWNER_ID,
+    });
+
+    const message = chatRepository.createMessageIdempotently.mock.calls[0][0] as Message;
+    expect(message.senderId).toBe(OWNER_ID);
+    expect(message.content).toBe('Owner User created the group');
+    expect(message.metadata?.groupActivity).toEqual({
+      type: 'GROUP_CREATED',
+      actorUserId: OWNER_ID,
+      actorName: 'Owner User',
+    });
+  });
+
   it('does not emit realtime for an idempotent persistence result', async () => {
     chatRepository.createMessageIdempotently.mockResolvedValue({
       created: false,
