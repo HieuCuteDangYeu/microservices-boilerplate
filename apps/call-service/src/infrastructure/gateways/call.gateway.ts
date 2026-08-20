@@ -250,11 +250,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           continue;
         }
 
-        if (
-          session.status === 'initiated' ||
-          session.status === 'ringing' ||
-          session.status === 'active'
-        ) {
+        if (session.status === 'active') {
           const reconnectDeadlineAt = new Date(
             Date.now() + this.reconnectGraceMs,
           );
@@ -267,14 +263,26 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
               reconnectDeadlineAt,
             }),
           );
-          if (session.status === 'active') {
-            this.server.to(callId).emit('peer_reconnecting', {
-              callId,
-              userId,
-              reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
-            });
-          }
+          this.server.to(callId).emit('peer_reconnecting', {
+            callId,
+            userId,
+            reconnectDeadlineAt: reconnectDeadlineAt.toISOString(),
+          });
           this.scheduleDisconnectFinalization(callId, userId);
+          continue;
+        }
+
+        if (session.status === 'initiated' || session.status === 'ringing') {
+          await this.stateRepository.removeParticipant(callId, userId);
+          const result = await this.leaveCallUseCase.execute(
+            callId,
+            userId,
+            'disconnected',
+          );
+          if (result.shouldEmitPeerLeft) {
+            this.emitPeerLeft(callId, userId, 'disconnected');
+          }
+          this.emitCallEnded(result.session, result.endedReason);
           continue;
         }
 
@@ -890,47 +898,64 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
-  private scheduleDisconnectFinalization(callId: string, userId: string): void {
+  private scheduleDisconnectFinalization(
+    callId: string,
+    userId: string,
+    delayMs = this.reconnectGraceMs,
+  ): void {
     this.clearPendingDisconnect(callId, userId);
 
-    const timeoutId = setTimeout(() => {
-      void (async () => {
-        try {
-          const participant = await this.stateRepository.getParticipant(
-            callId,
-            userId,
-          );
+    let rescheduled = false;
+    const timeoutId = setTimeout(
+      () => {
+        void (async () => {
+          try {
+            const participant = await this.stateRepository.getParticipant(
+              callId,
+              userId,
+            );
 
-          if (
-            !participant ||
-            participant.isConnected ||
-            !participant.reconnectDeadlineAt ||
-            participant.reconnectDeadlineAt.getTime() > Date.now()
-          ) {
-            return;
-          }
+            if (
+              !participant ||
+              participant.isConnected ||
+              !participant.reconnectDeadlineAt
+            ) {
+              return;
+            }
 
-          await this.stateRepository.removeParticipant(callId, userId);
-          const result = await this.leaveCallUseCase.execute(
-            callId,
-            userId,
-            'disconnected',
-          );
-          if (result.shouldEmitPeerLeft) {
-            this.emitPeerLeft(callId, userId, 'disconnected');
+            const remainingMs =
+              participant.reconnectDeadlineAt.getTime() - Date.now();
+            if (remainingMs > 0) {
+              rescheduled = true;
+              this.scheduleDisconnectFinalization(callId, userId, remainingMs);
+              return;
+            }
+
+            await this.stateRepository.removeParticipant(callId, userId);
+            const result = await this.leaveCallUseCase.execute(
+              callId,
+              userId,
+              'disconnected',
+            );
+            if (result.shouldEmitPeerLeft) {
+              this.emitPeerLeft(callId, userId, 'disconnected');
+            }
+            this.emitCallEnded(result.session, result.endedReason);
+          } catch (error) {
+            this.logger.warn(
+              `Deferred disconnect cleanup failed for call ${callId}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          } finally {
+            if (!rescheduled) {
+              this.clearPendingDisconnect(callId, userId);
+            }
           }
-          this.emitCallEnded(result.session, result.endedReason);
-        } catch (error) {
-          this.logger.warn(
-            `Deferred disconnect cleanup failed for call ${callId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        } finally {
-          this.clearPendingDisconnect(callId, userId);
-        }
-      })();
-    }, this.reconnectGraceMs);
+        })();
+      },
+      Math.max(1, delayMs),
+    );
 
     this.pendingDisconnects.set(this.disconnectKey(callId, userId), timeoutId);
   }
