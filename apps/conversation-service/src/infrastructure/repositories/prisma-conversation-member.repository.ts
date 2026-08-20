@@ -43,18 +43,41 @@ export class PrismaConversationMemberRepository
   ): Promise<boolean> {
     try {
       return await this.prisma.$transaction(async (tx) => {
-        // Write the legacy Conversation document inside the same transaction so
+        const conversation = await tx.conversation.findUnique({
+          where: { id: conversationId },
+          select: {
+            creatorId: true,
+            participantIds: true,
+            isGroup: true,
+            updatedAt: true,
+          },
+        });
+
+        if (
+          !conversation?.isGroup ||
+          conversation.creatorId !== actorUserId ||
+          !conversation.participantIds.includes(targetUserId)
+        ) {
+          return false;
+        }
+
+        // Touch the legacy Conversation document inside the same transaction so
         // a concurrent ownership transfer or membership mutation conflicts with
-        // this role change instead of allowing a stale-owner write skew.
+        // this role change. Use a temporary timestamp that is guaranteed to
+        // differ, then restore the original timestamp before commit. This keeps
+        // the write-conflict guard without reordering the conversation merely
+        // because a member role changed.
+        const guardTimestamp = new Date(conversation.updatedAt.getTime() + 1);
         const ownershipGuard = await tx.conversation.updateMany({
           where: {
             id: conversationId,
             isGroup: true,
             creatorId: actorUserId,
             participantIds: { has: targetUserId },
+            updatedAt: conversation.updatedAt,
           },
           data: {
-            creatorId: actorUserId,
+            updatedAt: guardTimestamp,
           },
         });
 
@@ -75,10 +98,15 @@ export class PrismaConversationMemberRepository
         });
 
         if (roleUpdate.count !== 1) {
-          // Roll the no-op Conversation guard write back as well. This keeps a
-          // failed/idempotent role mutation from changing conversation.updatedAt.
           throw new GroupRoleMutationConflict();
         }
+
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: {
+            updatedAt: conversation.updatedAt,
+          },
+        });
 
         return true;
       });
