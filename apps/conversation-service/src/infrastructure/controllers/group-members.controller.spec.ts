@@ -57,7 +57,7 @@ describe('GroupMembersMicroserviceController', () => {
     );
   });
 
-  it('emits the existing conversation_updated lifecycle event after a role mutation', async () => {
+  it('emits the existing conversation_updated lifecycle event after a real role mutation', async () => {
     const conversation = {
       id: 'conversation-id',
       participantIds: ['owner-id', 'member-id'],
@@ -65,6 +65,7 @@ describe('GroupMembersMicroserviceController', () => {
     const roleUseCase = {
       updateRole: jest.fn().mockResolvedValue({
         conversation,
+        changed: true,
         member: {
           userId: 'member-id',
           role: 'ADMIN',
@@ -96,6 +97,40 @@ describe('GroupMembersMicroserviceController', () => {
     expect(chatGateway.emitConversationUpdated).toHaveBeenCalledWith(
       conversation,
     );
+  });
+
+  it('does not emit a duplicate conversation_updated event for an idempotent role request', async () => {
+    const conversation = {
+      id: 'conversation-id',
+      participantIds: ['owner-id', 'member-id'],
+    };
+    const roleUseCase = {
+      updateRole: jest.fn().mockResolvedValue({
+        conversation,
+        changed: false,
+        member: {
+          userId: 'member-id',
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          joinedAt: '2026-08-19T00:00:00.000Z',
+        },
+      }),
+    };
+    const chatGateway = { emitConversationUpdated: jest.fn() };
+    const { controller } = createController({ roleUseCase, chatGateway });
+
+    await expect(
+      controller.handleUpdateGroupMemberRole({
+        conversationId: 'conversation-id',
+        actorUserId: 'owner-id',
+        targetUserId: 'member-id',
+        role: 'ADMIN',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ userId: 'member-id', role: 'ADMIN' }),
+    );
+
+    expect(chatGateway.emitConversationUpdated).not.toHaveBeenCalled();
   });
 
   it('maps member-list use-case failures to an RMQ exception', async () => {
