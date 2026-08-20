@@ -298,24 +298,31 @@ jobs:
             fi
 
             if [ -n "${PULL_SERVICES}" ]; then
-              echo "Pulling deploy images: ${PULL_SERVICES}"
-              pull_ok=false
-              for attempt in 1 2 3; do
-                echo "Docker image pull attempt ${attempt}/3..."
-                if docker compose pull ${PULL_SERVICES}; then
-                  pull_ok=true
-                  break
-                fi
+              echo "Pulling deploy images sequentially: ${PULL_SERVICES}"
 
-                if [ "$attempt" -lt 3 ]; then
-                  sleep $((attempt * 5))
+              # Pull one service at a time. The production VPS uses one
+              # containerd content store and parallel pulls can contend on
+              # shared layers/manifests.
+              for service in ${PULL_SERVICES}; do
+                pull_ok=false
+
+                for attempt in 1 2 3; do
+                  echo "Pulling ${service} (attempt ${attempt}/3)..."
+                  if docker compose pull "${service}"; then
+                    pull_ok=true
+                    break
+                  fi
+
+                  if [ "$attempt" -lt 3 ]; then
+                    sleep $((attempt * 5))
+                  fi
+                done
+
+                if [ "$pull_ok" != true ]; then
+                  echo "Failed to pull ${service} after 3 attempts."
+                  exit 1
                 fi
               done
-
-              if [ "$pull_ok" != true ]; then
-                echo "Failed to pull deploy images after 3 attempts."
-                exit 1
-              fi
             else
               echo "No deploy images to pull."
             fi
