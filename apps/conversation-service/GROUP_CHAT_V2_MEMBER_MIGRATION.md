@@ -49,12 +49,24 @@ Rollback: application code can continue to use the legacy fields because they ar
 Run the backfill in audit mode first:
 
 ```bash
+pnpm audit:conversation-members-v2
+```
+
+Equivalent direct command:
+
+```bash
 node scripts/backfill-conversation-members-v2.cjs
 ```
 
 Audit mode does not mutate data. A non-zero exit code indicates drift or invalid legacy groups.
 
-After reviewing the output, apply with the explicit safety token:
+After reviewing the output, apply with the explicit safety command:
+
+```bash
+pnpm backfill:conversation-members-v2:apply
+```
+
+Equivalent direct command:
 
 ```bash
 CONFIRM=BACKFILL_CONVERSATION_MEMBERS_V2 node scripts/backfill-conversation-members-v2.cjs
@@ -84,6 +96,51 @@ After a successful legacy mutation, conversation-service synchronizes the `Conve
 Projection synchronization is deliberately non-authoritative in this stage. If it fails, the already-committed V1 mutation still succeeds and drift is repaired by the audit/backfill command.
 
 This behavior prevents a cross-collection projection failure from making the client believe a legacy mutation failed when it actually committed.
+
+## Stage 2.5 — Shadow consistency under real traffic
+
+Before the V2 projection participates in authorization, enable read-only shadow verification:
+
+```bash
+GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true
+```
+
+The flag is default-OFF. When enabled, successful group lifecycle mutations schedule a non-blocking comparison after:
+
+- group creation;
+- add member;
+- remove member;
+- leave group;
+- ownership transfer;
+- role promotion/demotion.
+
+The shadow checker compares the legacy source of truth against `ConversationMember` and reports `readyForCutover=false` when it sees any of:
+
+- active legacy participant missing from the projection;
+- unexpected active projection row not present in `participantIds`;
+- projected OWNER set not exactly equal to `creatorId`;
+- joined-at timestamp drift;
+- conversation/projection read failure.
+
+Drift is logged with the prefix:
+
+```text
+[GroupV2Shadow] membership projection drift
+```
+
+Shadow checks are deliberately fire-and-forget and never turn a successful V1 mutation into a failed client request. This is telemetry, not authorization.
+
+Required rollout order:
+
+1. schema + dual write deployed;
+2. static backfill audit clean;
+3. enable `GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true` in staging;
+4. exercise normal and concurrent group lifecycle traffic;
+5. require no drift warnings and another clean static audit;
+6. only then consider enabling gated role mutation;
+7. canonical authorization remains a later gate.
+
+Do not enable canonical V2 authorization just because one static backfill run is clean. Shadow traffic validation exists specifically to catch runtime drift that a one-time migration cannot prove absent.
 
 ## Stage 3 — Additive read path
 
@@ -131,11 +188,12 @@ Do not make `ConversationMember` authoritative for existing V1 authorization unt
 
 1. schema deployed everywhere;
 2. backfill audit is clean;
-3. dual-write drift remains zero under normal traffic;
-4. ownership transfer stress tests remain clean;
-5. add/remove/leave concurrency tests remain clean;
-6. mixed-version Socket.IO rollout remains clean;
-7. mobile group lifecycle physical-device tests pass.
+3. shadow consistency reports remain clean under real traffic;
+4. dual-write drift remains zero under normal traffic;
+5. ownership transfer stress tests remain clean;
+6. add/remove/leave concurrency tests remain clean;
+7. mixed-version Socket.IO rollout remains clean;
+8. mobile group lifecycle physical-device tests pass.
 
 Until this gate, existing management operations remain owner-only exactly as V1.
 
@@ -188,6 +246,8 @@ GROUP_V2_ROLE_MUTATIONS_ENABLED=true
 ```
 
 When the variable is absent or false, the use case rejects role mutations. Deploying the code therefore does not automatically grant or change any role-management capability.
+
+Do not enable this flag before shadow consistency has been enabled and remained clean in staging.
 
 ### Atomic stale-owner protection
 
@@ -279,18 +339,21 @@ At minimum:
 ```bash
 pnpm prisma:generate:conversation
 pnpm exec prisma validate --schema=apps/conversation-service/prisma/schema.prisma
-pnpm test -- get-group-members.use-case.spec.ts manage-group-role.use-case.spec.ts group-permission.policy.spec.ts prisma-conversation-member.repository.spec.ts prisma-conversation-chat.repository.spec.ts manage-group-conversation.use-case.spec.ts group-members.controller.spec.ts group-members-v2.controller.spec.ts chat.gateway.realtime.spec.ts chat.gateway.room-migration.spec.ts
+pnpm test -- create-conversastion.use-case.spec.ts group-membership-consistency.service.spec.ts get-group-members.use-case.spec.ts manage-group-role.use-case.spec.ts group-permission.policy.spec.ts prisma-conversation-member.repository.spec.ts prisma-conversation-chat.repository.spec.ts manage-group-conversation.use-case.spec.ts group-members.controller.spec.ts group-members-v2.controller.spec.ts chat.gateway.realtime.spec.ts chat.gateway.room-migration.spec.ts
 pnpm build:conversation
 pnpm build:gateway
 ```
 
 Then:
 
-1. run the backfill against a staging copy of production data in audit mode;
+1. run `pnpm audit:conversation-members-v2` against a staging copy of production data;
 2. apply the backfill only after reviewing audit output;
 3. run audit again and require zero drift;
-4. exercise promote/demote with the role flag enabled only in staging;
-5. race promote/demote against ownership transfer and member removal;
-6. verify Android/iOS group lifecycle remains unchanged with the flag disabled.
+4. enable `GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true` in staging while role mutations remain disabled;
+5. exercise create/add/remove/leave/ownership-transfer traffic including concurrency races;
+6. require no `[GroupV2Shadow]` drift warnings and another clean static audit;
+7. only then enable `GROUP_V2_ROLE_MUTATIONS_ENABLED=true` in staging;
+8. exercise promote/demote and race them against ownership transfer/member removal;
+9. verify Android/iOS group lifecycle remains unchanged with both flags disabled in production-equivalent configuration.
 
 No merge should happen until runtime/physical-device validation is complete.
