@@ -27,7 +27,7 @@ export class ConversationMapper {
       participantIds: prismaData.participantIds,
       isGroup: prismaData.isGroup,
       name: prismaData.name ?? undefined,
-      picture: prismaData.picture ?? undefined,
+      picture: prismaData.picture,
       memberJoinedAt: toMemberJoinedAt(prismaData.memberJoinedAt),
       createdAt: prismaData.createdAt,
       updatedAt: prismaData.updatedAt,
