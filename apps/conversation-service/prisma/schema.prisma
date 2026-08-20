@@ -26,6 +26,18 @@ type OneTimePreKey {
   publicKey String
 }
 
+enum ConversationMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ConversationMemberStatus {
+  ACTIVE
+  LEFT
+  REMOVED
+}
+
 // --- MODELS ---
 
 model Conversation {
@@ -33,11 +45,11 @@ model Conversation {
   creatorId      String   @map("creator_id")
   participantIds String[]
 
-  // Group metadata is nullable so existing direct/group records remain valid.
+  // V1 compatibility fields. participantIds/creatorId/memberJoinedAt remain the
+  // canonical membership contract during the V2 rolling migration. The
+  // ConversationMember collection is introduced as a parallel projection first.
   name           String?
   picture        String?
-  // JSON map keyed by userId -> ISO joined-at timestamp. participantIds remains
-  // the canonical membership list; this map only stores per-member metadata.
   memberJoinedAt Json?
 
   // lastMessage chỉ lưu text hiển thị preview (ví dụ: "Tin nhắn mới", "[Hình ảnh]")
@@ -50,9 +62,34 @@ model Conversation {
   createdAt DateTime @default(now())
 
   messages Message[]
+  members  ConversationMember[]
 
   @@index([participantIds])
   @@map("conversations")
+}
+
+model ConversationMember {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  conversationId String       @db.ObjectId
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  userId         String
+
+  role   ConversationMemberRole   @default(MEMBER)
+  status ConversationMemberStatus @default(ACTIVE)
+
+  joinedAt  DateTime
+  invitedBy String?
+  leftAt    DateTime?
+  removedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([conversationId, userId])
+  @@index([conversationId, status, role])
+  @@index([userId, status])
+  @@map("conversation_members")
 }
 
 model Message {
@@ -65,8 +102,8 @@ model Message {
   // 3: PreKeyWhisperMessage (Tin thiết lập phiên X3DH)
   signalType Int @map("signal_type")
 
-  content String
-  media   Json?
+  content  String
+  media    Json?
   metadata Json?
 
   registrationId Int? // ID thiết bị người gửi
