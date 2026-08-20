@@ -29,12 +29,13 @@ const denied = (reason: string): GroupPermissionDecision => ({
 const allowed = (): GroupPermissionDecision => ({ allowed: true });
 
 /**
- * V2 permission policy definition only.
+ * Group Chat V2 permission matrix.
  *
- * This policy is intentionally not wired into the current V1 mutation use case
- * until ConversationMember has passed the migration/cutover gates. Keeping the
- * decision logic pure lets us test the intended matrix without granting ADMIN
- * privileges from a projection that is not authoritative yet.
+ * Stage 6B wires this policy into group-management mutations only when
+ * GROUP_V2_ADMIN_PERMISSIONS_ENABLED is explicitly enabled. With the flag off,
+ * the legacy owner-only V1 mutation path remains active. Keeping this policy
+ * pure makes the intended OWNER/ADMIN/MEMBER matrix testable independently of
+ * rollout state and transactional persistence details.
  */
 export const evaluateGroupPermission = ({
   actorRole,
