@@ -13,7 +13,10 @@ import { z } from 'zod';
 
 import { DeactivatePushTokenUseCase } from '../../application/use-cases/deactivate-push-token.use-case';
 import { RegisterPushTokenUseCase } from '../../application/use-cases/register-push-token.use-case';
-import { PushTokenLifecycleConflictError } from '../../domain/errors/notification.errors';
+import {
+  FcmPushTokenInvalidatedError,
+  PushTokenLifecycleConflictError,
+} from '../../domain/errors/notification.errors';
 
 const registerPushTokenSchema = z.discriminatedUnion('provider', [
   z.object({
@@ -83,6 +86,13 @@ export class PushTokensController {
         parsed.data,
       );
     } catch (error) {
+      if (error instanceof FcmPushTokenInvalidatedError) {
+        throw new ConflictException({
+          code: error.code,
+          message: error.message,
+        });
+      }
+
       if (error instanceof PushTokenLifecycleConflictError) {
         throw new ConflictException(error.message);
       }

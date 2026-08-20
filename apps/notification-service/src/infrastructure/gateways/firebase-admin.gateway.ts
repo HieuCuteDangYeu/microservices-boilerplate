@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging, Messaging } from 'firebase-admin/messaging';
 import { readFileSync } from 'node:fs';
@@ -8,6 +8,7 @@ import {
   IFcmPushGateway,
   SendFcmPushInput,
 } from '../../domain/interfaces/fcm-push.gateway.interface';
+import { IPushTokenLifecycleRepository } from '../../domain/interfaces/push-token-lifecycle.repository.interface';
 
 const ANDROID_MESSAGE_CHANNEL_ID = 'velora_messages';
 
@@ -19,9 +20,13 @@ type FirebaseServiceAccount = {
 
 @Injectable()
 export class FirebaseAdminGateway implements IFcmPushGateway {
+  private readonly logger = new Logger(FirebaseAdminGateway.name);
   private readonly messaging: Messaging;
 
-  constructor() {
+  constructor(
+    @Inject('IPushTokenLifecycleRepository')
+    private readonly lifecycleRepository: IPushTokenLifecycleRepository,
+  ) {
     const serviceAccountPath =
       process.env.NOTIFICATION_FIREBASE_SERVICE_ACCOUNT_PATH;
 
@@ -90,47 +95,87 @@ export class FirebaseAdminGateway implements IFcmPushGateway {
       Boolean(input.title?.trim()) &&
       Boolean(input.body?.trim());
 
-    return this.messaging.send({
-      token: input.token,
-      ...(shouldIncludeNotification
-        ? {
-            notification: {
-              title: input.title,
-              body: input.body,
-            },
-          }
-        : {}),
-      data,
-      android: {
-        priority: 'high',
+    try {
+      return await this.messaging.send({
+        token: input.token,
         ...(shouldIncludeNotification
           ? {
               notification: {
-                channelId: input.androidChannelId ?? ANDROID_MESSAGE_CHANNEL_ID,
-                priority: 'max',
-                sound: input.androidSound ?? 'default',
+                title: input.title,
+                body: input.body,
               },
             }
           : {}),
-      },
-      apns: {
-        ...(input.apnsBackground
-          ? {
-              headers: {
-                'apns-push-type': 'background',
-                'apns-priority': '5',
-              },
-            }
-          : {}),
-        payload: {
-          aps: {
-            ...(input.apnsContentAvailable ? { 'content-available': 1 } : {}),
-            ...(shouldIncludeNotification || input.apnsSound
-              ? { sound: input.apnsSound ?? 'default' }
-              : {}),
+        data,
+        android: {
+          priority: 'high',
+          ...(shouldIncludeNotification
+            ? {
+                notification: {
+                  channelId:
+                    input.androidChannelId ?? ANDROID_MESSAGE_CHANNEL_ID,
+                  priority: 'max',
+                  sound: input.androidSound ?? 'default',
+                },
+              }
+            : {}),
+        },
+        apns: {
+          ...(input.apnsBackground
+            ? {
+                headers: {
+                  'apns-push-type': 'background',
+                  'apns-priority': '5',
+                },
+              }
+            : {}),
+          payload: {
+            aps: {
+              ...(input.apnsContentAvailable ? { 'content-available': 1 } : {}),
+              ...(shouldIncludeNotification || input.apnsSound
+                ? { sound: input.apnsSound ?? 'default' }
+                : {}),
+            },
           },
         },
-      },
-    });
+      });
+    } catch (error) {
+      const errorCode = this.readErrorCode(error);
+
+      if (this.isTerminalFcmTokenError(errorCode)) {
+        try {
+          await this.lifecycleRepository.markTokenInvalidated({
+            provider: 'fcm',
+            token: input.token,
+          });
+        } catch (markerError) {
+          this.logger.warn(
+            `Failed to persist invalidated FCM token marker: ${this.readErrorMessage(markerError)}`,
+          );
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  private isTerminalFcmTokenError(errorCode?: string) {
+    return (
+      errorCode === 'messaging/registration-token-not-registered' ||
+      errorCode === 'messaging/invalid-registration-token'
+    );
+  }
+
+  private readErrorCode(error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error) {
+      const code = error.code;
+      return typeof code === 'string' ? code : undefined;
+    }
+
+    return undefined;
+  }
+
+  private readErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
   }
 }

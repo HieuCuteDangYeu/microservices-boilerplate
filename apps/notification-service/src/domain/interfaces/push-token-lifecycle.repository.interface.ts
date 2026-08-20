@@ -8,6 +8,11 @@ export type PushTokenLifecycleInput = Pick<
   'provider' | 'deviceId' | 'lifecycleVersion'
 >;
 
+export type PushTokenIdentityInput = Pick<
+  RegisterPushTokenInput,
+  'provider' | 'token'
+>;
+
 export type PushTokenLifecycleAction = 'register' | 'deactivate';
 
 export abstract class IPushTokenLifecycleRepository {
@@ -27,4 +32,8 @@ export abstract class IPushTokenLifecycleRepository {
     input: PushTokenLifecycleInput,
     action: PushTokenLifecycleAction,
   ): Promise<boolean>;
+
+  abstract markTokenInvalidated(input: PushTokenIdentityInput): Promise<void>;
+
+  abstract isTokenInvalidated(input: PushTokenIdentityInput): Promise<boolean>;
 }

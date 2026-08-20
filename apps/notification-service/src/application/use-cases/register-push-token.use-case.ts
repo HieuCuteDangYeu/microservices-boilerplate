@@ -4,7 +4,10 @@ import {
   PushToken,
   RegisterPushTokenInput,
 } from '../../domain/entities/push-token.entity';
-import { PushTokenLifecycleConflictError } from '../../domain/errors/notification.errors';
+import {
+  FcmPushTokenInvalidatedError,
+  PushTokenLifecycleConflictError,
+} from '../../domain/errors/notification.errors';
 import { IPushTokenLifecycleRepository } from '../../domain/interfaces/push-token-lifecycle.repository.interface';
 import { IPushTokenRepository } from '../../domain/interfaces/push-token.repository.interface';
 
@@ -35,6 +38,13 @@ export class RegisterPushTokenUseCase {
         !(await this.lifecycleRepository.advance(input, 'register'))
       ) {
         throw new PushTokenLifecycleConflictError();
+      }
+
+      if (
+        input.provider === 'fcm' &&
+        (await this.lifecycleRepository.isTokenInvalidated(input))
+      ) {
+        throw new FcmPushTokenInvalidatedError();
       }
 
       const pushToken = await this.pushTokenRepository.upsert(userId, input);

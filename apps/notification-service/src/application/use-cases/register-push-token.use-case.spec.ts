@@ -1,5 +1,8 @@
 import { PushToken } from '../../domain/entities/push-token.entity';
-import { PushTokenLifecycleConflictError } from '../../domain/errors/notification.errors';
+import {
+  FcmPushTokenInvalidatedError,
+  PushTokenLifecycleConflictError,
+} from '../../domain/errors/notification.errors';
 import type { IPushTokenLifecycleRepository } from '../../domain/interfaces/push-token-lifecycle.repository.interface';
 import type { IPushTokenRepository } from '../../domain/interfaces/push-token.repository.interface';
 import { RegisterPushTokenUseCase } from './register-push-token.use-case';
@@ -41,6 +44,8 @@ describe('RegisterPushTokenUseCase', () => {
     releaseLock: jest.Mock;
     advance: jest.Mock;
     isCurrent: jest.Mock;
+    markTokenInvalidated: jest.Mock;
+    isTokenInvalidated: jest.Mock;
   };
   let useCase: RegisterPushTokenUseCase;
 
@@ -55,6 +60,8 @@ describe('RegisterPushTokenUseCase', () => {
       releaseLock: jest.fn().mockResolvedValue(undefined),
       advance: jest.fn().mockResolvedValue(true),
       isCurrent: jest.fn().mockResolvedValue(true),
+      markTokenInvalidated: jest.fn().mockResolvedValue(undefined),
+      isTokenInvalidated: jest.fn().mockResolvedValue(false),
     };
     useCase = new RegisterPushTokenUseCase(
       pushTokenRepository as unknown as IPushTokenRepository,
@@ -79,6 +86,7 @@ describe('RegisterPushTokenUseCase', () => {
 
     expect(lifecycleRepository.acquireLock).toHaveBeenCalledWith(input);
     expect(lifecycleRepository.advance).toHaveBeenCalledWith(input, 'register');
+    expect(lifecycleRepository.isTokenInvalidated).toHaveBeenCalledWith(input);
     expect(pushTokenRepository.upsert).toHaveBeenCalledWith(USER_ID, input);
     expect(lifecycleRepository.isCurrent).toHaveBeenCalledWith(input, 'register');
     expect(pushTokenRepository.deactivateOtherDeviceTokens).toHaveBeenCalledWith(
@@ -92,6 +100,17 @@ describe('RegisterPushTokenUseCase', () => {
     ).toBeGreaterThan(
       pushTokenRepository.deactivateOtherDeviceTokens.mock.invocationCallOrder[0],
     );
+  });
+
+  it('rejects FCM tokens that Firebase already marked terminal-invalid', async () => {
+    lifecycleRepository.isTokenInvalidated.mockResolvedValue(true);
+
+    await expect(useCase.execute(USER_ID, input)).rejects.toBeInstanceOf(
+      FcmPushTokenInvalidatedError,
+    );
+
+    expect(pushTokenRepository.upsert).not.toHaveBeenCalled();
+    expect(lifecycleRepository.releaseLock).toHaveBeenCalledWith(input, 'lock-1');
   });
 
   it('releases the device lock when the lifecycle has already advanced', async () => {

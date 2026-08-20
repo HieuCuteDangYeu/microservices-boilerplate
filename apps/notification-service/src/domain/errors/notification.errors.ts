@@ -5,6 +5,15 @@ export class PushTokenLifecycleConflictError extends Error {
   }
 }
 
+export class FcmPushTokenInvalidatedError extends Error {
+  readonly code = 'FCM_TOKEN_INVALIDATED';
+
+  constructor() {
+    super('FCM push token has been invalidated');
+    this.name = FcmPushTokenInvalidatedError.name;
+  }
+}
+
 export class ActiveFcmPushTokenNotFoundError extends Error {
   constructor() {
     super('No active FCM token found');

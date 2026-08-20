@@ -4,11 +4,13 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import {
   IPushTokenLifecycleRepository,
+  PushTokenIdentityInput,
   PushTokenLifecycleAction,
   PushTokenLifecycleInput,
 } from '../../domain/interfaces/push-token-lifecycle.repository.interface';
 
 const LIFECYCLE_TTL_SECONDS = 15 * 60;
+const INVALIDATED_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const LIFECYCLE_LOCK_TTL_MS = 10_000;
 const LIFECYCLE_LOCK_WAIT_MS = 3_000;
 const LIFECYCLE_LOCK_RETRY_MS = 25;
@@ -132,12 +134,32 @@ export class RedisPushTokenLifecycleRepository
     );
   }
 
+  async markTokenInvalidated(input: PushTokenIdentityInput): Promise<void> {
+    await this.redis.set(
+      this.invalidatedTokenKey(input),
+      '1',
+      'EX',
+      INVALIDATED_TOKEN_TTL_SECONDS,
+    );
+  }
+
+  async isTokenInvalidated(input: PushTokenIdentityInput): Promise<boolean> {
+    return (await this.redis.exists(this.invalidatedTokenKey(input))) === 1;
+  }
+
   private lifecycleKey(input: PushTokenLifecycleInput) {
     return `notification:push-token-lifecycle:${this.installationHash(input)}`;
   }
 
   private lifecycleLockKey(input: PushTokenLifecycleInput) {
     return `notification:push-token-lifecycle-lock:${this.installationHash(input)}`;
+  }
+
+  private invalidatedTokenKey(input: PushTokenIdentityInput) {
+    const identity = `${input.provider}:${input.token}`;
+    const tokenHash = createHash('sha256').update(identity).digest('hex');
+
+    return `notification:push-token-invalidated:${tokenHash}`;
   }
 
   private installationHash(input: PushTokenLifecycleInput) {
