@@ -187,6 +187,8 @@ export class PrismaGroupManagementV2Repository
         !conversation?.isGroup ||
         !conversation.participantIds.includes(actorUserId) ||
         !conversation.participantIds.includes(userId) ||
+        conversation.creatorId === userId ||
+        expectedTargetRole === 'OWNER' ||
         conversation.participantIds.length <= 2
       ) {
         throw ROLLBACK;
@@ -207,7 +209,7 @@ export class PrismaGroupManagementV2Repository
           role: expectedTargetRole,
         },
         data: {
-          role: expectedTargetRole === 'OWNER' ? 'MEMBER' : expectedTargetRole,
+          role: expectedTargetRole,
           status: 'REMOVED',
           leftAt: null,
           removedBy: actorUserId,
@@ -326,6 +328,7 @@ export class PrismaGroupManagementV2Repository
       const conversation = await this.loadConversation(tx, conversationId);
       if (
         !conversation?.isGroup ||
+        actorUserId === newOwnerUserId ||
         conversation.creatorId !== actorUserId ||
         !conversation.participantIds.includes(actorUserId) ||
         !conversation.participantIds.includes(newOwnerUserId)
