@@ -8,6 +8,7 @@ import type {
 } from '../../domain/interfaces/conversation-member.repository.interface';
 
 export type GroupMembershipConsistencyTrigger =
+  | 'create-group'
   | 'add-member'
   | 'remove-member'
   | 'leave-group'
