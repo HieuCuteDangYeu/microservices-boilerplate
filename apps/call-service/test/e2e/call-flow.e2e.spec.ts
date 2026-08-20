@@ -1088,11 +1088,13 @@ describe('Call Service P0 flow (e2e)', () => {
           userId: calleeUser.id,
           producerId: audioNotice.producerId,
           kind: 'audio',
+          paused: false,
         },
         {
           userId: calleeUser.id,
           producerId: videoNotice.producerId,
           kind: 'video',
+          paused: false,
         },
       ]),
     );
@@ -1415,6 +1417,7 @@ describe('Call Service P0 flow (e2e)', () => {
       userId: calleeUser.id,
       producerId: producedByCallee.producerId,
       kind: 'audio',
+      paused: false,
     });
     await expect(peerReconnected).resolves.toEqual({
       callId,
