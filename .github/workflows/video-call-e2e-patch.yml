@@ -6,6 +6,7 @@ on:
       - feat/video-call-1to1
     paths:
       - scripts/apply-video-call-e2e-patch.cjs
+      - scripts/apply-video-call-camera-state-patch.cjs
       - scripts/video-call-e2e-ci-trigger.txt
       - .github/workflows/video-call-e2e-patch.yml
 
@@ -34,12 +35,18 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - name: Apply guarded E2E patch
+      - name: Apply guarded video patches
         id: patch
         shell: bash
         run: |
           set +e
-          node scripts/apply-video-call-e2e-patch.cjs > /tmp/patch.log 2>&1
+          {
+            node scripts/apply-video-call-e2e-patch.cjs
+            e2e=$?
+            node scripts/apply-video-call-camera-state-patch.cjs
+            camera=$?
+            exit $(( e2e || camera ))
+          } > /tmp/patch.log 2>&1
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           cat /tmp/patch.log
@@ -49,9 +56,14 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm rebuild mediasoup
-      - name: Format generated E2E
+      - name: Format video-call touched files
         if: steps.patch.outputs.code == '0'
-        run: pnpm exec prettier --write apps/call-service/test/e2e/call-flow.e2e.spec.ts
+        run: |
+          pnpm exec prettier --write \
+            apps/call-service/src/domain/interfaces/call-media.engine.interface.ts \
+            apps/call-service/src/infrastructure/engines/mediasoup-call.engine.ts \
+            apps/call-service/src/infrastructure/gateways/call.gateway.ts \
+            apps/call-service/test/e2e/call-flow.e2e.spec.ts
       - name: Verify call service
         if: steps.patch.outputs.code == '0'
         shell: bash
@@ -76,7 +88,7 @@ jobs:
             echo
             echo '## Tests'
             echo '```text'
-            tail -n 220 /tmp/test.log
+            tail -n 260 /tmp/test.log
             echo '```'
           } > VIDEO_CALL_BACKEND_CI_RESULT.md
           exit 0
@@ -87,24 +99,27 @@ jobs:
           {
             echo '# Backend Video Call CI Result'
             echo
-            echo '- Guarded E2E patch failed before verification.'
+            echo '- Guarded video patch failed before verification.'
             echo
             echo '```text'
             cat /tmp/patch.log
             echo '```'
           } > VIDEO_CALL_BACKEND_CI_RESULT.md
-      - name: Commit generated E2E and result
+      - name: Commit generated video-call changes and result
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
+            apps/call-service/src/domain/interfaces/call-media.engine.interface.ts \
+            apps/call-service/src/infrastructure/engines/mediasoup-call.engine.ts \
+            apps/call-service/src/infrastructure/gateways/call.gateway.ts \
             apps/call-service/test/e2e/call-flow.e2e.spec.ts \
             VIDEO_CALL_BACKEND_CI_RESULT.md
           if git diff --cached --quiet; then
             exit 0
           fi
-          HUSKY=0 git commit -m 'test(call): cover 1:1 video gateway lifecycle'
+          HUSKY=0 git commit -m 'feat(call): synchronize video camera state'
           git fetch origin feat/video-call-1to1
           git rebase origin/feat/video-call-1to1
           git push origin HEAD:feat/video-call-1to1
