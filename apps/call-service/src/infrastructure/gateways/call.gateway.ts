@@ -102,6 +102,12 @@ type SetCallTypePayload = {
   callType: 'VOICE' | 'VIDEO';
 };
 
+type SetVideoEnabledPayload = {
+  callId: string;
+  producerId: string;
+  enabled: boolean;
+};
+
 type AudioBitrateProfile = 'normal' | 'constrained';
 
 type SetAudioBitratePayload = {
@@ -458,6 +464,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId: producer.userId,
         producerId: producer.producerId,
         kind: producer.kind,
+        paused: producer.paused ?? false,
       });
     });
 
@@ -471,6 +478,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId: producer.userId,
         producerId: producer.producerId,
         kind: producer.kind,
+        paused: producer.paused ?? false,
       });
     });
   }
@@ -642,6 +650,61 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       callId: payload.callId,
       transportId: payload.transportId,
       profile: payload.profile,
+    });
+  }
+
+  @SubscribeMessage('set_video_enabled')
+  async handleSetVideoEnabled(
+    @MessageBody() payload: SetVideoEnabledPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = await this.resolveUserId(client);
+    if (!userId) return;
+
+    const session = await this.sessionRepository.findByCallId(payload.callId);
+    if (!session) {
+      throw new NotFoundException('Call not found');
+    }
+
+    if (session.status !== 'active' || session.callType !== 'VIDEO') {
+      throw new ForbiddenException('Video state cannot be changed');
+    }
+
+    if (session.initiatorId !== userId && session.targetUserId !== userId) {
+      throw new ForbiddenException('You are not part of this call');
+    }
+
+    const producer = (
+      await this.mediaEngine.listActiveProducers(payload.callId)
+    ).find(
+      (entry) =>
+        entry.producerId === payload.producerId &&
+        entry.userId === userId &&
+        entry.kind === 'video',
+    );
+    if (!producer) {
+      throw new NotFoundException('Video producer not found');
+    }
+
+    if (payload.enabled) {
+      await this.mediaEngine.resumeProducer(
+        payload.callId,
+        userId,
+        payload.producerId,
+      );
+    } else {
+      await this.mediaEngine.pauseProducer(
+        payload.callId,
+        userId,
+        payload.producerId,
+      );
+    }
+
+    this.server.to(payload.callId).emit('video_state_changed', {
+      callId: payload.callId,
+      userId,
+      producerId: payload.producerId,
+      enabled: payload.enabled,
     });
   }
 

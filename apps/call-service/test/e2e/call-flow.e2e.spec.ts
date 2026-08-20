@@ -31,6 +31,7 @@ type RoomState = {
       userId: string;
       transportId: string;
       kind: 'audio' | 'video';
+      paused: boolean;
       closed: boolean;
     }
   >;
@@ -263,6 +264,7 @@ class FakeCallMediaEngine {
       userId,
       transportId,
       kind,
+      paused: false,
       closed: false,
     });
     return Promise.resolve({ producerId });
@@ -343,11 +345,40 @@ class FakeCallMediaEngine {
           producerId,
           userId: producer.userId,
           kind: producer.kind,
+          paused: producer.paused,
         }))
         .filter((producer) =>
           excludingUserId ? producer.userId !== excludingUserId : true,
         ),
     );
+  }
+
+  pauseProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const room = this.getRoom(callId);
+    const producer = room.producers.get(producerId);
+    if (!producer || producer.userId !== userId || producer.closed) {
+      throw new Error('Producer not found');
+    }
+    producer.paused = true;
+    return Promise.resolve();
+  }
+
+  resumeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const room = this.getRoom(callId);
+    const producer = room.producers.get(producerId);
+    if (!producer || producer.userId !== userId || producer.closed) {
+      throw new Error('Producer not found');
+    }
+    producer.paused = false;
+    return Promise.resolve();
   }
 
   closeProducer(
@@ -1065,6 +1096,73 @@ describe('Call Service P0 flow (e2e)', () => {
         },
       ]),
     );
+  });
+
+  it('broadcasts camera off/on without replacing the video producer', async () => {
+    const { caller, callee, callId } = await establishActiveCall('VIDEO');
+    const callerSendTransport = await createAndConnectTransport(
+      caller,
+      callId,
+      'send',
+    );
+
+    const videoNoticePromise = onceEvent<{
+      callId: string;
+      userId: string;
+      producerId: string;
+      kind: 'audio' | 'video';
+    }>(callee, 'new_producer');
+    caller.emit('produce', {
+      callId,
+      transportId: callerSendTransport.transportId,
+      kind: 'video',
+      rtpParameters: { codecs: validRtpCapabilities.codecs },
+    });
+    const videoNotice = await videoNoticePromise;
+
+    const cameraOff = onceEvent<{
+      callId: string;
+      userId: string;
+      producerId: string;
+      enabled: boolean;
+    }>(callee, 'video_state_changed');
+    caller.emit('set_video_enabled', {
+      callId,
+      producerId: videoNotice.producerId,
+      enabled: false,
+    });
+    await expect(cameraOff).resolves.toEqual({
+      callId,
+      userId: callerUser.id,
+      producerId: videoNotice.producerId,
+      enabled: false,
+    });
+    expect(
+      mediaEngine.getRoomState(callId)?.producers.get(videoNotice.producerId)
+        ?.paused,
+    ).toBe(true);
+
+    const cameraOn = onceEvent<{
+      callId: string;
+      userId: string;
+      producerId: string;
+      enabled: boolean;
+    }>(callee, 'video_state_changed');
+    caller.emit('set_video_enabled', {
+      callId,
+      producerId: videoNotice.producerId,
+      enabled: true,
+    });
+    await expect(cameraOn).resolves.toEqual({
+      callId,
+      userId: callerUser.id,
+      producerId: videoNotice.producerId,
+      enabled: true,
+    });
+    expect(
+      mediaEngine.getRoomState(callId)?.producers.get(videoNotice.producerId)
+        ?.paused,
+    ).toBe(false);
   });
 
   it('auto-ends unanswered voice calls after the backend no-answer timeout', async () => {
