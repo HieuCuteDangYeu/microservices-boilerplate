@@ -1,6 +1,7 @@
 import { CurrentUser } from '@common/auth/decorators/current-user.decorator';
 import type { AuthUser } from '@common/auth/interfaces/auth-user.interface';
 import { AddReactionDto } from '@common/conversation/dtos/add-reaction.dto';
+import { MessageReactionDetailsDto } from '@common/conversation/dtos/message-reaction-details.dto';
 import { MessageDto } from '@common/conversation/dtos/message.dto';
 import { JwtAuthGuard } from '@gateway/auth/guards/jwt-auth.guard';
 import {
@@ -8,6 +9,7 @@ import {
   Controller,
   Delete,
   ForbiddenException,
+  Get,
   Inject,
   Param,
   Post,
@@ -32,6 +34,21 @@ export class MessageController {
     @Inject('CONVERSATION_SERVICE')
     private readonly conversationClient: ClientProxy,
   ) {}
+
+  @Get(':messageId/reactions')
+  @ApiOperation({ summary: 'List users who reacted to a message' })
+  @ApiOkResponse({ type: MessageReactionDetailsDto })
+  async getReactionDetails(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<MessageReactionDetailsDto> {
+    const source$ = this.conversationClient.send('get_reaction_details', {
+      messageId,
+      userId: user.id,
+    });
+
+    return (await lastValueFrom(source$)) as MessageReactionDetailsDto;
+  }
 
   @Post(':messageId/reactions')
   @ApiOperation({
