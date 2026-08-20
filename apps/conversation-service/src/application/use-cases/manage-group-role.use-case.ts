@@ -15,12 +15,14 @@ import type {
   IConversationMemberRepository,
 } from '../../domain/interfaces/conversation-member.repository.interface';
 import { evaluateGroupPermission } from '../policies/group-permission.policy';
+import { GroupActivityService } from '../services/group-activity.service';
 import { GroupMembershipConsistencyService } from '../services/group-membership-consistency.service';
 import type { GroupMemberProjectionDto } from './get-group-members.use-case';
 
 export type GroupRoleMutationResult = {
   conversation: Conversation;
   member: GroupMemberProjectionDto;
+  changed: boolean;
 };
 
 @Injectable()
@@ -32,6 +34,7 @@ export class ManageGroupRoleUseCase {
     private readonly memberRepository: IConversationMemberRepository,
     private readonly configService: ConfigService,
     private readonly consistencyService: GroupMembershipConsistencyService,
+    private readonly groupActivityService: GroupActivityService,
   ) {}
 
   async updateRole(input: {
@@ -75,6 +78,7 @@ export class ManageGroupRoleUseCase {
       return {
         conversation,
         member: this.toDto(targetMember),
+        changed: false,
       };
     }
 
@@ -114,6 +118,7 @@ export class ManageGroupRoleUseCase {
         return {
           conversation: currentConversation,
           member: this.toDto(currentTarget),
+          changed: false,
         };
       }
 
@@ -137,10 +142,19 @@ export class ManageGroupRoleUseCase {
     }
 
     this.scheduleConsistencyCheck(conversationId);
+    this.groupActivityService.publish({
+      conversationId,
+      type: input.role === 'ADMIN' ? 'MEMBER_PROMOTED' : 'MEMBER_DEMOTED',
+      actorUserId,
+      actorName: this.displayName(conversation, actorUserId),
+      targetUserId,
+      targetName: this.displayName(conversation, targetUserId),
+    });
 
     return {
       conversation: updatedConversation,
       member: this.toDto(updatedTarget),
+      changed: true,
     };
   }
 
@@ -219,6 +233,18 @@ export class ManageGroupRoleUseCase {
         ? { invitedBy: member.invitedBy }
         : {}),
     };
+  }
+
+  private displayName(conversation: Conversation, userId: string): string {
+    const participant = conversation.participants?.find(
+      (candidate) => candidate.id === userId,
+    );
+    return (
+      participant?.name?.trim() ||
+      participant?.fullName?.trim() ||
+      participant?.email?.split('@')[0] ||
+      'A member'
+    );
   }
 
   private scheduleConsistencyCheck(conversationId: string): void {
