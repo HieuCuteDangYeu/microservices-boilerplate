@@ -69,10 +69,6 @@ export class GetGroupMembersUseCase {
       projectedMembers =
         await this.memberRepository.listByConversation(conversationId);
     } catch {
-      // Stage 1 compatibility: participantIds/creatorId/memberJoinedAt remain
-      // authoritative until the projection backfill and runtime verification
-      // are complete. Existing member-list APIs must keep working if the V2
-      // projection is temporarily unavailable.
       projectedMembers = [];
     }
 
@@ -147,7 +143,8 @@ export class GetGroupMembersUseCase {
       legacyIds.length !== projectedIds.length ||
       legacyIds.some((userId, index) => userId !== projectedIds[index]) ||
       ownerIds.length !== 1 ||
-      ownerIds[0] !== conversation.creatorId
+      ownerIds[0] !== conversation.creatorId ||
+      this.hasJoinedAtDrift(conversation, activeMembers)
     ) {
       throw new ConflictException(
         'ConversationMember projection is not consistent enough for canonical reads',
@@ -169,5 +166,40 @@ export class GetGroupMembersUseCase {
         ? { invitedBy: member.invitedBy }
         : {}),
     }));
+  }
+
+  private hasJoinedAtDrift(
+    conversation: Conversation,
+    activeMembers: ConversationMemberRecord[],
+  ): boolean {
+    const fallbackJoinedAt = conversation.createdAt.toISOString();
+    const activeByUserId = new Map(
+      activeMembers.map((member) => [member.userId, member]),
+    );
+
+    return conversation.participantIds.some((userId) => {
+      const member = activeByUserId.get(userId);
+      if (!member) {
+        return true;
+      }
+
+      const expectedJoinedAt =
+        conversation.memberJoinedAt?.[userId] ?? fallbackJoinedAt;
+      return !this.sameInstant(expectedJoinedAt, member.joinedAt.toISOString());
+    });
+  }
+
+  private sameInstant(left: string, right: string): boolean {
+    const leftDate = new Date(left);
+    const rightDate = new Date(right);
+
+    if (
+      Number.isNaN(leftDate.getTime()) ||
+      Number.isNaN(rightDate.getTime())
+    ) {
+      return left === right;
+    }
+
+    return leftDate.getTime() === rightDate.getTime();
   }
 }
