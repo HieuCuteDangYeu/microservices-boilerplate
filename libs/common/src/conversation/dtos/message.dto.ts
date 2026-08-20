@@ -3,6 +3,44 @@ import { z } from 'zod';
 import { ConversationMessageTypeSchema } from './create-message.dto';
 import { MessageMediaSchema } from './message-media.schema';
 
+export const GroupSystemActivityTypeSchema = z.enum([
+  'GROUP_CREATED',
+  'MEMBER_ADDED',
+  'MEMBER_LEFT',
+  'MEMBER_REMOVED',
+  'MEMBER_PROMOTED',
+  'MEMBER_DEMOTED',
+  'OWNERSHIP_TRANSFERRED',
+  'GROUP_RENAMED',
+  'GROUP_PICTURE_CHANGED',
+]);
+
+export const GroupSystemActivitySchema = z.object({
+  type: GroupSystemActivityTypeSchema,
+  actorUserId: z.string(),
+  actorName: z.string().optional(),
+  targetUserId: z.string().optional(),
+  targetName: z.string().optional(),
+  previousValue: z.string().nullable().optional(),
+  nextValue: z.string().nullable().optional(),
+});
+
+export const MessageMetadataSchema = z
+  .object({
+    kind: z
+      .enum([
+        'velora_ai_response',
+        'velora_ai_reel_recommendations',
+        'group_system_activity',
+      ])
+      .optional(),
+    citations: z.array(z.unknown()).optional(),
+    recommendedReels: z.array(z.unknown()).optional(),
+    suggestedQueries: z.array(z.string()).optional(),
+    groupActivity: GroupSystemActivitySchema.optional(),
+  })
+  .passthrough();
+
 export const MessageSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
@@ -10,6 +48,7 @@ export const MessageSchema = z.object({
   clientMessageId: z.string().optional(),
   content: z.string(),
   media: MessageMediaSchema.optional(),
+  metadata: MessageMetadataSchema.optional(),
   type: z.string().default('text'),
   signalType: z.number().int().optional(),
   createdAt: z.string().datetime(),
