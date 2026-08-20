@@ -15,32 +15,32 @@ export class UserServiceAdapter implements IUserService {
   async validateUsers(ids: string[]): Promise<boolean> {
     return lastValueFrom(
       this.client
-        .send<boolean>('user.validate_list', { ids }) // 👈 Gọi đúng Pattern mới
+        .send<boolean>('user.validate_list', { ids })
         .pipe(
-          timeout(5000), // Quá 5s thì tự cắt
+          timeout(5000),
           catchError((err: unknown) => {
             const error = err as Error;
             this.logger.error(`RPC Error [validateUsers]: ${error.message}`);
-            return of(false); // Lỗi thì trả về false (An toàn)
+            return of(false);
           }),
         ),
       { defaultValue: false },
     );
   }
 
-  async findUsersByIds(ids: string[]): Promise<ValidateUserResponse | null> {
+  async findUsersByIds(ids: string[]): Promise<ValidateUserResponse[]> {
     return lastValueFrom(
       this.client
-        .send<ValidateUserResponse | null>('user.find_by_ids', ids) // ✅ ĐỔI THÀNH OBJECT { ids } CHO ĐỒNG BỘ
+        .send<ValidateUserResponse[]>('user.find_by_ids', ids)
         .pipe(
           timeout(5000),
           catchError((err: unknown) => {
             const error = err as Error;
             this.logger.error(`RPC Error [findUsersByIds]: ${error.message}`);
-            return of(null);
+            return of([] as ValidateUserResponse[]);
           }),
         ),
-      { defaultValue: null },
+      { defaultValue: [] },
     );
   }
 }
