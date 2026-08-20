@@ -54,10 +54,20 @@ export class ManageGroupConversationUseCase {
     const name = normalizeGroupName(input.name);
     const picture = normalizeGroupPicture(input.picture);
 
-    await this.mutationRepository.updateMetadata(input.conversationId, {
-      ...(name !== undefined ? { name } : {}),
-      ...(picture !== undefined ? { picture } : {}),
-    });
+    const updated = await this.mutationRepository.updateMetadataAsOwner(
+      input.conversationId,
+      input.actorUserId,
+      {
+        ...(name !== undefined ? { name } : {}),
+        ...(picture !== undefined ? { picture } : {}),
+      },
+    );
+
+    if (!updated) {
+      throw new ConflictException(
+        'Group membership or ownership changed; refresh and try again',
+      );
+    }
 
     return await this.getUpdatedConversation(input.conversationId);
   }
@@ -85,11 +95,29 @@ export class ManageGroupConversationUseCase {
       throw new BadRequestException('Participant does not exist');
     }
 
-    await this.mutationRepository.addParticipant(
+    const added = await this.mutationRepository.addParticipantAsOwner(
       input.conversationId,
+      input.actorUserId,
       userId,
       new Date(),
     );
+
+    if (!added) {
+      const currentConversation = await this.getUpdatedConversation(
+        input.conversationId,
+      );
+
+      if (
+        currentConversation.creatorId === input.actorUserId &&
+        currentConversation.participantIds.includes(userId)
+      ) {
+        return { conversation: currentConversation, added: false };
+      }
+
+      throw new ConflictException(
+        'Group membership or ownership changed; refresh and try again',
+      );
+    }
 
     return {
       conversation: await this.getUpdatedConversation(input.conversationId),
