@@ -93,5 +93,10 @@ export abstract class ICallMediaEngine {
     callId: string,
     excludingUserId?: string,
   ): Promise<ActiveProducerResult[]>;
+  abstract closeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void>;
   abstract closeRoom(callId: string): Promise<void>;
 }
