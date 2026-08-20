@@ -1,12 +1,17 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Conversation } from '../../domain/entities/conversation.entity';
 import type { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import type {
+  ConversationMemberRecord,
   ConversationMemberRole,
   IConversationMemberRepository,
 } from '../../domain/interfaces/conversation-member.repository.interface';
@@ -26,6 +31,7 @@ export class GetGroupMembersUseCase {
     private readonly chatRepository: IChatRepository,
     @Inject('IConversationMemberRepository')
     private readonly memberRepository: IConversationMemberRepository,
+    private readonly configService: ConfigService,
   ) {}
 
   async execute(
@@ -39,15 +45,19 @@ export class GetGroupMembersUseCase {
       throw new NotFoundException('Conversation not found');
     }
 
-    if (!conversation.participantIds.includes(requesterUserId)) {
-      throw new ForbiddenException(
-        'You are not a participant of this conversation',
-      );
-    }
-
     if (!conversation.isGroup) {
       throw new BadRequestException(
         'Conversation member roles are only supported for groups',
+      );
+    }
+
+    if (this.isCanonicalProjectionReadEnabled()) {
+      return await this.readCanonicalProjection(conversation, requesterUserId);
+    }
+
+    if (!conversation.participantIds.includes(requesterUserId)) {
+      throw new ForbiddenException(
+        'You are not a participant of this conversation',
       );
     }
 
@@ -92,5 +102,72 @@ export class GetGroupMembersUseCase {
           : {}),
       };
     });
+  }
+
+  private isCanonicalProjectionReadEnabled(): boolean {
+    const value = this.configService.get<string>(
+      'GROUP_V2_CANONICAL_MEMBER_READS_ENABLED',
+      'false',
+    );
+
+    return ['1', 'true', 'yes', 'on'].includes(
+      String(value).trim().toLowerCase(),
+    );
+  }
+
+  private async readCanonicalProjection(
+    conversation: Conversation,
+    requesterUserId: string,
+  ): Promise<GroupMemberProjectionDto[]> {
+    let projectedMembers: ConversationMemberRecord[];
+
+    try {
+      projectedMembers = await this.memberRepository.listByConversation(
+        conversation.id,
+      );
+    } catch {
+      throw new ServiceUnavailableException(
+        'ConversationMember projection is temporarily unavailable',
+      );
+    }
+
+    const activeMembers = projectedMembers.filter(
+      (member) => member.status === 'ACTIVE',
+    );
+    const legacyIds = Array.from(new Set(conversation.participantIds)).sort();
+    const projectedIds = Array.from(
+      new Set(activeMembers.map((member) => member.userId)),
+    ).sort();
+    const ownerIds = activeMembers
+      .filter((member) => member.role === 'OWNER')
+      .map((member) => member.userId)
+      .sort();
+
+    if (
+      legacyIds.length !== projectedIds.length ||
+      legacyIds.some((userId, index) => userId !== projectedIds[index]) ||
+      ownerIds.length !== 1 ||
+      ownerIds[0] !== conversation.creatorId
+    ) {
+      throw new ConflictException(
+        'ConversationMember projection is not consistent enough for canonical reads',
+      );
+    }
+
+    if (!activeMembers.some((member) => member.userId === requesterUserId)) {
+      throw new ForbiddenException(
+        'You are not an active participant of this conversation',
+      );
+    }
+
+    return activeMembers.map((member) => ({
+      userId: member.userId,
+      role: member.role,
+      status: 'ACTIVE',
+      joinedAt: member.joinedAt.toISOString(),
+      ...(member.invitedBy !== undefined
+        ? { invitedBy: member.invitedBy }
+        : {}),
+    }));
   }
 }
