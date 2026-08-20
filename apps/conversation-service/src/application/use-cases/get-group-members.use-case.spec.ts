@@ -212,6 +212,21 @@ describe('GetGroupMembersUseCase', () => {
     );
   });
 
+  it('fails closed when canonical projection joined-at metadata diverges from legacy rollout data', async () => {
+    configService.get.mockReturnValue('true');
+    memberRepository.listByConversation.mockResolvedValue(
+      canonicalProjection().map((member) =>
+        member.userId === MEMBER_ID
+          ? { ...member, joinedAt: new Date('2026-08-19T05:00:00.000Z') }
+          : member,
+      ),
+    );
+
+    await expect(useCase.execute('group-id', OWNER_ID)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
   it('does not fall back to legacy data if canonical projection reads are enabled but unavailable', async () => {
     configService.get.mockReturnValue('true');
     memberRepository.listByConversation.mockRejectedValue(
