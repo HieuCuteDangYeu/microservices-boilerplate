@@ -410,6 +410,25 @@ export class MediasoupCallMediaEngine
     );
   }
 
+  closeProducer(
+    callId: string,
+    userId: string,
+    producerId: string,
+  ): Promise<void> {
+    const room = this.getRoomOrThrow(callId);
+    const producer = room.producers.get(producerId);
+    const meta = room.producerMeta.get(producerId);
+
+    if (!producer || !meta || meta.callId !== callId || meta.userId !== userId) {
+      throw new Error('Producer not found');
+    }
+
+    producer.close();
+    room.producers.delete(producerId);
+    room.producerMeta.delete(producerId);
+    return Promise.resolve();
+  }
+
   closeRoom(callId: string): Promise<void> {
     const room = this.rooms.get(callId);
     if (!room) return Promise.resolve();
