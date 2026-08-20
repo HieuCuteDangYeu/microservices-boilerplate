@@ -9,10 +9,10 @@ const THIRD_ID = '33333333-3333-4333-8333-333333333333';
 const NEW_MEMBER_ID = '44444444-4444-4444-8444-444444444444';
 const CONVERSATION_ID = '507f1f77bcf86cd799439011';
 
-const group = (participantIds: string[]) =>
+const group = (participantIds: string[], creatorId = OWNER_ID) =>
   new Conversation({
     id: CONVERSATION_ID,
-    creatorId: OWNER_ID,
+    creatorId,
     participantIds,
     isGroup: true,
     name: 'Realtime Group',
@@ -24,6 +24,7 @@ describe('ConversationMicroserviceController realtime group orchestration', () =
   let manageGroupConversationUseCase: {
     updateMetadata: jest.Mock;
     addMember: jest.Mock;
+    transferOwnership: jest.Mock;
     removeMember: jest.Mock;
     leave: jest.Mock;
   };
@@ -38,6 +39,7 @@ describe('ConversationMicroserviceController realtime group orchestration', () =
     manageGroupConversationUseCase = {
       updateMetadata: jest.fn(),
       addMember: jest.fn(),
+      transferOwnership: jest.fn(),
       removeMember: jest.fn(),
       leave: jest.fn(),
     };
@@ -77,6 +79,22 @@ describe('ConversationMicroserviceController realtime group orchestration', () =
 
     expect(chatGateway.emitConversationUpdated).toHaveBeenCalledWith(updated);
     expect(result).toEqual(expect.objectContaining({ id: CONVERSATION_ID }));
+  });
+
+  it('fans ownership transfer out to every current participant', async () => {
+    const updated = group([OWNER_ID, MEMBER_ID, THIRD_ID], MEMBER_ID);
+    manageGroupConversationUseCase.transferOwnership.mockResolvedValue(updated);
+
+    const result = await controller.handleTransferGroupOwnership({
+      conversationId: CONVERSATION_ID,
+      actorUserId: OWNER_ID,
+      userId: MEMBER_ID,
+    });
+
+    expect(chatGateway.emitConversationUpdated).toHaveBeenCalledWith(updated);
+    expect(result).toEqual(
+      expect.objectContaining({ id: CONVERSATION_ID, creatorId: MEMBER_ID }),
+    );
   });
 
   it('sends conversation_created only to a newly-added member and updates existing members', async () => {

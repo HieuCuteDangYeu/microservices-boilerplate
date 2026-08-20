@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -96,6 +97,43 @@ export class ManageGroupConversationUseCase {
     };
   }
 
+  async transferOwnership(input: {
+    conversationId: string;
+    actorUserId: string;
+    userId: string;
+  }): Promise<Conversation> {
+    const conversation = await this.getGroupConversationForMember(
+      input.conversationId,
+      input.actorUserId,
+    );
+    this.assertOwner(conversation, input.actorUserId);
+
+    const newOwnerUserId = input.userId.trim();
+    assertValidConversationUserId(newOwnerUserId);
+
+    if (newOwnerUserId === conversation.creatorId) {
+      throw new BadRequestException('New owner must be another group member');
+    }
+
+    if (!conversation.participantIds.includes(newOwnerUserId)) {
+      throw new NotFoundException('New owner must be an existing group member');
+    }
+
+    const transferred = await this.mutationRepository.transferOwnership(
+      input.conversationId,
+      input.actorUserId,
+      newOwnerUserId,
+    );
+
+    if (!transferred) {
+      throw new ConflictException(
+        'Group membership or ownership changed; refresh and try again',
+      );
+    }
+
+    return await this.getUpdatedConversation(input.conversationId);
+  }
+
   async removeMember(input: {
     conversationId: string;
     actorUserId: string;
@@ -120,10 +158,17 @@ export class ManageGroupConversationUseCase {
 
     this.assertGroupWillKeepMinimumMembers(conversation);
 
-    await this.mutationRepository.removeParticipant(
+    const removed = await this.mutationRepository.removeParticipantAsOwner(
       input.conversationId,
+      input.actorUserId,
       userId,
     );
+
+    if (!removed) {
+      throw new ConflictException(
+        'Group membership or ownership changed; refresh and try again',
+      );
+    }
 
     return await this.getUpdatedConversation(input.conversationId);
   }
@@ -139,16 +184,22 @@ export class ManageGroupConversationUseCase {
 
     if (conversation.creatorId === input.actorUserId) {
       throw new BadRequestException(
-        'The group owner cannot leave before ownership transfer is supported',
+        'The group owner must transfer ownership before leaving',
       );
     }
 
     this.assertGroupWillKeepMinimumMembers(conversation);
 
-    await this.mutationRepository.removeParticipant(
+    const removed = await this.mutationRepository.removeParticipantAsMember(
       input.conversationId,
       input.actorUserId,
     );
+
+    if (!removed) {
+      throw new ConflictException(
+        'Group membership or ownership changed; refresh and try again',
+      );
+    }
 
     return await this.getUpdatedConversation(input.conversationId);
   }

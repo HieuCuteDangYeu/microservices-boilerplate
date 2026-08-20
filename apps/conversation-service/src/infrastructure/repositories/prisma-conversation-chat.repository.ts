@@ -44,7 +44,8 @@ export class PrismaConversationChatRepository
   constructor(
     private readonly conversationPrisma: PrismaService,
     @Inject('REDIS_CLIENT') redis: Redis,
-    @Inject('IEncryptionRepository') encryptionRepository: IEncryptionRepository,
+    @Inject('IEncryptionRepository')
+    encryptionRepository: IEncryptionRepository,
     @Inject('IUserService') userService: IUserService,
     @Inject('IChatMediaService') chatMediaService: IChatMediaService,
   ) {
@@ -60,22 +61,24 @@ export class PrismaConversationChatRepository
   override async createConversation(
     conversation: Conversation,
   ): Promise<Conversation> {
-    const savedConversation = await this.conversationPrisma.conversation.create({
-      data: {
-        creatorId: conversation.creatorId,
-        participantIds: conversation.participantIds,
-        name: conversation.name ?? null,
-        picture: conversation.picture ?? null,
-        memberJoinedAt: conversation.memberJoinedAt
-          ? (conversation.memberJoinedAt as Prisma.InputJsonValue)
-          : null,
-        createdAt: conversation.createdAt,
-        updatedAt: conversation.updatedAt,
-        isGroup: conversation.isGroup,
-        lastMessage: conversation.lastMessage || null,
-        lastMessageAt: conversation.lastMessageAt || null,
+    const savedConversation = await this.conversationPrisma.conversation.create(
+      {
+        data: {
+          creatorId: conversation.creatorId,
+          participantIds: conversation.participantIds,
+          name: conversation.name ?? null,
+          picture: conversation.picture ?? null,
+          memberJoinedAt: conversation.memberJoinedAt
+            ? (conversation.memberJoinedAt as Prisma.InputJsonValue)
+            : null,
+          createdAt: conversation.createdAt,
+          updatedAt: conversation.updatedAt,
+          isGroup: conversation.isGroup,
+          lastMessage: conversation.lastMessage || null,
+          lastMessageAt: conversation.lastMessageAt || null,
+        },
       },
-    });
+    );
 
     return ConversationMapper.toDomain(savedConversation);
   }
@@ -130,6 +133,124 @@ export class PrismaConversationChatRepository
         memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
       },
     });
+  }
+
+  async transferOwnership(
+    conversationId: string,
+    currentOwnerUserId: string,
+    newOwnerUserId: string,
+  ): Promise<boolean> {
+    const result = await this.conversationPrisma.conversation.updateMany({
+      where: {
+        id: conversationId,
+        creatorId: currentOwnerUserId,
+        participantIds: { has: newOwnerUserId },
+      },
+      data: { creatorId: newOwnerUserId },
+    });
+
+    return result.count === 1;
+  }
+
+  async removeParticipantAsOwner(
+    conversationId: string,
+    currentOwnerUserId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const conversation = await this.conversationPrisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        creatorId: true,
+        participantIds: true,
+        memberJoinedAt: true,
+        createdAt: true,
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (
+      conversation.creatorId !== currentOwnerUserId ||
+      !conversation.participantIds.includes(userId)
+    ) {
+      return false;
+    }
+
+    const participantIds = conversation.participantIds.filter(
+      (participantId) => participantId !== userId,
+    );
+    const memberJoinedAt = normalizeMemberJoinedAt(
+      conversation.memberJoinedAt,
+      conversation.participantIds,
+      conversation.createdAt,
+    );
+    delete memberJoinedAt[userId];
+
+    const result = await this.conversationPrisma.conversation.updateMany({
+      where: {
+        id: conversationId,
+        creatorId: currentOwnerUserId,
+        participantIds: { has: userId },
+      },
+      data: {
+        participantIds: { set: participantIds },
+        memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
+      },
+    });
+
+    return result.count === 1;
+  }
+
+  async removeParticipantAsMember(
+    conversationId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const conversation = await this.conversationPrisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        creatorId: true,
+        participantIds: true,
+        memberJoinedAt: true,
+        createdAt: true,
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (
+      conversation.creatorId === userId ||
+      !conversation.participantIds.includes(userId)
+    ) {
+      return false;
+    }
+
+    const participantIds = conversation.participantIds.filter(
+      (participantId) => participantId !== userId,
+    );
+    const memberJoinedAt = normalizeMemberJoinedAt(
+      conversation.memberJoinedAt,
+      conversation.participantIds,
+      conversation.createdAt,
+    );
+    delete memberJoinedAt[userId];
+
+    const result = await this.conversationPrisma.conversation.updateMany({
+      where: {
+        id: conversationId,
+        creatorId: { not: userId },
+        participantIds: { has: userId },
+      },
+      data: {
+        participantIds: { set: participantIds },
+        memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
+      },
+    });
+
+    return result.count === 1;
   }
 
   async removeParticipant(
