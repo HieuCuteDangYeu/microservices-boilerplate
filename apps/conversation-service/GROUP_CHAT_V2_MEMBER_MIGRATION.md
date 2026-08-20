@@ -276,13 +276,46 @@ MongoDB transactions require a replica set. Conversation-service already uses Pr
 
 A successful role change reuses the existing `conversation_updated` realtime lifecycle event so connected clients can invalidate member data without changing the established V1 event protocol.
 
-## Stage 6 — Canonical membership cutover
+## Stage 6A — Gated canonical reads on the V2 endpoint only
 
-Only after Stage 0–5 runtime gates are clean:
+Before changing any V1 authorization path, the additive `/members/v2` endpoint can be switched to strict `ConversationMember` reads in staging:
 
-1. switch membership reads to `ConversationMember(status = ACTIVE)`;
-2. switch role/permission resolution for existing group mutations to `ConversationMember`;
-3. activate ADMIN permissions one action at a time behind rollout controls;
+```bash
+GROUP_V2_CANONICAL_MEMBER_READS_ENABLED=true
+```
+
+This flag is default-OFF and affects only `get_group_member_projection` / `GET /conversations/:id/members/v2`.
+
+When disabled, the V2 endpoint keeps the compatibility behavior described in Stage 3.
+
+When enabled:
+
+- active membership comes from `ConversationMember(status = ACTIVE)`;
+- role comes directly from `ConversationMember`;
+- joined-at comes directly from `ConversationMember.joinedAt`;
+- requester membership is checked against the active projection;
+- projection read failure returns service-unavailable rather than falling back to legacy membership;
+- active projected member ids must still equal legacy `participantIds` during this rollout gate;
+- projected OWNER must still be exactly the legacy `creatorId` during this rollout gate;
+- any member-set/owner drift returns conflict rather than serving potentially inconsistent canonical data.
+
+The legacy equality checks are temporary cutover guards, not the final V2 architecture. They let staging exercise projection-authoritative reads while still proving equivalence to V1 before V1 is retired.
+
+Enabling this flag does **not**:
+
+- modify `GET /conversations/:id/members`;
+- make ADMIN authoritative for rename/add/remove;
+- change send-message membership authorization;
+- change history policy;
+- change realtime room membership.
+
+## Stage 6B — Canonical membership/authorization cutover
+
+Only after Stage 0–6A runtime gates are clean:
+
+1. switch role/permission resolution for existing group mutations to `ConversationMember`;
+2. activate ADMIN permissions one action at a time behind rollout controls;
+3. move additional membership reads to `ConversationMember(status = ACTIVE)` only after their own compatibility tests;
 4. keep legacy fields as compatibility projection for at least one rollout window;
 5. compare legacy and V2 membership continuously;
 6. only then stop using `memberJoinedAt` JSON for new logic.
@@ -352,8 +385,10 @@ Then:
 4. enable `GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true` in staging while role mutations remain disabled;
 5. exercise create/add/remove/leave/ownership-transfer traffic including concurrency races;
 6. require no `[GroupV2Shadow]` drift warnings and another clean static audit;
-7. only then enable `GROUP_V2_ROLE_MUTATIONS_ENABLED=true` in staging;
-8. exercise promote/demote and race them against ownership transfer/member removal;
-9. verify Android/iOS group lifecycle remains unchanged with both flags disabled in production-equivalent configuration.
+7. enable `GROUP_V2_CANONICAL_MEMBER_READS_ENABLED=true` only on staging and exercise `/members/v2` from owner/admin/member accounts;
+8. require no canonical-read conflicts under valid traffic and confirm V1 `/members` output remains unchanged;
+9. only then enable `GROUP_V2_ROLE_MUTATIONS_ENABLED=true` in staging;
+10. exercise promote/demote and race them against ownership transfer/member removal;
+11. verify Android/iOS group lifecycle remains unchanged with all V2 cutover flags disabled in production-equivalent configuration.
 
 No merge should happen until runtime/physical-device validation is complete.
