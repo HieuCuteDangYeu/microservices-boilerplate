@@ -32,6 +32,7 @@ describe('ManageGroupConversationUseCase', () => {
     removeParticipant: jest.Mock;
   };
   let userService: { validateUsers: jest.Mock };
+  let consistencyService: { checkAfterMutation: jest.Mock };
   let useCase: ManageGroupConversationUseCase;
 
   beforeEach(() => {
@@ -45,10 +46,14 @@ describe('ManageGroupConversationUseCase', () => {
       removeParticipant: jest.fn().mockResolvedValue(undefined),
     };
     userService = { validateUsers: jest.fn().mockResolvedValue(true) };
+    consistencyService = {
+      checkAfterMutation: jest.fn().mockResolvedValue(null),
+    };
     useCase = new ManageGroupConversationUseCase(
       chatRepository as unknown as IChatRepository,
       mutationRepository as unknown as IConversationMutationRepository,
       userService as unknown as IUserService,
+      consistencyService as never,
     );
   });
 
@@ -71,6 +76,7 @@ describe('ManageGroupConversationUseCase', () => {
       { name: 'Renamed' },
     );
     expect(result.name).toBe('Renamed');
+    expect(consistencyService.checkAfterMutation).not.toHaveBeenCalled();
   });
 
   it('rejects a stale metadata write after ownership changes', async () => {
@@ -102,7 +108,7 @@ describe('ManageGroupConversationUseCase', () => {
     expect(mutationRepository.updateMetadataAsOwner).not.toHaveBeenCalled();
   });
 
-  it('adds a validated member and returns the refreshed conversation', async () => {
+  it('adds a validated member and schedules a shadow consistency check', async () => {
     const before = group();
     const after = group([...before.participantIds, NEW_MEMBER_ID]);
     chatRepository.findConversation
@@ -124,6 +130,10 @@ describe('ManageGroupConversationUseCase', () => {
     );
     expect(result.added).toBe(true);
     expect(result.conversation.participantIds).toContain(NEW_MEMBER_ID);
+    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
+      before.id,
+      'add-member',
+    );
   });
 
   it('rejects a stale add-member write after ownership changes', async () => {
@@ -148,7 +158,7 @@ describe('ManageGroupConversationUseCase', () => {
     );
   });
 
-  it('treats a concurrently-added member as an idempotent no-op', async () => {
+  it('treats a concurrently-added member as an idempotent no-op and still shadow checks', async () => {
     const before = group();
     const after = group([...before.participantIds, NEW_MEMBER_ID]);
     chatRepository.findConversation
@@ -163,6 +173,10 @@ describe('ManageGroupConversationUseCase', () => {
     });
 
     expect(result).toEqual({ conversation: after, added: false });
+    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
+      before.id,
+      'add-member',
+    );
   });
 
   it('treats adding an existing member as an idempotent no-op', async () => {
@@ -178,9 +192,10 @@ describe('ManageGroupConversationUseCase', () => {
     expect(result).toEqual({ conversation: before, added: false });
     expect(userService.validateUsers).not.toHaveBeenCalled();
     expect(mutationRepository.addParticipantAsOwner).not.toHaveBeenCalled();
+    expect(consistencyService.checkAfterMutation).not.toHaveBeenCalled();
   });
 
-  it('transfers ownership to an existing group member', async () => {
+  it('transfers ownership to an existing group member and shadow checks convergence', async () => {
     const before = group();
     const after = new Conversation({ ...before, creatorId: MEMBER_ID });
     chatRepository.findConversation
@@ -199,6 +214,10 @@ describe('ManageGroupConversationUseCase', () => {
       MEMBER_ID,
     );
     expect(result.creatorId).toBe(MEMBER_ID);
+    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
+      before.id,
+      'transfer-ownership',
+    );
   });
 
   it('blocks ownership transfer by a non-owner member', async () => {
@@ -272,7 +291,7 @@ describe('ManageGroupConversationUseCase', () => {
     ).rejects.toThrow('A group must keep at least 2 participants');
   });
 
-  it('allows the current owner to remove a regular member', async () => {
+  it('allows the current owner to remove a regular member and shadow checks convergence', async () => {
     const before = group();
     const after = group([OWNER_ID, THIRD_ID]);
     chatRepository.findConversation
@@ -291,6 +310,10 @@ describe('ManageGroupConversationUseCase', () => {
       MEMBER_ID,
     );
     expect(result.participantIds).not.toContain(MEMBER_ID);
+    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
+      before.id,
+      'remove-member',
+    );
   });
 
   it('rejects a stale owner removal if ownership changes concurrently', async () => {
@@ -308,7 +331,7 @@ describe('ManageGroupConversationUseCase', () => {
     );
   });
 
-  it('allows a non-owner member to leave a group with three or more members', async () => {
+  it('allows a non-owner member to leave and shadow checks convergence', async () => {
     const before = group();
     const after = group([OWNER_ID, THIRD_ID]);
     chatRepository.findConversation
@@ -325,6 +348,10 @@ describe('ManageGroupConversationUseCase', () => {
       MEMBER_ID,
     );
     expect(result.participantIds).not.toContain(MEMBER_ID);
+    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
+      before.id,
+      'leave-group',
+    );
   });
 
   it('rejects leave if the member becomes owner concurrently', async () => {
