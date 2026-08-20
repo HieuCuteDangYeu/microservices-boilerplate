@@ -8,6 +8,12 @@ import { ChatGateway } from './chat.gateway';
 const OWNER_ID = '11111111-1111-4111-8111-111111111111';
 const MEMBER_ID = '22222222-2222-4222-8222-222222222222';
 const CONVERSATION_ID = '507f1f77bcf86cd799439011';
+const ownerRooms = [OWNER_ID, `user:${OWNER_ID}`];
+const memberRooms = [MEMBER_ID, `user:${MEMBER_ID}`];
+const conversationRooms = [
+  CONVERSATION_ID,
+  `conversation:${CONVERSATION_ID}`,
+];
 
 const conversation = () =>
   new Conversation({
@@ -24,6 +30,7 @@ describe('ChatGateway realtime membership helpers', () => {
   let chatRepository: {
     assertConversationParticipant: jest.Mock;
     findPresenceAudienceUserIds: jest.Mock;
+    markMessagesAsSeen: jest.Mock;
   };
   let redis: { del: jest.Mock };
   let gateway: ChatGateway;
@@ -37,6 +44,7 @@ describe('ChatGateway realtime membership helpers', () => {
     chatRepository = {
       assertConversationParticipant: jest.fn().mockResolvedValue(undefined),
       findPresenceAudienceUserIds: jest.fn().mockResolvedValue([]),
+      markMessagesAsSeen: jest.fn().mockResolvedValue({}),
     };
     redis = { del: jest.fn().mockResolvedValue(1) };
 
@@ -61,7 +69,7 @@ describe('ChatGateway realtime membership helpers', () => {
     } as unknown as Server;
   });
 
-  it('keeps the existing raw user room contract on connection', async () => {
+  it('dual-joins legacy and namespaced user rooms on connection', async () => {
     const client = {
       id: 'socket-1',
       data: { userId: OWNER_ID },
@@ -70,12 +78,12 @@ describe('ChatGateway realtime membership helpers', () => {
 
     await gateway.handleConnection(client);
 
-    expect(inRoom).toHaveBeenCalledWith(OWNER_ID);
-    expect(client.join).toHaveBeenCalledWith(OWNER_ID);
+    expect(inRoom).toHaveBeenCalledWith(ownerRooms);
+    expect(client.join).toHaveBeenCalledWith(ownerRooms);
     expect(redis.del).toHaveBeenCalled();
   });
 
-  it('authorizes then joins the existing raw conversation room', async () => {
+  it('authorizes then dual-joins legacy and namespaced conversation rooms', async () => {
     const client = {
       id: 'socket-2',
       data: { userId: MEMBER_ID },
@@ -88,7 +96,7 @@ describe('ChatGateway realtime membership helpers', () => {
       CONVERSATION_ID,
       MEMBER_ID,
     );
-    expect(client.join).toHaveBeenCalledWith(CONVERSATION_ID);
+    expect(client.join).toHaveBeenCalledWith(conversationRooms);
   });
 
   it.each([
@@ -141,12 +149,26 @@ describe('ChatGateway realtime membership helpers', () => {
     expect(clientJoin).not.toHaveBeenCalled();
   });
 
-  it('emits conversation updates to all account rooms in one fanout', () => {
+  it('dual-targets legacy and namespaced conversation rooms', () => {
+    gateway.emitToConversation(CONVERSATION_ID, 'new_message', {
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(to).toHaveBeenCalledWith(conversationRooms);
+    expect(emit).toHaveBeenCalledWith('new_message', {
+      conversationId: CONVERSATION_ID,
+    });
+  });
+
+  it('emits conversation updates to legacy and namespaced account rooms in one fanout', () => {
     const group = conversation();
 
     gateway.emitConversationUpdated(group);
 
-    expect(to).toHaveBeenCalledWith([OWNER_ID, MEMBER_ID]);
+    expect(to).toHaveBeenCalledWith([
+      ...ownerRooms,
+      ...memberRooms,
+    ]);
     expect(emit).toHaveBeenCalledWith(
       'conversation_updated',
       expect.objectContaining({
@@ -156,7 +178,7 @@ describe('ChatGateway realtime membership helpers', () => {
     );
   });
 
-  it('fans message activity out through recipient account rooms only', () => {
+  it('fans message activity out through the recipient legacy and namespaced account rooms only', () => {
     const group = conversation();
     const message = new Message({
       id: 'message-id',
@@ -170,7 +192,7 @@ describe('ChatGateway realtime membership helpers', () => {
 
     gateway.emitConversationMessageActivity(group, message, OWNER_ID);
 
-    expect(to).toHaveBeenCalledWith([MEMBER_ID]);
+    expect(to).toHaveBeenCalledWith(memberRooms);
     expect(emit).toHaveBeenCalledWith(
       'conversation_message_activity',
       expect.objectContaining({
@@ -187,32 +209,32 @@ describe('ChatGateway realtime membership helpers', () => {
     );
   });
 
-  it('can target conversation_created to only the newly-added member', () => {
+  it('can target conversation_created to only the newly-added member across both room forms', () => {
     const group = conversation();
 
     gateway.emitConversationCreated(group, [MEMBER_ID]);
 
-    expect(to).toHaveBeenCalledWith([MEMBER_ID]);
+    expect(to).toHaveBeenCalledWith(memberRooms);
     expect(emit).toHaveBeenCalledWith(
       'conversation_created',
       expect.objectContaining({ id: CONVERSATION_ID }),
     );
   });
 
-  it('notifies every device then removes the account from the conversation room', () => {
+  it('notifies every device then removes the account from both conversation room forms', () => {
     gateway.evictConversationMember({
       conversationId: CONVERSATION_ID,
       userId: MEMBER_ID,
       reason: 'removed',
     });
 
-    expect(to).toHaveBeenCalledWith([MEMBER_ID]);
+    expect(to).toHaveBeenCalledWith(memberRooms);
     expect(emit).toHaveBeenCalledWith('conversation_removed', {
       conversationId: CONVERSATION_ID,
       reason: 'removed',
     });
-    expect(inRoom).toHaveBeenCalledWith(MEMBER_ID);
-    expect(socketsLeave).toHaveBeenCalledWith(CONVERSATION_ID);
+    expect(inRoom).toHaveBeenCalledWith(memberRooms);
+    expect(socketsLeave).toHaveBeenCalledWith(conversationRooms);
   });
 
   it('does not disconnect the account when evicting it from one conversation', () => {
@@ -229,7 +251,60 @@ describe('ChatGateway realtime membership helpers', () => {
       reason: 'left',
     });
 
-    expect(socketsLeave).toHaveBeenCalledWith(CONVERSATION_ID);
+    expect(socketsLeave).toHaveBeenCalledWith(conversationRooms);
     expect(disconnectSockets).not.toHaveBeenCalled();
+  });
+
+  it('broadcasts read receipts to both conversation room forms', async () => {
+    const seenAt = new Date('2026-08-19T00:03:00.000Z');
+    chatRepository.markMessagesAsSeen.mockResolvedValueOnce({
+      seenUpTo: {
+        messageId: 'message-id',
+        createdAt: new Date('2026-08-19T00:02:00.000Z'),
+      },
+      seenAt,
+    });
+    const clientEmit = jest.fn();
+    const clientTo = jest.fn().mockReturnValue({ emit: clientEmit });
+    const client = {
+      id: 'socket-seen',
+      data: { userId: MEMBER_ID },
+      to: clientTo,
+    } as unknown as Socket;
+
+    await gateway.handleMarkSeen(
+      { conversationId: CONVERSATION_ID, upToMessageId: 'message-id' },
+      client,
+    );
+
+    expect(clientTo).toHaveBeenCalledWith(conversationRooms);
+    expect(clientEmit).toHaveBeenCalledWith(
+      'messages_seen',
+      expect.objectContaining({
+        conversationId: CONVERSATION_ID,
+        readByUserId: MEMBER_ID,
+        messageId: 'message-id',
+        at: seenAt.toISOString(),
+      }),
+    );
+  });
+
+  it('broadcasts typing state to both conversation room forms', async () => {
+    const clientEmit = jest.fn();
+    const clientTo = jest.fn().mockReturnValue({ emit: clientEmit });
+    const client = {
+      id: 'socket-typing',
+      data: { userId: MEMBER_ID },
+      to: clientTo,
+    } as unknown as Socket;
+
+    await gateway.handleTypingStart(CONVERSATION_ID, client);
+
+    expect(clientTo).toHaveBeenCalledWith(conversationRooms);
+    expect(clientEmit).toHaveBeenCalledWith('user_typing', {
+      conversationId: CONVERSATION_ID,
+      userId: MEMBER_ID,
+      isTyping: true,
+    });
   });
 });
