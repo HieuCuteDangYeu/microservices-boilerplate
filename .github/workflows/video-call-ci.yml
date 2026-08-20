@@ -1,15 +1,21 @@
 name: Video Call CI
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/video-call-1to1
+      - master
+    paths:
+      - 'apps/call-service/**'
+      - 'apps/notification-service/**'
+      - '.github/workflows/video-call-ci.yml'
   workflow_dispatch:
 
 jobs:
-  call-service:
+  call-video-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      RABBITMQ_URL: amqp://127.0.0.1:5672
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -19,6 +25,15 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm build:call
-      - run: pnpm exec jest --runInBand apps/call-service/test/unit/application apps/call-service/test/e2e/call-flow.e2e.spec.ts
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build mediasoup worker
+        run: pnpm rebuild mediasoup
+      - name: Build call service
+        run: pnpm build:call
+      - name: Build notification service
+        run: pnpm build:notification
+      - name: Run call unit tests
+        run: pnpm exec jest --runInBand apps/call-service/test/unit/application
+      - name: Run full call E2E
+        run: pnpm exec jest --runInBand apps/call-service/test/e2e/call-flow.e2e.spec.ts
