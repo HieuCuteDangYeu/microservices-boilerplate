@@ -29,6 +29,8 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build mediasoup worker
         run: pnpm rebuild mediasoup
+      - name: Generate notification Prisma client
+        run: pnpm prisma:generate:notification
       - name: Build call service
         run: pnpm build:call
       - name: Build notification service
