@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/apply-video-call-e2e-patch.cjs
       - scripts/apply-video-call-camera-state-patch.cjs
+      - scripts/fix-video-call-e2e-paused-expectations.cjs
       - scripts/video-call-e2e-ci-trigger.txt
       - .github/workflows/video-call-e2e-patch.yml
 
@@ -45,7 +46,9 @@ jobs:
             e2e=$?
             node scripts/apply-video-call-camera-state-patch.cjs
             camera=$?
-            exit $(( e2e || camera ))
+            node scripts/fix-video-call-e2e-paused-expectations.cjs
+            expectations=$?
+            exit $(( e2e || camera || expectations ))
           } > /tmp/patch.log 2>&1
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
@@ -72,23 +75,41 @@ jobs:
           pnpm build:call > /tmp/build.log 2>&1
           BUILD=$?
           pnpm exec jest --runInBand \
-            apps/call-service/test/unit/application \
-            apps/call-service/test/e2e/call-flow.e2e.spec.ts > /tmp/test.log 2>&1
-          TEST=$?
+            apps/call-service/test/unit/application > /tmp/unit.log 2>&1
+          UNIT=$?
+          pnpm exec jest --runInBand \
+            apps/call-service/test/e2e/call-flow.e2e.spec.ts \
+            -t 'auto-ends unanswered video|switches VOICE to VIDEO|rejoin advertises both active audio and video|broadcasts camera off/on' > /tmp/video-e2e.log 2>&1
+          VIDEO_E2E=$?
+          pnpm exec jest --runInBand \
+            apps/call-service/test/e2e/call-flow.e2e.spec.ts > /tmp/full-e2e.log 2>&1
+          FULL_E2E=$?
           {
             echo '# Backend Video Call CI Result'
             echo
             echo "- Build exit: $BUILD"
-            echo "- Tests exit: $TEST"
+            echo "- Unit tests exit: $UNIT"
+            echo "- Targeted video E2E exit: $VIDEO_E2E"
+            echo "- Full E2E exit: $FULL_E2E"
             echo
             echo '## Build'
             echo '```text'
-            tail -n 160 /tmp/build.log
+            tail -n 120 /tmp/build.log
             echo '```'
             echo
-            echo '## Tests'
+            echo '## Unit tests'
             echo '```text'
-            tail -n 260 /tmp/test.log
+            tail -n 160 /tmp/unit.log
+            echo '```'
+            echo
+            echo '## Targeted video E2E'
+            echo '```text'
+            tail -n 220 /tmp/video-e2e.log
+            echo '```'
+            echo
+            echo '## Full E2E'
+            echo '```text'
+            tail -n 260 /tmp/full-e2e.log
             echo '```'
           } > VIDEO_CALL_BACKEND_CI_RESULT.md
           exit 0
