@@ -1,26 +1,20 @@
-# Group Chat V2 — ConversationMember Migration Plan
+# Group Chat V2 — ConversationMember Migration and Cutover
 
 ## Goal
 
-Introduce a real per-member model for Group Chat V2 without breaking the current mobile application, direct chats, realtime event names, ownership transfer, or existing group history.
+Introduce authoritative per-member group roles and membership without breaking direct chats, existing group history, realtime event names, or the legacy `Conversation` compatibility fields.
 
-This plan deliberately separates **data migration** from **behavior cutover**.
+Group calls, invite-link/approval/ban flows, and Phase 2 discovery features are intentionally outside this migration.
 
-## Current V1 source of truth
+## Compatibility model
 
-During the first rollout stages the existing `Conversation` fields remain authoritative:
+The legacy `Conversation` fields remain a compatibility projection during the first V2 rollout window:
 
 - `creatorId`
 - `participantIds`
 - `memberJoinedAt`
 
-Existing REST/RMQ/realtime contracts continue to use those fields.
-
-The new `ConversationMember` collection is initially a projection, not the authorization source of truth.
-
-## New V2 model
-
-Each group participant has at most one row per conversation:
+The new group membership source is `ConversationMember`:
 
 - `conversationId`
 - `userId`
@@ -31,128 +25,103 @@ Each group participant has at most one row per conversation:
 - `leftAt`
 - `removedBy`
 
-The compound unique constraint `(conversationId, userId)` prevents duplicate membership rows.
+Direct conversations are not backfilled into `ConversationMember` and continue using their existing behavior.
 
-Direct conversations are intentionally not backfilled in this phase. The V2 model is introduced for group membership first.
+## Stage 0 — Schema deploy
 
-## Stage 0 — Schema deploy only
+1. Generate the conversation Prisma client.
+2. Validate the conversation schema.
+3. Deploy the schema using the repository's normal MongoDB schema deployment process.
+4. Confirm the `conversation_members` collection and indexes exist.
+5. Confirm the deployment uses a MongoDB replica set because Stage 5/6B role and membership guards use interactive transactions.
 
-1. Generate the conversation Prisma client with the new model.
-2. Run the normal conversation schema deployment (`prisma db push` in this repository).
-3. Do not change mobile/API behavior yet.
-4. Confirm the new collection/indexes exist.
+Required commands:
 
-Rollback: application code can continue to use the legacy fields because they are untouched.
+```bash
+pnpm prisma:generate:conversation
+pnpm exec prisma validate --schema=apps/conversation-service/prisma/schema.prisma
+```
 
 ## Stage 1 — Audit and backfill
 
-Run the backfill in audit mode first:
+Audit first:
 
 ```bash
 pnpm audit:conversation-members-v2
 ```
 
-Equivalent direct command:
-
-```bash
-node scripts/backfill-conversation-members-v2.cjs
-```
-
-Audit mode does not mutate data. A non-zero exit code indicates drift or invalid legacy groups.
-
-After reviewing the output, apply with the explicit safety command:
+Apply only after reviewing the audit:
 
 ```bash
 pnpm backfill:conversation-members-v2:apply
 ```
 
-Equivalent direct command:
+Equivalent guarded command:
 
 ```bash
 CONFIRM=BACKFILL_CONVERSATION_MEMBERS_V2 node scripts/backfill-conversation-members-v2.cjs
 ```
 
-Then run audit mode again and require:
+Run the audit again and require:
 
 - `missingMembers = 0`
 - `mismatchedMembers = 0`
 - `orphanActiveMembers = 0`
 - `invalidGroups = 0`
 
-The backfill preserves `ADMIN` only when the existing projection record is still `ACTIVE`. A previously `LEFT` or `REMOVED` admin who later appears again in legacy `participantIds` is restored as `MEMBER`; explicit owner promotion is required to regain admin privileges. `creatorId` remains authoritative for who is `OWNER` during this stage.
+Backfill rules:
+
+- legacy `creatorId` becomes `OWNER`;
+- active existing `ADMIN` is preserved;
+- other active participants become `MEMBER`;
+- previously `LEFT`/`REMOVED` admins that reappear become `MEMBER` until the owner promotes them again;
+- `joinedAt` uses `memberJoinedAt[userId]`, falling back to conversation creation time.
 
 ## Stage 2 — Compatibility dual write
 
-Current group create/add/remove/leave/ownership-transfer operations continue updating the legacy `Conversation` document first.
+Group create/add/remove/leave/ownership-transfer continue maintaining the legacy `Conversation` projection while synchronizing `ConversationMember`.
 
-After a successful legacy mutation, conversation-service synchronizes the `ConversationMember` projection:
+The compatibility path protects current clients while the V2 projection is verified. Projection drift can be repaired by the audit/backfill script.
 
-- create → creator `OWNER`, others `MEMBER`
-- add → target becomes `ACTIVE/MEMBER`, `invitedBy = actor`
-- owner removal → target becomes `REMOVED`, `removedBy = actor`
-- leave → target becomes `LEFT`, `leftAt = now`
-- ownership transfer → new creator becomes `OWNER`; previous owner becomes `MEMBER` unless it has another explicitly preserved active role
+## Stage 2.5 — Shadow consistency
 
-Projection synchronization is deliberately non-authoritative in this stage. If it fails, the already-committed V1 mutation still succeeds and drift is repaired by the audit/backfill command.
-
-This behavior prevents a cross-collection projection failure from making the client believe a legacy mutation failed when it actually committed.
-
-## Stage 2.5 — Shadow consistency under real traffic
-
-Before the V2 projection participates in authorization, enable read-only shadow verification:
+Enable:
 
 ```bash
 GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true
 ```
 
-The flag is default-OFF. When enabled, successful group lifecycle mutations schedule a non-blocking comparison after:
+This flag is default-OFF. The checker compares legacy membership against `ConversationMember` after group lifecycle mutations and reports drift when it detects:
 
-- group creation;
-- add member;
-- remove member;
-- leave group;
-- ownership transfer;
-- role promotion/demotion.
+- missing active members;
+- unexpected active members;
+- OWNER mismatch;
+- `joinedAt` mismatch;
+- projection/conversation read failure.
 
-The shadow checker compares the legacy source of truth against `ConversationMember` and reports `readyForCutover=false` when it sees any of:
-
-- active legacy participant missing from the projection;
-- unexpected active projection row not present in `participantIds`;
-- projected OWNER set not exactly equal to `creatorId`;
-- joined-at timestamp drift;
-- conversation/projection read failure.
-
-Drift is logged with the prefix:
+Drift log prefix:
 
 ```text
 [GroupV2Shadow] membership projection drift
 ```
 
-Shadow checks are deliberately fire-and-forget and never turn a successful V1 mutation into a failed client request. This is telemetry, not authorization.
+The check is telemetry only and never turns an otherwise successful compatibility mutation into a client failure.
 
-Required rollout order:
+## Stage 3 — V2 member read contract
 
-1. schema + dual write deployed;
-2. static backfill audit clean;
-3. enable `GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true` in staging;
-4. exercise normal and concurrent group lifecycle traffic;
-5. require no drift warnings and another clean static audit;
-6. only then consider enabling gated role mutation;
-7. canonical authorization remains a later gate.
+Internal RMQ:
 
-Do not enable canonical V2 authorization just because one static backfill run is clean. Shadow traffic validation exists specifically to catch runtime drift that a one-time migration cannot prove absent.
+```text
+get_group_member_projection
+```
 
-## Stage 3 — Additive read path
+Gateway:
 
-A new internal RMQ request is available:
+```text
+GET /conversations/:id/members/v2
+```
 
-`get_group_member_projection`
-
-A new additive gateway endpoint is available:
-
-`GET /conversations/:id/members/v2`
-
-It returns the V1-compatible member shape plus role metadata:
+Response:
 
 ```ts
 {
@@ -171,35 +140,9 @@ It returns the V1-compatible member shape plus role metadata:
 }
 ```
 
-The current `GET /conversations/:id/members` endpoint is unchanged.
+The legacy `/members` endpoint remains available for compatibility.
 
-During this stage:
-
-- legacy `creatorId` always wins for `OWNER`;
-- a projected `ADMIN` role is used only when the matching legacy participant is still active;
-- missing/unavailable projection data falls back to `MEMBER`;
-- inactive projection rows are not allowed to create active membership that is absent from `participantIds`.
-
-This makes the V2 read path fail closed instead of granting stale privileges.
-
-## Stage 4 — Permission matrix preparation
-
-Do not make `ConversationMember` authoritative for existing V1 authorization until all of these pass:
-
-1. schema deployed everywhere;
-2. backfill audit is clean;
-3. shadow consistency reports remain clean under real traffic;
-4. dual-write drift remains zero under normal traffic;
-5. ownership transfer stress tests remain clean;
-6. add/remove/leave concurrency tests remain clean;
-7. mixed-version Socket.IO rollout remains clean;
-8. mobile group lifecycle physical-device tests pass.
-
-Until this gate, existing management operations remain owner-only exactly as V1.
-
-### Proposed V2 permission matrix
-
-The matrix is implemented as a pure policy and unit-tested, but it is not wired into current V1 management operations yet.
+## Stage 4 — Permission matrix
 
 | Action | OWNER | ADMIN | MEMBER |
 | --- | --- | --- | --- |
@@ -211,21 +154,23 @@ The matrix is implemented as a pure policy and unit-tested, but it is not wired 
 | Demote ADMIN → MEMBER | Yes | No | No |
 | Transfer ownership | Yes | No | No |
 | Leave group | Transfer first | Yes | Yes |
-| Disband group | Policy gate | No | No |
+| Disband group | Not enabled | No | No |
 
-Any ADMIN action that depends on target role must fail closed if the target role projection cannot be verified.
+The pure policy is implemented in `group-permission.policy.ts`.
 
-## Stage 5 — Gated role mutation lifecycle
+## Stage 5 — Role mutations
 
-Owner promotion/demotion is implemented as an **additive, default-OFF capability**.
+Enable:
 
-Internal RMQ:
+```bash
+GROUP_V2_ROLE_MUTATIONS_ENABLED=true
+```
 
-`update_group_member_role`
+Gateway:
 
-Gateway endpoint:
-
-`PATCH /conversations/:id/members/:userId/role`
+```text
+PATCH /conversations/:id/members/:userId/role
+```
 
 Body:
 
@@ -239,119 +184,66 @@ or:
 { "role": "MEMBER" }
 ```
 
-Activation requires:
+Only the current legacy owner can promote/demote during the transitional rollout. The write uses a MongoDB/Prisma transaction and guards ownership, active membership, and expected role against concurrent changes.
 
-```bash
-GROUP_V2_ROLE_MUTATIONS_ENABLED=true
-```
+Idempotent role requests return success without creating another role write, activity entry, or duplicate `conversation_updated` event.
 
-When the variable is absent or false, the use case rejects role mutations. Deploying the code therefore does not automatically grant or change any role-management capability.
+## Stage 6A — Canonical V2 reads
 
-Do not enable this flag before shadow consistency has been enabled and remained clean in staging.
-
-### Atomic stale-owner protection
-
-The role write uses a MongoDB/Prisma transaction. Inside the same transaction it:
-
-1. performs a guarded write on the legacy `Conversation` document requiring:
-   - matching conversation id;
-   - `isGroup = true`;
-   - `creatorId = actorUserId`;
-   - target user still present in `participantIds`;
-2. changes the active target `ConversationMember` only if its current role equals the expected role;
-3. rolls the transaction back when the expected target role no longer matches.
-
-Writing the legacy conversation guard is intentional: it prevents the classic stale-owner read/write-skew where ownership transfers between an authorization pre-read and a role write in another collection.
-
-MongoDB transactions require a replica set. Conversation-service already uses Prisma transactions in message persistence, but role mutation must still be runtime-tested against the actual deployment before the flag is enabled.
-
-### Idempotency
-
-`PATCH` is treated idempotently:
-
-- setting an existing `ADMIN` to `ADMIN` succeeds without another write;
-- setting an existing `MEMBER` to `MEMBER` succeeds without another write;
-- if a concurrent identical role change wins the guarded transaction first, the losing request re-reads state and succeeds if the desired role is already canonical;
-- conflicting ownership/membership/role changes return a conflict instead of overwriting current state.
-
-A successful role change reuses the existing `conversation_updated` realtime lifecycle event so connected clients can invalidate member data without changing the established V1 event protocol.
-
-## Stage 6A — Gated canonical reads on the V2 endpoint only
-
-Before changing any V1 authorization path, the additive `/members/v2` endpoint can be switched to strict `ConversationMember` reads in staging:
+Enable:
 
 ```bash
 GROUP_V2_CANONICAL_MEMBER_READS_ENABLED=true
 ```
 
-This flag is default-OFF and affects only `get_group_member_projection` / `GET /conversations/:id/members/v2`.
-
-When disabled, the V2 endpoint keeps the compatibility behavior described in Stage 3.
+The flag affects only `get_group_member_projection` / `/members/v2`.
 
 When enabled:
 
-- active membership comes from `ConversationMember(status = ACTIVE)`;
-- role comes directly from `ConversationMember`;
-- joined-at comes directly from `ConversationMember.joinedAt`;
-- requester membership is checked against the active projection;
-- projection read failure returns service-unavailable rather than falling back to legacy membership;
-- active projected member ids must still equal legacy `participantIds` during this rollout gate;
-- projected OWNER must still be exactly the legacy `creatorId` during this rollout gate;
-- any member-set/owner drift returns conflict rather than serving potentially inconsistent canonical data.
+- membership comes from ACTIVE `ConversationMember` rows;
+- roles come from `ConversationMember`;
+- `joinedAt` comes from `ConversationMember.joinedAt`;
+- requester must be an ACTIVE projected member;
+- projection failure is fail-closed, with no legacy fallback;
+- active projected user ids must still exactly equal legacy `participantIds`;
+- projected OWNER must still exactly equal legacy `creatorId`;
+- every projected `joinedAt` must still equal legacy `memberJoinedAt[userId]`, falling back to `Conversation.createdAt`;
+- any member-set, OWNER, or `joinedAt` drift returns conflict.
 
-The legacy equality checks are temporary cutover guards, not the final V2 architecture. They let staging exercise projection-authoritative reads while still proving equivalence to V1 before V1 is retired.
+These equality checks are temporary cutover guards and deliberately remain during the first V2 test window.
 
-Enabling this flag does **not**:
+## Stage 6B — ADMIN permissions and transactional membership mutations
 
-- modify `GET /conversations/:id/members`;
-- make ADMIN authoritative for rename/add/remove;
-- change send-message membership authorization;
-- change history policy;
-- change realtime room membership.
+Enable:
 
-## Stage 6B — Canonical membership/authorization cutover
+```bash
+GROUP_V2_ADMIN_PERMISSIONS_ENABLED=true
+```
 
-Only after Stage 0–6A runtime gates are clean:
+This flag is default-OFF. With it disabled, the old owner-only V1 management path remains active.
 
-1. switch role/permission resolution for existing group mutations to `ConversationMember`;
-2. activate ADMIN permissions one action at a time behind rollout controls;
-3. move additional membership reads to `ConversationMember(status = ACTIVE)` only after their own compatibility tests;
-4. keep legacy fields as compatibility projection for at least one rollout window;
-5. compare legacy and V2 membership continuously;
-6. only then stop using `memberJoinedAt` JSON for new logic.
+With it enabled, rename/photo/add/remove/leave/transfer operations resolve the active V2 role and use `PrismaGroupManagementV2Repository` transactional guards.
 
-Removing `participantIds`, `creatorId`, or `memberJoinedAt` is a later migration and must not be bundled into the first V2 rollout.
+Repository invariants include:
 
-## Product policy gates still intentionally unchanged
+- actor must remain ACTIVE with the expected role;
+- exact legacy `participantIds` are guarded for membership changes;
+- ADMIN can remove only a `MEMBER`;
+- current OWNER can never be removed at the repository boundary;
+- target role must still match inside the transaction;
+- ownership transfer requires the current OWNER and a different active target;
+- two-member minimum is rechecked in the transaction path;
+- legacy `participantIds`/`memberJoinedAt` and `ConversationMember` are committed together for V2 membership changes.
 
-### Two-member groups
+## Stage 6C — Structured group system activities
 
-Current creation behavior is preserved by this migration. The migration itself does not silently change minimum group size or auto-convert groups to direct chats.
+Enable:
 
-Before a disband feature or stricter creation rule is enabled, product must choose between:
+```bash
+GROUP_V2_SYSTEM_ACTIVITIES_ENABLED=true
+```
 
-- require creator + at least two other users for new groups; or
-- keep two-member groups and provide an explicit disband flow.
-
-Existing two-member groups must be included in that decision.
-
-### New-member history
-
-Phase 1 preserves the current **FULL HISTORY** behavior for compatibility: a newly added active member can read existing group history.
-
-Changing to join-boundary history is a separate privacy migration that must update pagination, around-message, anchor older/newer, search, pinned navigation, local bootstrap and reply-target behavior together.
-
-## Group avatar
-
-Backend metadata already supports `picture` update/removal and the current mobile Group Info renders `conversation.picture`. The missing Phase 1 work is the mobile choose/upload/change/remove UX.
-
-Do not write that UI directly to mobile `main`. Apply it only when there is a safe mobile working branch/ref.
-
-## System activity messages
-
-Do not emit system activity messages until member/role mutations are authoritative enough to guarantee exactly-once semantics. Otherwise a projection retry could create duplicate activity entries.
-
-When implemented, activity types should be structured metadata rather than localized text persisted as the source of truth, for example:
+Implemented activity types:
 
 - `GROUP_CREATED`
 - `MEMBER_ADDED`
@@ -363,32 +255,86 @@ When implemented, activity types should be structured metadata rather than local
 - `GROUP_RENAMED`
 - `GROUP_PICTURE_CHANGED`
 
-Rendering text belongs at the client/presentation layer.
+Activities are stored as regular server-managed messages with structured `metadata.kind = group_system_activity`. The message content is encrypted at rest through the existing server-managed encryption path, while `Conversation.lastMessage` receives the readable activity preview.
 
-## Required validation before merge
+Mobile renders these messages as centered, non-interactive timeline rows and preserves structured activity metadata through HTTP, Socket.IO, and the local WatermelonDB sync path.
 
-At minimum:
+Ordinary retries do not create duplicate activities because activities are only requested after a mutation reports a real state change. This is still a best-effort side effect rather than a transactional outbox: a process crash after the membership mutation but before asynchronous activity persistence can lose that activity entry. A strict outbox is a separate reliability migration.
+
+## Group avatar
+
+Backend group metadata supports picture set/removal. Mobile Group Info now supports:
+
+1. choose JPEG/PNG/WebP;
+2. existing media `upload-url` flow;
+3. direct upload to the returned URL;
+4. existing `finalize-upload` flow;
+5. PATCH the finalized public URL into `conversation.picture`;
+6. remove photo with `picture: null`.
+
+No new media-service endpoint is required.
+
+## One-pass staging flag set
+
+For the requested single end-to-end V2 test, enable all five gates together **only after schema generation/validation and a clean backfill audit**:
+
+```bash
+GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true
+GROUP_V2_CANONICAL_MEMBER_READS_ENABLED=true
+GROUP_V2_ROLE_MUTATIONS_ENABLED=true
+GROUP_V2_ADMIN_PERMISSIONS_ENABLED=true
+GROUP_V2_SYSTEM_ACTIVITIES_ENABLED=true
+```
+
+Do not enable only Stage 6B while canonical reads or projection consistency are known to be unhealthy; the management use case deliberately fails closed on membership/owner/`joinedAt` drift.
+
+## Required automated validation before merge
+
+Backend minimum:
 
 ```bash
 pnpm prisma:generate:conversation
 pnpm exec prisma validate --schema=apps/conversation-service/prisma/schema.prisma
-pnpm test -- create-conversastion.use-case.spec.ts group-membership-consistency.service.spec.ts get-group-members.use-case.spec.ts manage-group-role.use-case.spec.ts group-permission.policy.spec.ts prisma-conversation-member.repository.spec.ts prisma-conversation-chat.repository.spec.ts manage-group-conversation.use-case.spec.ts group-members.controller.spec.ts group-members-v2.controller.spec.ts chat.gateway.realtime.spec.ts chat.gateway.room-migration.spec.ts
+pnpm test -- create-conversastion.use-case.spec.ts group-activity.service.spec.ts group-membership-consistency.service.spec.ts get-group-members.use-case.spec.ts manage-group-role.use-case.spec.ts group-permission.policy.spec.ts prisma-conversation-member.repository.spec.ts prisma-group-management-v2.repository.spec.ts prisma-conversation-chat.repository.spec.ts manage-group-conversation.use-case.spec.ts group-members.controller.spec.ts group-members-v2.controller.spec.ts chat.gateway.realtime.spec.ts chat.gateway.room-migration.spec.ts
 pnpm build:conversation
 pnpm build:gateway
 ```
 
-Then:
+Mobile minimum:
 
-1. run `pnpm audit:conversation-members-v2` against a staging copy of production data;
-2. apply the backfill only after reviewing audit output;
-3. run audit again and require zero drift;
-4. enable `GROUP_V2_SHADOW_CONSISTENCY_ENABLED=true` in staging while role mutations remain disabled;
-5. exercise create/add/remove/leave/ownership-transfer traffic including concurrency races;
-6. require no `[GroupV2Shadow]` drift warnings and another clean static audit;
-7. enable `GROUP_V2_CANONICAL_MEMBER_READS_ENABLED=true` only on staging and exercise `/members/v2` from owner/admin/member accounts;
-8. require no canonical-read conflicts under valid traffic and confirm V1 `/members` output remains unchanged;
-9. only then enable `GROUP_V2_ROLE_MUTATIONS_ENABLED=true` in staging;
-10. exercise promote/demote and race them against ownership transfer/member removal;
-11. verify Android/iOS group lifecycle remains unchanged with all V2 cutover flags disabled in production-equivalent configuration.
+```bash
+npm run type-check
+npm test
+npm run lint
+```
 
-No merge should happen until runtime/physical-device validation is complete.
+These commands are requirements, not evidence that they have already passed in the current agent environment.
+
+## Runtime validation before merge
+
+1. Audit staging.
+2. Apply backfill after review.
+3. Audit again and require zero drift.
+4. Enable the one-pass five-flag set above.
+5. Execute `GROUP_CHAT_V2_FINAL_TEST_CHECKLIST.md` on staging.
+6. Confirm no `[GroupV2Shadow]` warnings under valid traffic.
+7. Confirm MongoDB transactions succeed on the actual replica-set deployment.
+8. Validate Android and iOS physical devices.
+9. Confirm direct chat send/reply/reaction/media/read-receipt/presence/call behavior remains unchanged.
+10. Confirm group calls remain blocked until the separate Phase 4 implementation.
+
+No merge should happen until runtime and physical-device validation is complete.
+
+## Product policies intentionally unchanged
+
+### Two-member groups
+
+Two-member groups remain valid. Removing/leaving is blocked if it would reduce an existing group below two active legacy participants. Disband remains unresolved and disabled.
+
+### New-member history
+
+V2 continues the current FULL HISTORY behavior. Join-boundary history is a separate privacy migration because it must update pagination, anchored message navigation, search, reply targets, local bootstrap, and related data access together.
+
+### Group calls
+
+Group calls remain outside this migration and must stay blocked until the separate Mediasoup Phase 4 work is implemented and tested.
