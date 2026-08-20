@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { Conversation } from '../../domain/entities/conversation.entity';
 import {
   Message,
   type GroupSystemActivity,
@@ -61,12 +62,21 @@ export class GroupActivityService {
     const senderId = conversation.participantIds.includes(input.actorUserId)
       ? input.actorUserId
       : conversation.creatorId;
+    const actorName =
+      input.actorName?.trim() ||
+      this.displayName(conversation, input.actorUserId) ||
+      undefined;
+    const targetName = input.targetUserId
+      ? input.targetName?.trim() ||
+        this.displayName(conversation, input.targetUserId) ||
+        undefined
+      : input.targetName?.trim() || undefined;
     const activity: GroupSystemActivity = {
       type: input.type,
       actorUserId: input.actorUserId,
-      ...(input.actorName ? { actorName: input.actorName } : {}),
+      ...(actorName ? { actorName } : {}),
       ...(input.targetUserId ? { targetUserId: input.targetUserId } : {}),
-      ...(input.targetName ? { targetName: input.targetName } : {}),
+      ...(targetName ? { targetName } : {}),
       ...(input.previousValue !== undefined
         ? { previousValue: input.previousValue }
         : {}),
@@ -107,6 +117,19 @@ export class GroupActivityService {
     if (updatedConversation) {
       this.realtimePublisher.emitConversationUpdated(updatedConversation);
     }
+  }
+
+  private displayName(conversation: Conversation, userId: string): string | null {
+    const participant = conversation.participants?.find(
+      (candidate) => candidate.id === userId,
+    );
+
+    return (
+      participant?.name?.trim() ||
+      participant?.fullName?.trim() ||
+      participant?.email?.split('@')[0]?.trim() ||
+      null
+    );
   }
 
   private buildContent(activity: GroupSystemActivity): string {
