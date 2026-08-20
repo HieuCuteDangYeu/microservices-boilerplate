@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 
 // Import UseCases & Infra
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { GroupActivityService } from 'apps/conversation-service/src/application/services/group-activity.service';
 import { GroupMembershipConsistencyService } from 'apps/conversation-service/src/application/services/group-membership-consistency.service';
 import { BuildBotMemoryContextUseCase } from 'apps/conversation-service/src/application/use-cases/build-bot-memory-context.use-case';
 import { BuildCompletedTurnMemoryContextUseCase } from 'apps/conversation-service/src/application/use-cases/build-completed-turn-memory-context.use-case';
@@ -21,6 +22,7 @@ import { ProcessBotReplyUseCase } from 'apps/conversation-service/src/applicatio
 import { TriggerBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/trigger-bot-reply.use-case';
 import { AiServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/ai-service.adapter';
 import { ChatMediaServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/chat-media.service.adapter';
+import { ConversationRealtimePublisherAdapter } from 'apps/conversation-service/src/infrastructure/adapters/conversation-realtime-publisher.adapter';
 import { NotificationServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/notification-service.adapter';
 import { UserServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/user-service.adapter';
 import { ConversationMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/conversation.controller';
@@ -124,6 +126,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     CreateConversationUseCase,
     ManageGroupConversationUseCase,
     ManageGroupRoleUseCase,
+    GroupActivityService,
     GroupMembershipConsistencyService,
     GetUserConversationsUseCase,
     ProcessBotReplyUseCase,
@@ -131,11 +134,12 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     BuildBotMemoryContextUseCase,
     BuildCompletedTurnMemoryContextUseCase,
 
-    // --- Repositories ---
+    // --- Repositories / publishers ---
     PrismaConversationChatRepository,
     PrismaConversationMemberRepository,
     PrismaGroupManagementV2Repository,
     PrismaKeyBundleRepository,
+    ConversationRealtimePublisherAdapter,
 
     {
       provide: 'IUserService',
@@ -156,6 +160,10 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     {
       provide: 'IGroupManagementV2Repository',
       useExisting: PrismaGroupManagementV2Repository,
+    },
+    {
+      provide: 'IConversationRealtimePublisher',
+      useExisting: ConversationRealtimePublisherAdapter,
     },
     {
       provide: 'IEncryptionRepository',
