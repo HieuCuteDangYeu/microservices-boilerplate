@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/conversation-client';
 import Redis from 'ioredis';
 
@@ -12,6 +12,31 @@ import { ConversationMapper } from './conversation.mapper';
 import { PrismaChatRepository } from './prisma-chat.repository';
 
 const MEMBERSHIP_CAS_MAX_ATTEMPTS = 8;
+
+type ProjectionChange =
+  | {
+      kind: 'created';
+      actorUserId: string;
+    }
+  | {
+      kind: 'added';
+      actorUserId: string;
+      userId: string;
+    }
+  | {
+      kind: 'removed';
+      actorUserId?: string;
+      userId: string;
+      at: Date;
+    }
+  | {
+      kind: 'left';
+      userId: string;
+      at: Date;
+    }
+  | {
+      kind: 'ownership-transferred';
+    };
 
 const normalizeMemberJoinedAt = (
   value: Prisma.JsonValue | null | undefined,
@@ -50,6 +75,8 @@ export class PrismaConversationChatRepository
   extends PrismaChatRepository
   implements IConversationMutationRepository
 {
+  private readonly logger = new Logger(PrismaConversationChatRepository.name);
+
   constructor(
     private readonly conversationPrisma: PrismaService,
     @Inject('REDIS_CLIENT') redis: Redis,
@@ -88,6 +115,13 @@ export class PrismaConversationChatRepository
         },
       },
     );
+
+    if (savedConversation.isGroup) {
+      await this.syncGroupMemberProjection(savedConversation.id, {
+        kind: 'created',
+        actorUserId: savedConversation.creatorId,
+      });
+    }
 
     return ConversationMapper.toDomain(savedConversation);
   }
@@ -146,6 +180,11 @@ export class PrismaConversationChatRepository
       );
 
       if (updated) {
+        await this.syncGroupMemberProjection(conversationId, {
+          kind: 'added',
+          actorUserId: currentOwnerUserId,
+          userId,
+        });
         return true;
       }
     }
@@ -167,7 +206,14 @@ export class PrismaConversationChatRepository
       data: { creatorId: newOwnerUserId },
     });
 
-    return result.count === 1;
+    if (result.count === 1) {
+      await this.syncGroupMemberProjection(conversationId, {
+        kind: 'ownership-transferred',
+      });
+      return true;
+    }
+
+    return false;
   }
 
   async removeParticipantAsOwner(
@@ -205,6 +251,12 @@ export class PrismaConversationChatRepository
       );
 
       if (updated) {
+        await this.syncGroupMemberProjection(conversationId, {
+          kind: 'removed',
+          actorUserId: currentOwnerUserId,
+          userId,
+          at: new Date(),
+        });
         return true;
       }
     }
@@ -246,6 +298,11 @@ export class PrismaConversationChatRepository
       );
 
       if (updated) {
+        await this.syncGroupMemberProjection(conversationId, {
+          kind: 'left',
+          userId,
+          at: new Date(),
+        });
         return true;
       }
     }
@@ -282,6 +339,11 @@ export class PrismaConversationChatRepository
       );
 
       if (updated) {
+        await this.syncGroupMemberProjection(conversationId, {
+          kind: 'removed',
+          userId,
+          at: new Date(),
+        });
         return;
       }
     }
@@ -327,5 +389,118 @@ export class PrismaConversationChatRepository
     });
 
     return result.count === 1;
+  }
+
+  private async syncGroupMemberProjection(
+    conversationId: string,
+    change: ProjectionChange,
+  ): Promise<void> {
+    // During the rolling V2 migration the legacy Conversation document remains
+    // authoritative. Projection failures must therefore not turn a successful
+    // V1 mutation into an apparent client failure; the audit/backfill command
+    // detects and repairs projection drift before cutover.
+    try {
+      const memberRepository = this.conversationPrisma.conversationMember;
+      if (!memberRepository) {
+        return;
+      }
+
+      const conversation = await this.conversationPrisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: {
+          creatorId: true,
+          participantIds: true,
+          memberJoinedAt: true,
+          createdAt: true,
+          isGroup: true,
+        },
+      });
+
+      if (!conversation?.isGroup) {
+        return;
+      }
+
+      const participantIds = Array.from(new Set(conversation.participantIds));
+      const participantSet = new Set(participantIds);
+      const joinedAtByUserId = normalizeMemberJoinedAt(
+        conversation.memberJoinedAt,
+        participantIds,
+        conversation.createdAt,
+      );
+      const existingMembers = await memberRepository.findMany({
+        where: { conversationId },
+      });
+      const existingByUserId = new Map(
+        existingMembers.map((member) => [member.userId, member]),
+      );
+
+      for (const userId of participantIds) {
+        const existing = existingByUserId.get(userId);
+        const role =
+          userId === conversation.creatorId
+            ? 'OWNER'
+            : existing?.role === 'ADMIN'
+              ? 'ADMIN'
+              : 'MEMBER';
+        const invitedBy =
+          change.kind === 'created' && userId !== conversation.creatorId
+            ? change.actorUserId
+            : change.kind === 'added' && userId === change.userId
+              ? change.actorUserId
+              : existing?.invitedBy ?? null;
+
+        await memberRepository.upsert({
+          where: {
+            conversationId_userId: {
+              conversationId,
+              userId,
+            },
+          },
+          create: {
+            conversationId,
+            userId,
+            role,
+            status: 'ACTIVE',
+            joinedAt: new Date(joinedAtByUserId[userId]),
+            ...(invitedBy ? { invitedBy } : {}),
+          },
+          update: {
+            role,
+            status: 'ACTIVE',
+            joinedAt: new Date(joinedAtByUserId[userId]),
+            leftAt: null,
+            removedBy: null,
+            ...(invitedBy ? { invitedBy } : {}),
+          },
+        });
+      }
+
+      for (const existing of existingMembers) {
+        if (participantSet.has(existing.userId) || existing.status !== 'ACTIVE') {
+          continue;
+        }
+
+        const isExplicitLeave =
+          change.kind === 'left' && change.userId === existing.userId;
+        const isExplicitRemoval =
+          change.kind === 'removed' && change.userId === existing.userId;
+
+        await memberRepository.update({
+          where: { id: existing.id },
+          data: {
+            role: existing.role === 'OWNER' ? 'MEMBER' : existing.role,
+            status: isExplicitLeave ? 'LEFT' : 'REMOVED',
+            ...(isExplicitLeave ? { leftAt: change.at } : { leftAt: null }),
+            ...(isExplicitRemoval && change.actorUserId
+              ? { removedBy: change.actorUserId }
+              : { removedBy: null }),
+          },
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `ConversationMember projection sync failed for ${conversationId}: ${(error as Error).message}`,
+      );
+    }
   }
 }
