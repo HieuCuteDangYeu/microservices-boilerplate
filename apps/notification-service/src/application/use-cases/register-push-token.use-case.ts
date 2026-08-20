@@ -21,27 +21,41 @@ export class RegisterPushTokenUseCase {
     userId: string,
     input: RegisterPushTokenInput,
   ): Promise<PushToken> {
-    if (
-      input.lifecycleVersion !== undefined &&
-      !(await this.lifecycleRepository.advance(input, 'register'))
-    ) {
+    const requiresLifecycleLock =
+      Boolean(input.deviceId) && input.lifecycleVersion !== undefined;
+    const lockId = await this.lifecycleRepository.acquireLock(input);
+
+    if (requiresLifecycleLock && !lockId) {
       throw new PushTokenLifecycleConflictError();
     }
 
-    const pushToken = await this.pushTokenRepository.upsert(userId, input);
+    try {
+      if (
+        input.lifecycleVersion !== undefined &&
+        !(await this.lifecycleRepository.advance(input, 'register'))
+      ) {
+        throw new PushTokenLifecycleConflictError();
+      }
 
-    if (
-      input.lifecycleVersion !== undefined &&
-      !(await this.lifecycleRepository.isCurrent(input, 'register'))
-    ) {
-      await this.pushTokenRepository.deactivateRegistration(userId, input);
-      throw new PushTokenLifecycleConflictError();
+      const pushToken = await this.pushTokenRepository.upsert(userId, input);
+
+      if (
+        input.lifecycleVersion !== undefined &&
+        !(await this.lifecycleRepository.isCurrent(input, 'register'))
+      ) {
+        await this.pushTokenRepository.deactivateRegistration(userId, input);
+        throw new PushTokenLifecycleConflictError();
+      }
+
+      if (input.deviceId) {
+        await this.pushTokenRepository.deactivateOtherDeviceTokens(userId, input);
+      }
+
+      return pushToken;
+    } finally {
+      if (lockId) {
+        await this.lifecycleRepository.releaseLock(input, lockId);
+      }
     }
-
-    if (input.deviceId) {
-      await this.pushTokenRepository.deactivateOtherDeviceTokens(userId, input);
-    }
-
-    return pushToken;
   }
 }

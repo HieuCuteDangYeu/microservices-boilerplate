@@ -11,6 +11,13 @@ export type PushTokenLifecycleInput = Pick<
 export type PushTokenLifecycleAction = 'register' | 'deactivate';
 
 export abstract class IPushTokenLifecycleRepository {
+  abstract acquireLock(input: PushTokenLifecycleInput): Promise<string | null>;
+
+  abstract releaseLock(
+    input: PushTokenLifecycleInput,
+    lockId: string,
+  ): Promise<void>;
+
   abstract advance(
     input: PushTokenLifecycleInput,
     action: PushTokenLifecycleAction,

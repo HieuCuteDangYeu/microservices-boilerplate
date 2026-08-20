@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   IPushTokenLifecycleRepository,
@@ -9,10 +9,69 @@ import {
 } from '../../domain/interfaces/push-token-lifecycle.repository.interface';
 
 const LIFECYCLE_TTL_SECONDS = 15 * 60;
+const LIFECYCLE_LOCK_TTL_MS = 10_000;
+const LIFECYCLE_LOCK_WAIT_MS = 3_000;
+const LIFECYCLE_LOCK_RETRY_MS = 25;
+
+const sleep = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 @Injectable()
-export class RedisPushTokenLifecycleRepository implements IPushTokenLifecycleRepository {
+export class RedisPushTokenLifecycleRepository
+  implements IPushTokenLifecycleRepository
+{
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
+
+  async acquireLock(input: PushTokenLifecycleInput): Promise<string | null> {
+    if (!input.deviceId || input.lifecycleVersion === undefined) {
+      return null;
+    }
+
+    const lockId = randomUUID();
+    const deadline = Date.now() + LIFECYCLE_LOCK_WAIT_MS;
+
+    while (true) {
+      const result = await this.redis.set(
+        this.lifecycleLockKey(input),
+        lockId,
+        'PX',
+        LIFECYCLE_LOCK_TTL_MS,
+        'NX',
+      );
+
+      if (result === 'OK') {
+        return lockId;
+      }
+
+      if (Date.now() >= deadline) {
+        return null;
+      }
+
+      await sleep(LIFECYCLE_LOCK_RETRY_MS);
+    }
+  }
+
+  async releaseLock(
+    input: PushTokenLifecycleInput,
+    lockId: string,
+  ): Promise<void> {
+    if (!input.deviceId || input.lifecycleVersion === undefined) {
+      return;
+    }
+
+    await this.redis.eval(
+      `
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+          return redis.call('DEL', KEYS[1])
+        end
+
+        return 0
+      `,
+      1,
+      this.lifecycleLockKey(input),
+      lockId,
+    );
+  }
 
   async advance(
     input: PushTokenLifecycleInput,
@@ -74,11 +133,16 @@ export class RedisPushTokenLifecycleRepository implements IPushTokenLifecycleRep
   }
 
   private lifecycleKey(input: PushTokenLifecycleInput) {
-    const identity = `${input.provider}:${input.deviceId}`;
-    const installationHash = createHash('sha256')
-      .update(identity)
-      .digest('hex');
+    return `notification:push-token-lifecycle:${this.installationHash(input)}`;
+  }
 
-    return `notification:push-token-lifecycle:${installationHash}`;
+  private lifecycleLockKey(input: PushTokenLifecycleInput) {
+    return `notification:push-token-lifecycle-lock:${this.installationHash(input)}`;
+  }
+
+  private installationHash(input: PushTokenLifecycleInput) {
+    const identity = `${input.provider}:${input.deviceId}`;
+
+    return createHash('sha256').update(identity).digest('hex');
   }
 }
