@@ -44,7 +44,9 @@ export class GroupMembersMicroserviceController {
   ) {
     try {
       const result = await this.manageGroupRoleUseCase.updateRole(data);
-      this.chatGateway.emitConversationUpdated(result.conversation);
+      if (result.changed) {
+        this.chatGateway.emitConversationUpdated(result.conversation);
+      }
       return result.member;
     } catch (error) {
       const resolved = error as Error;
