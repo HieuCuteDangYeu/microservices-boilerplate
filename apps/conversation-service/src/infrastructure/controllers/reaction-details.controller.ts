@@ -128,6 +128,7 @@ export class ReactionDetailsMicroserviceController {
       return [];
     }
 
-    return this.userService.findUsersByIds(ids);
+    const response = await this.userService.findUsersByIds(ids);
+    return Array.isArray(response) ? (response as ValidateUserResponse[]) : [];
   }
 }
