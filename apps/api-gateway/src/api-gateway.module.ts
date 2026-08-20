@@ -6,6 +6,7 @@ import { ContentController } from '@gateway/content/content.controller';
 import { PublicReelShareController } from '@gateway/content/public-reel-share.controller';
 import { ReelAuthorService } from '@gateway/content/reel-author.service';
 import { ConversationController } from '@gateway/conversation/conversation.controller';
+import { GroupMembersV2Controller } from '@gateway/conversation/group-members-v2.controller';
 import { GatewayKeyController } from '@gateway/conversation/key.controller';
 import { MessageController } from '@gateway/conversation/message.controller';
 import { FriendController } from '@gateway/friends/friend.controller';
@@ -75,6 +76,7 @@ function createRmqClientRegistration(name: string, queue: string) {
     MediaController,
     PaymentController,
     ConversationController,
+    GroupMembersV2Controller,
     MessageController,
     GatewayKeyController,
     ContentController,
