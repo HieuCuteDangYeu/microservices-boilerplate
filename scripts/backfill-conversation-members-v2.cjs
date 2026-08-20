@@ -51,7 +51,7 @@ async function reconcileConversation(conversation, stats) {
     const expectedRole =
       userId === conversation.creatorId
         ? 'OWNER'
-        : existing?.role === 'ADMIN'
+        : existing?.status === 'ACTIVE' && existing.role === 'ADMIN'
           ? 'ADMIN'
           : 'MEMBER';
 
