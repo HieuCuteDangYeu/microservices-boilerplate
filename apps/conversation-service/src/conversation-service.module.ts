@@ -30,6 +30,7 @@ import { PrismaService } from 'apps/conversation-service/src/infrastructure/pris
 import { AesEncryptionRepository } from 'apps/conversation-service/src/infrastructure/repositories/aes-encryption.repository';
 import { PrismaConversationChatRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-conversation-chat.repository';
 import { PrismaConversationMemberRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-conversation-member.repository';
+import { PrismaGroupManagementV2Repository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-group-management-v2.repository';
 import { PrismaKeyBundleRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-key-bundle.repository';
 import { SendMessageUseCase } from './application/use-cases/send-message.use-case';
 import { ChatGateway } from './infrastructure/gateways/chat.gateway';
@@ -133,6 +134,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     // --- Repositories ---
     PrismaConversationChatRepository,
     PrismaConversationMemberRepository,
+    PrismaGroupManagementV2Repository,
     PrismaKeyBundleRepository,
 
     {
@@ -150,6 +152,10 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     {
       provide: 'IConversationMemberRepository',
       useExisting: PrismaConversationMemberRepository,
+    },
+    {
+      provide: 'IGroupManagementV2Repository',
+      useExisting: PrismaGroupManagementV2Repository,
     },
     {
       provide: 'IEncryptionRepository',
