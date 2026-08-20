@@ -312,7 +312,7 @@ export class PrismaConversationChatRepository
     expectedParticipantIds: string[],
     participantIds: string[],
     memberJoinedAt: Record<string, string>,
-    extraWhere: Record<string, unknown> = {},
+    extraWhere: Prisma.ConversationWhereInput = {},
   ): Promise<boolean> {
     const result = await this.conversationPrisma.conversation.updateMany({
       where: {
