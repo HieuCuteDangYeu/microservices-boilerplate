@@ -59,7 +59,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (userId) {
       const wasOnlineBefore = await this.isUserOnline(userId);
 
-      await client.join(this.userRoom(userId));
+      await client.join(this.userRooms(userId));
       await this.clearLastSeenAt(userId);
 
       if (!wasOnlineBefore) {
@@ -96,13 +96,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     payload: unknown,
   ): void {
     this.server
-      .to(this.conversationRoom(conversationId))
+      .to(this.conversationRooms(conversationId))
       .emit(eventName, payload);
   }
 
   emitToUsers(userIds: string[], eventName: string, payload: unknown): void {
-    const rooms = Array.from(new Set(userIds.filter(Boolean))).map((userId) =>
-      this.userRoom(userId),
+    const rooms = Array.from(
+      new Set(
+        userIds
+          .filter(Boolean)
+          .flatMap((userId) => this.userRooms(userId)),
+      ),
     );
 
     if (rooms.length === 0) {
@@ -159,12 +163,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       reason: input.reason,
     });
 
-    // The user-specific room targets all devices for the account. With the
-    // Redis adapter, socketsLeave propagates this eviction across Socket.IO
-    // nodes without disconnecting the user's underlying socket connection.
+    // Stage 1 of the rolling room migration targets both legacy raw rooms and
+    // namespaced rooms. The Socket.IO adapter treats room arrays as a union,
+    // so a dual-joined socket receives one event and is evicted once.
     this.server
-      .in(this.userRoom(input.userId))
-      .socketsLeave(this.conversationRoom(input.conversationId));
+      .in(this.userRooms(input.userId))
+      .socketsLeave(this.conversationRooms(input.conversationId));
   }
 
   emitMediaProcessingCompleted(
@@ -242,7 +246,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       client
-        .to(this.conversationRoom(payload.conversationId))
+        .to(this.conversationRooms(payload.conversationId))
         .emit('new_message', savedMessageDto);
 
       // Update conversation sidebar for all participants (lastMessage, ordering)
@@ -345,7 +349,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    void client.join(this.conversationRoom(conversationId));
+    void client.join(this.conversationRooms(conversationId));
     console.log(`Client ${client.id} joined room ${conversationId}`);
   }
 
@@ -398,7 +402,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    client.to(this.conversationRoom(conversationId)).emit('user_typing', {
+    client.to(this.conversationRooms(conversationId)).emit('user_typing', {
       conversationId,
       userId,
       isTyping: true,
@@ -425,7 +429,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    client.to(this.conversationRoom(conversationId)).emit('user_typing', {
+    client.to(this.conversationRooms(conversationId)).emit('user_typing', {
       conversationId,
       userId,
       isTyping: false,
@@ -472,15 +476,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // --- PRIVATE HELPERS ---
-  // Keep legacy raw room keys for this PR so rolling deployments remain
-  // compatible with older conversation-service instances. All addressing now
-  // goes through these helpers so a future dual-room migration has one seam.
-  private userRoom(userId: string): string {
-    return userId;
+  // Stage 1 keeps the legacy raw room and adds the namespaced room. Once all
+  // conversation-service instances have this code, a later rollout can switch
+  // readers/emitters to namespaced-only and finally remove the raw room.
+  private userRooms(userId: string): string[] {
+    return [userId, `user:${userId}`];
   }
 
-  private conversationRoom(conversationId: string): string {
-    return conversationId;
+  private conversationRooms(conversationId: string): string[] {
+    return [conversationId, `conversation:${conversationId}`];
   }
 
   private getLastSeenKey(userId: string): string {
@@ -615,7 +619,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    const sockets = await this.server.in(this.userRoom(userId)).fetchSockets();
+    const sockets = await this.server.in(this.userRooms(userId)).fetchSockets();
     return sockets.length > 0;
   }
 
@@ -628,7 +632,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const toUserId = String(data['toUserId']);
     if (toUserId && senderId) {
       client
-        .to(this.userRoom(toUserId))
+        .to(this.userRooms(toUserId))
         .emit(event, { ...data, fromUserId: senderId });
     }
   }
@@ -729,7 +733,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
 
     if (result.seenUpTo) {
-      client.to(this.conversationRoom(conversationId)).emit('messages_seen', {
+      client.to(this.conversationRooms(conversationId)).emit('messages_seen', {
         conversationId,
         readByUserId: userId,
         frontierCreatedAt: result.seenUpTo.createdAt.toISOString(),
