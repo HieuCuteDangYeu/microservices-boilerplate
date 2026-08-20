@@ -4,16 +4,18 @@ export type ConversationMetadataPatch = {
 };
 
 export abstract class IConversationMutationRepository {
-  abstract updateMetadata(
+  abstract updateMetadataAsOwner(
     conversationId: string,
+    currentOwnerUserId: string,
     patch: ConversationMetadataPatch,
-  ): Promise<void>;
+  ): Promise<boolean>;
 
-  abstract addParticipant(
+  abstract addParticipantAsOwner(
     conversationId: string,
+    currentOwnerUserId: string,
     userId: string,
     joinedAt: Date,
-  ): Promise<void>;
+  ): Promise<boolean>;
 
   abstract transferOwnership(
     conversationId: string,
