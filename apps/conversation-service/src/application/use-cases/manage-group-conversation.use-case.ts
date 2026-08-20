@@ -28,6 +28,7 @@ import {
   normalizeGroupName,
   normalizeGroupPicture,
 } from '../policies/conversation-rules';
+import { GroupActivityService } from '../services/group-activity.service';
 import { GroupMembershipConsistencyService } from '../services/group-membership-consistency.service';
 
 export type AddGroupMemberResult = {
@@ -50,6 +51,7 @@ export class ManageGroupConversationUseCase {
     private readonly userService: IUserService,
     private readonly configService: ConfigService,
     private readonly consistencyService: GroupMembershipConsistencyService,
+    private readonly groupActivityService: GroupActivityService,
   ) {}
 
   async updateMetadata(input: {
@@ -71,50 +73,72 @@ export class ManageGroupConversationUseCase {
 
     const name = normalizeGroupName(input.name);
     const picture = normalizeGroupPicture(input.picture);
+    const nameChanged = name !== undefined && name !== conversation.name;
+    const pictureChanged =
+      picture !== undefined && picture !== conversation.picture;
+
+    if (!nameChanged && !pictureChanged) {
+      return conversation;
+    }
+
     const patch = {
       ...(name !== undefined ? { name } : {}),
       ...(picture !== undefined ? { picture } : {}),
     };
-
-    if (
-      (name === undefined || name === conversation.name) &&
-      (picture === undefined || picture === conversation.picture)
-    ) {
-      return conversation;
-    }
+    let updated = false;
 
     if (!this.isAdminPermissionsEnabled()) {
       this.assertOwner(conversation, input.actorUserId);
-      const updated = await this.mutationRepository.updateMetadataAsOwner(
+      updated = await this.mutationRepository.updateMetadataAsOwner(
         input.conversationId,
         input.actorUserId,
         patch,
       );
-
-      if (!updated) {
-        throw this.conflict();
-      }
-
-      return await this.getUpdatedConversation(input.conversationId);
+    } else {
+      const members = await this.loadConsistentProjection(conversation);
+      const actor = this.requireActiveMember(members, input.actorUserId);
+      this.assertPermission(actor.role, 'UPDATE_METADATA');
+      updated =
+        await this.groupManagementV2Repository.updateMetadataWithRoleGuard(
+          input.conversationId,
+          input.actorUserId,
+          actor.role,
+          patch,
+        );
     }
-
-    const members = await this.loadConsistentProjection(conversation);
-    const actor = this.requireActiveMember(members, input.actorUserId);
-    this.assertPermission(actor.role, 'UPDATE_METADATA');
-
-    const updated =
-      await this.groupManagementV2Repository.updateMetadataWithRoleGuard(
-        input.conversationId,
-        input.actorUserId,
-        actor.role,
-        patch,
-      );
 
     if (!updated) {
       throw this.conflict();
     }
 
-    return await this.getUpdatedConversation(input.conversationId);
+    const updatedConversation = await this.getUpdatedConversation(
+      input.conversationId,
+    );
+    const actorName = this.displayName(conversation, input.actorUserId);
+
+    if (nameChanged) {
+      this.groupActivityService.publish({
+        conversationId: input.conversationId,
+        type: 'GROUP_RENAMED',
+        actorUserId: input.actorUserId,
+        actorName,
+        previousValue: conversation.name ?? null,
+        nextValue: name ?? null,
+      });
+    }
+
+    if (pictureChanged) {
+      this.groupActivityService.publish({
+        conversationId: input.conversationId,
+        type: 'GROUP_PICTURE_CHANGED',
+        actorUserId: input.actorUserId,
+        actorName,
+        previousValue: conversation.picture ?? null,
+        nextValue: picture ?? null,
+      });
+    }
+
+    return updatedConversation;
   }
 
   async addMember(input: {
@@ -129,63 +153,51 @@ export class ManageGroupConversationUseCase {
     const userId = input.userId.trim();
     assertValidConversationUserId(userId);
 
+    let actorRole: ConversationMemberRole | null = null;
     if (!this.isAdminPermissionsEnabled()) {
       this.assertOwner(conversation, input.actorUserId);
-
-      if (conversation.participantIds.includes(userId)) {
-        return { conversation, added: false };
-      }
-
-      await this.assertUserExists(userId);
-      const added = await this.mutationRepository.addParticipantAsOwner(
-        input.conversationId,
-        input.actorUserId,
-        userId,
-        new Date(),
-      );
-
-      if (!added) {
-        const currentConversation = await this.getUpdatedConversation(
-          input.conversationId,
-        );
-
-        if (
-          currentConversation.creatorId === input.actorUserId &&
-          currentConversation.participantIds.includes(userId)
-        ) {
-          this.scheduleConsistencyCheck(input.conversationId, 'add-member');
-          return { conversation: currentConversation, added: false };
-        }
-
-        throw this.conflict();
-      }
-
-      const updatedConversation = await this.getUpdatedConversation(
-        input.conversationId,
-      );
-      this.scheduleConsistencyCheck(input.conversationId, 'add-member');
-      return { conversation: updatedConversation, added: true };
+    } else {
+      const members = await this.loadConsistentProjection(conversation);
+      const actor = this.requireActiveMember(members, input.actorUserId);
+      actorRole = actor.role;
+      this.assertPermission(actor.role, 'ADD_MEMBER');
     }
-
-    const members = await this.loadConsistentProjection(conversation);
-    const actor = this.requireActiveMember(members, input.actorUserId);
-    this.assertPermission(actor.role, 'ADD_MEMBER');
 
     if (conversation.participantIds.includes(userId)) {
       return { conversation, added: false };
     }
 
     await this.assertUserExists(userId);
-    const added =
-      await this.groupManagementV2Repository.addParticipantWithRoleGuard(
-        input.conversationId,
-        input.actorUserId,
-        actor.role,
-        userId,
-        new Date(),
-      );
+    const joinedAt = new Date();
+    const added = actorRole
+      ? await this.groupManagementV2Repository.addParticipantWithRoleGuard(
+          input.conversationId,
+          input.actorUserId,
+          actorRole,
+          userId,
+          joinedAt,
+        )
+      : await this.mutationRepository.addParticipantAsOwner(
+          input.conversationId,
+          input.actorUserId,
+          userId,
+          joinedAt,
+        );
 
     if (!added) {
+      const currentConversation = await this.getUpdatedConversation(
+        input.conversationId,
+      );
+
+      if (
+        !actorRole &&
+        currentConversation.creatorId === input.actorUserId &&
+        currentConversation.participantIds.includes(userId)
+      ) {
+        this.scheduleConsistencyCheck(input.conversationId, 'add-member');
+        return { conversation: currentConversation, added: false };
+      }
+
       throw this.conflict();
     }
 
@@ -193,6 +205,15 @@ export class ManageGroupConversationUseCase {
       input.conversationId,
     );
     this.scheduleConsistencyCheck(input.conversationId, 'add-member');
+    this.groupActivityService.publish({
+      conversationId: input.conversationId,
+      type: 'MEMBER_ADDED',
+      actorUserId: input.actorUserId,
+      actorName: this.displayName(conversation, input.actorUserId),
+      targetUserId: userId,
+      targetName: this.displayName(updatedConversation, userId),
+    });
+
     return { conversation: updatedConversation, added: true };
   }
 
@@ -216,41 +237,34 @@ export class ManageGroupConversationUseCase {
       throw new NotFoundException('New owner must be an existing group member');
     }
 
+    let transferred = false;
     if (!this.isAdminPermissionsEnabled()) {
       this.assertOwner(conversation, input.actorUserId);
-      const transferred = await this.mutationRepository.transferOwnership(
+      transferred = await this.mutationRepository.transferOwnership(
         input.conversationId,
         input.actorUserId,
         newOwnerUserId,
       );
+    } else {
+      const members = await this.loadConsistentProjection(conversation);
+      const actor = this.requireActiveMember(members, input.actorUserId);
+      const target = this.requireActiveMember(members, newOwnerUserId);
+      this.assertPermission(actor.role, 'TRANSFER_OWNERSHIP', target.role);
 
-      if (!transferred) {
-        throw this.conflict();
+      if (target.role === 'OWNER') {
+        throw new BadRequestException(
+          'Ownership must transfer to another member',
+        );
       }
 
-      const updatedConversation = await this.getUpdatedConversation(
-        input.conversationId,
-      );
-      this.scheduleConsistencyCheck(input.conversationId, 'transfer-ownership');
-      return updatedConversation;
+      transferred =
+        await this.groupManagementV2Repository.transferOwnershipWithRoleGuard(
+          input.conversationId,
+          input.actorUserId,
+          newOwnerUserId,
+          target.role,
+        );
     }
-
-    const members = await this.loadConsistentProjection(conversation);
-    const actor = this.requireActiveMember(members, input.actorUserId);
-    const target = this.requireActiveMember(members, newOwnerUserId);
-    this.assertPermission(actor.role, 'TRANSFER_OWNERSHIP', target.role);
-
-    if (target.role === 'OWNER') {
-      throw new BadRequestException('Ownership must transfer to another member');
-    }
-
-    const transferred =
-      await this.groupManagementV2Repository.transferOwnershipWithRoleGuard(
-        input.conversationId,
-        input.actorUserId,
-        newOwnerUserId,
-        target.role,
-      );
 
     if (!transferred) {
       throw this.conflict();
@@ -260,6 +274,14 @@ export class ManageGroupConversationUseCase {
       input.conversationId,
     );
     this.scheduleConsistencyCheck(input.conversationId, 'transfer-ownership');
+    this.groupActivityService.publish({
+      conversationId: input.conversationId,
+      type: 'OWNERSHIP_TRANSFERRED',
+      actorUserId: input.actorUserId,
+      actorName: this.displayName(conversation, input.actorUserId),
+      targetUserId: newOwnerUserId,
+      targetName: this.displayName(conversation, newOwnerUserId),
+    });
     return updatedConversation;
   }
 
@@ -280,45 +302,33 @@ export class ManageGroupConversationUseCase {
     }
 
     this.assertGroupWillKeepMinimumMembers(conversation);
+    let removed = false;
 
     if (!this.isAdminPermissionsEnabled()) {
       this.assertOwner(conversation, input.actorUserId);
-
       if (userId === conversation.creatorId) {
         throw new BadRequestException('The group owner cannot be removed');
       }
-
-      const removed = await this.mutationRepository.removeParticipantAsOwner(
+      removed = await this.mutationRepository.removeParticipantAsOwner(
         input.conversationId,
         input.actorUserId,
         userId,
       );
-
-      if (!removed) {
-        throw this.conflict();
-      }
-
-      const updatedConversation = await this.getUpdatedConversation(
-        input.conversationId,
-      );
-      this.scheduleConsistencyCheck(input.conversationId, 'remove-member');
-      return updatedConversation;
+    } else {
+      const members = await this.loadConsistentProjection(conversation);
+      const actor = this.requireActiveMember(members, input.actorUserId);
+      const target = this.requireActiveMember(members, userId);
+      this.assertPermission(actor.role, 'REMOVE_MEMBER', target.role);
+      removed =
+        await this.groupManagementV2Repository.removeParticipantWithRoleGuard(
+          input.conversationId,
+          input.actorUserId,
+          actor.role,
+          userId,
+          target.role,
+          new Date(),
+        );
     }
-
-    const members = await this.loadConsistentProjection(conversation);
-    const actor = this.requireActiveMember(members, input.actorUserId);
-    const target = this.requireActiveMember(members, userId);
-    this.assertPermission(actor.role, 'REMOVE_MEMBER', target.role);
-
-    const removed =
-      await this.groupManagementV2Repository.removeParticipantWithRoleGuard(
-        input.conversationId,
-        input.actorUserId,
-        actor.role,
-        userId,
-        target.role,
-        new Date(),
-      );
 
     if (!removed) {
       throw this.conflict();
@@ -328,6 +338,14 @@ export class ManageGroupConversationUseCase {
       input.conversationId,
     );
     this.scheduleConsistencyCheck(input.conversationId, 'remove-member');
+    this.groupActivityService.publish({
+      conversationId: input.conversationId,
+      type: 'MEMBER_REMOVED',
+      actorUserId: input.actorUserId,
+      actorName: this.displayName(conversation, input.actorUserId),
+      targetUserId: userId,
+      targetName: this.displayName(conversation, userId),
+    });
     return updatedConversation;
   }
 
@@ -340,6 +358,7 @@ export class ManageGroupConversationUseCase {
       input.actorUserId,
     );
     this.assertGroupWillKeepMinimumMembers(conversation);
+    let removed = false;
 
     if (!this.isAdminPermissionsEnabled()) {
       if (conversation.creatorId === input.actorUserId) {
@@ -347,34 +366,22 @@ export class ManageGroupConversationUseCase {
           'The group owner must transfer ownership before leaving',
         );
       }
-
-      const removed = await this.mutationRepository.removeParticipantAsMember(
+      removed = await this.mutationRepository.removeParticipantAsMember(
         input.conversationId,
         input.actorUserId,
       );
-
-      if (!removed) {
-        throw this.conflict();
-      }
-
-      const updatedConversation = await this.getUpdatedConversation(
-        input.conversationId,
-      );
-      this.scheduleConsistencyCheck(input.conversationId, 'leave-group');
-      return updatedConversation;
+    } else {
+      const members = await this.loadConsistentProjection(conversation);
+      const actor = this.requireActiveMember(members, input.actorUserId);
+      this.assertPermission(actor.role, 'LEAVE_GROUP');
+      removed =
+        await this.groupManagementV2Repository.leaveParticipantWithRoleGuard(
+          input.conversationId,
+          input.actorUserId,
+          actor.role,
+          new Date(),
+        );
     }
-
-    const members = await this.loadConsistentProjection(conversation);
-    const actor = this.requireActiveMember(members, input.actorUserId);
-    this.assertPermission(actor.role, 'LEAVE_GROUP');
-
-    const removed =
-      await this.groupManagementV2Repository.leaveParticipantWithRoleGuard(
-        input.conversationId,
-        input.actorUserId,
-        actor.role,
-        new Date(),
-      );
 
     if (!removed) {
       throw this.conflict();
@@ -384,6 +391,12 @@ export class ManageGroupConversationUseCase {
       input.conversationId,
     );
     this.scheduleConsistencyCheck(input.conversationId, 'leave-group');
+    this.groupActivityService.publish({
+      conversationId: input.conversationId,
+      type: 'MEMBER_LEFT',
+      actorUserId: input.actorUserId,
+      actorName: this.displayName(conversation, input.actorUserId),
+    });
     return updatedConversation;
   }
 
@@ -449,7 +462,10 @@ export class ManageGroupConversationUseCase {
         conversation.memberJoinedAt?.[member.userId] ??
         conversation.createdAt.toISOString();
       const expectedMs = Date.parse(expectedJoinedAt);
-      return !Number.isFinite(expectedMs) || member.joinedAt.getTime() !== expectedMs;
+      return (
+        !Number.isFinite(expectedMs) ||
+        member.joinedAt.getTime() !== expectedMs
+      );
     });
 
     if (hasMemberSetDrift || hasOwnerDrift || hasJoinedAtDrift) {
@@ -484,7 +500,9 @@ export class ManageGroupConversationUseCase {
     });
 
     if (!decision.allowed) {
-      throw new ForbiddenException(decision.reason ?? 'Group action is not allowed');
+      throw new ForbiddenException(
+        decision.reason ?? 'Group action is not allowed',
+      );
     }
   }
 
@@ -509,6 +527,18 @@ export class ManageGroupConversationUseCase {
     if (!isValidUser) {
       throw new BadRequestException('Participant does not exist');
     }
+  }
+
+  private displayName(conversation: Conversation, userId: string): string {
+    const participant = conversation.participants?.find(
+      (candidate) => candidate.id === userId,
+    );
+    return (
+      participant?.name?.trim() ||
+      participant?.fullName?.trim() ||
+      participant?.email?.split('@')[0] ||
+      'A member'
+    );
   }
 
   private async getUpdatedConversation(
