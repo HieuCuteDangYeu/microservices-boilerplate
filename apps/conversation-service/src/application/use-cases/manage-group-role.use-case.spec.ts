@@ -16,6 +16,10 @@ const group = (creatorId = OWNER_ID) =>
     id: CONVERSATION_ID,
     creatorId,
     participantIds: [OWNER_ID, MEMBER_ID],
+    participants: [
+      { id: OWNER_ID, email: 'owner@example.com', fullName: 'Owner User' },
+      { id: MEMBER_ID, email: 'member@example.com', fullName: 'Member User' },
+    ],
     isGroup: true,
     createdAt: JOINED_AT,
     updatedAt: JOINED_AT,
@@ -38,6 +42,7 @@ describe('ManageGroupRoleUseCase', () => {
   let memberRepository: any;
   let configService: any;
   let consistencyService: any;
+  let activityService: any;
   let useCase: ManageGroupRoleUseCase;
 
   beforeEach(() => {
@@ -54,12 +59,14 @@ describe('ManageGroupRoleUseCase', () => {
     consistencyService = {
       checkAfterMutation: jest.fn().mockResolvedValue(null),
     };
+    activityService = { publish: jest.fn() };
 
     useCase = new ManageGroupRoleUseCase(
       chatRepository,
       memberRepository,
       configService,
       consistencyService,
+      activityService,
     );
   });
 
@@ -77,6 +84,7 @@ describe('ManageGroupRoleUseCase', () => {
 
     expect(memberRepository.changeRoleAsLegacyOwner).not.toHaveBeenCalled();
     expect(consistencyService.checkAfterMutation).not.toHaveBeenCalled();
+    expect(activityService.publish).not.toHaveBeenCalled();
   });
 
   it('rejects a stale old owner before attempting a role mutation', async () => {
@@ -94,7 +102,7 @@ describe('ManageGroupRoleUseCase', () => {
     expect(memberRepository.changeRoleAsLegacyOwner).not.toHaveBeenCalled();
   });
 
-  it('promotes an active regular member to admin and shadow checks convergence', async () => {
+  it('promotes an active regular member to admin and emits one activity', async () => {
     memberRepository.listByConversation
       .mockResolvedValueOnce([member('MEMBER')])
       .mockResolvedValueOnce([member('ADMIN')]);
@@ -108,6 +116,7 @@ describe('ManageGroupRoleUseCase', () => {
       }),
     ).resolves.toEqual(
       expect.objectContaining({
+        changed: true,
         member: expect.objectContaining({
           userId: MEMBER_ID,
           role: 'ADMIN',
@@ -127,9 +136,17 @@ describe('ManageGroupRoleUseCase', () => {
       CONVERSATION_ID,
       'role-change',
     );
+    expect(activityService.publish).toHaveBeenCalledTimes(1);
+    expect(activityService.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'MEMBER_PROMOTED',
+        actorUserId: OWNER_ID,
+        targetUserId: MEMBER_ID,
+      }),
+    );
   });
 
-  it('demotes an active admin to regular member', async () => {
+  it('demotes an active admin to regular member and emits one activity', async () => {
     memberRepository.listByConversation
       .mockResolvedValueOnce([member('ADMIN')])
       .mockResolvedValueOnce([member('MEMBER')]);
@@ -143,6 +160,7 @@ describe('ManageGroupRoleUseCase', () => {
       }),
     ).resolves.toEqual(
       expect.objectContaining({
+        changed: true,
         member: expect.objectContaining({ role: 'MEMBER' }),
       }),
     );
@@ -154,13 +172,12 @@ describe('ManageGroupRoleUseCase', () => {
       'ADMIN',
       'MEMBER',
     );
-    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
-      CONVERSATION_ID,
-      'role-change',
+    expect(activityService.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'MEMBER_DEMOTED' }),
     );
   });
 
-  it('treats setting the current role as an idempotent success and still shadow checks', async () => {
+  it('treats setting the current role as an idempotent success without duplicate activity', async () => {
     memberRepository.listByConversation.mockResolvedValue([member('ADMIN')]);
 
     await expect(
@@ -172,18 +189,16 @@ describe('ManageGroupRoleUseCase', () => {
       }),
     ).resolves.toEqual(
       expect.objectContaining({
+        changed: false,
         member: expect.objectContaining({ role: 'ADMIN' }),
       }),
     );
 
     expect(memberRepository.changeRoleAsLegacyOwner).not.toHaveBeenCalled();
-    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
-      CONVERSATION_ID,
-      'role-change',
-    );
+    expect(activityService.publish).not.toHaveBeenCalled();
   });
 
-  it('accepts a concurrent duplicate role change as idempotent after the guarded write loses the race', async () => {
+  it('accepts a concurrent duplicate role change without emitting a second activity', async () => {
     memberRepository.changeRoleAsLegacyOwner.mockResolvedValue(false);
     memberRepository.listByConversation
       .mockResolvedValueOnce([member('MEMBER')])
@@ -198,14 +213,12 @@ describe('ManageGroupRoleUseCase', () => {
       }),
     ).resolves.toEqual(
       expect.objectContaining({
+        changed: false,
         member: expect.objectContaining({ role: 'ADMIN' }),
       }),
     );
 
-    expect(consistencyService.checkAfterMutation).toHaveBeenCalledWith(
-      CONVERSATION_ID,
-      'role-change',
-    );
+    expect(activityService.publish).not.toHaveBeenCalled();
   });
 
   it('rejects when ownership or role changed to a conflicting state during the final mutation', async () => {
@@ -223,7 +236,7 @@ describe('ManageGroupRoleUseCase', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
 
-    expect(consistencyService.checkAfterMutation).not.toHaveBeenCalled();
+    expect(activityService.publish).not.toHaveBeenCalled();
   });
 
   it('refuses to mutate roles when the projection is unavailable', async () => {
