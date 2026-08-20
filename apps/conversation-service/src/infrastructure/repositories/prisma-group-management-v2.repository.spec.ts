@@ -208,6 +208,46 @@ describe('PrismaGroupManagementV2Repository', () => {
     expect(tx.conversation.updateMany).not.toHaveBeenCalled();
   });
 
+  it('never removes the current owner even if a caller supplies a stale non-owner target role', async () => {
+    const tx = createTx();
+    const { repository } = createRepository(tx);
+
+    await expect(
+      repository.removeParticipantWithRoleGuard(
+        CONVERSATION_ID,
+        ADMIN_ID,
+        'ADMIN',
+        OWNER_ID,
+        'MEMBER',
+        new Date('2026-08-20T03:00:00.000Z'),
+      ),
+    ).resolves.toBe(false);
+
+    expect(tx.conversationMember.findUnique).not.toHaveBeenCalled();
+    expect(tx.conversationMember.updateMany).not.toHaveBeenCalled();
+    expect(tx.conversation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an OWNER target role at the repository boundary before any member write', async () => {
+    const tx = createTx();
+    const { repository } = createRepository(tx);
+
+    await expect(
+      repository.removeParticipantWithRoleGuard(
+        CONVERSATION_ID,
+        OWNER_ID,
+        'OWNER',
+        ADMIN_ID,
+        'OWNER',
+        new Date('2026-08-20T03:00:00.000Z'),
+      ),
+    ).resolves.toBe(false);
+
+    expect(tx.conversationMember.findUnique).not.toHaveBeenCalled();
+    expect(tx.conversationMember.updateMany).not.toHaveBeenCalled();
+    expect(tx.conversation.updateMany).not.toHaveBeenCalled();
+  });
+
   it('removes a member from both projections while preserving the actor role guard', async () => {
     const tx = createTx();
     tx.conversationMember.findUnique.mockResolvedValue(activeMember(ADMIN_ID, 'ADMIN'));
@@ -368,6 +408,23 @@ describe('PrismaGroupManagementV2Repository', () => {
       },
       data: { creatorId: ADMIN_ID },
     });
+  });
+
+  it('rejects self ownership transfer before changing either member role', async () => {
+    const tx = createTx();
+    const { repository } = createRepository(tx);
+
+    await expect(
+      repository.transferOwnershipWithRoleGuard(
+        CONVERSATION_ID,
+        OWNER_ID,
+        OWNER_ID,
+        'MEMBER',
+      ),
+    ).resolves.toBe(false);
+
+    expect(tx.conversationMember.updateMany).not.toHaveBeenCalled();
+    expect(tx.conversation.updateMany).not.toHaveBeenCalled();
   });
 
   it('rolls back the ownership transfer when the target role no longer matches', async () => {
