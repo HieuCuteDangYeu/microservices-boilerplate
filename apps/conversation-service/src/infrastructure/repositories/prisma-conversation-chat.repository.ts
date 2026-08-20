@@ -11,6 +11,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConversationMapper } from './conversation.mapper';
 import { PrismaChatRepository } from './prisma-chat.repository';
 
+const MEMBERSHIP_CAS_MAX_ATTEMPTS = 8;
+
 const normalizeMemberJoinedAt = (
   value: Prisma.JsonValue | null | undefined,
   participantIds: string[],
@@ -34,6 +36,13 @@ const normalizeMemberJoinedAt = (
   });
 
   return result;
+};
+
+type MembershipSnapshot = {
+  creatorId: string;
+  participantIds: string[];
+  memberJoinedAt: Prisma.JsonValue | null;
+  createdAt: Date;
 };
 
 @Injectable()
@@ -83,56 +92,65 @@ export class PrismaConversationChatRepository
     return ConversationMapper.toDomain(savedConversation);
   }
 
-  async updateMetadata(
+  async updateMetadataAsOwner(
     conversationId: string,
+    currentOwnerUserId: string,
     patch: { name?: string; picture?: string | null },
-  ): Promise<void> {
-    await this.conversationPrisma.conversation.update({
-      where: { id: conversationId },
+  ): Promise<boolean> {
+    const result = await this.conversationPrisma.conversation.updateMany({
+      where: {
+        id: conversationId,
+        creatorId: currentOwnerUserId,
+        isGroup: true,
+      },
       data: {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.picture !== undefined ? { picture: patch.picture } : {}),
       },
     });
+
+    return result.count === 1;
   }
 
-  async addParticipant(
+  async addParticipantAsOwner(
     conversationId: string,
+    currentOwnerUserId: string,
     userId: string,
     joinedAt: Date,
-  ): Promise<void> {
-    const conversation = await this.conversationPrisma.conversation.findUnique({
-      where: { id: conversationId },
-      select: {
-        participantIds: true,
-        memberJoinedAt: true,
-        createdAt: true,
-      },
-    });
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < MEMBERSHIP_CAS_MAX_ATTEMPTS; attempt += 1) {
+      const conversation = await this.findMembershipSnapshot(conversationId);
 
-    if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      if (conversation.creatorId !== currentOwnerUserId) {
+        return false;
+      }
+
+      if (conversation.participantIds.includes(userId)) {
+        return false;
+      }
+
+      const participantIds = [...conversation.participantIds, userId];
+      const memberJoinedAt = normalizeMemberJoinedAt(
+        conversation.memberJoinedAt,
+        conversation.participantIds,
+        conversation.createdAt,
+      );
+      memberJoinedAt[userId] = joinedAt.toISOString();
+
+      const updated = await this.compareAndSetMembership(
+        conversationId,
+        conversation.participantIds,
+        participantIds,
+        memberJoinedAt,
+        { creatorId: currentOwnerUserId },
+      );
+
+      if (updated) {
+        return true;
+      }
     }
 
-    if (conversation.participantIds.includes(userId)) {
-      return;
-    }
-
-    const participantIds = [...conversation.participantIds, userId];
-    const memberJoinedAt = normalizeMemberJoinedAt(
-      conversation.memberJoinedAt,
-      conversation.participantIds,
-      conversation.createdAt,
-    );
-    memberJoinedAt[userId] = joinedAt.toISOString();
-
-    await this.conversationPrisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        participantIds: { set: participantIds },
-        memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
-      },
-    });
+    return false;
   }
 
   async transferOwnership(
@@ -157,56 +175,121 @@ export class PrismaConversationChatRepository
     currentOwnerUserId: string,
     userId: string,
   ): Promise<boolean> {
-    const conversation = await this.conversationPrisma.conversation.findUnique({
-      where: { id: conversationId },
-      select: {
-        creatorId: true,
-        participantIds: true,
-        memberJoinedAt: true,
-        createdAt: true,
-      },
-    });
+    for (let attempt = 0; attempt < MEMBERSHIP_CAS_MAX_ATTEMPTS; attempt += 1) {
+      const conversation = await this.findMembershipSnapshot(conversationId);
 
-    if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      if (
+        conversation.creatorId !== currentOwnerUserId ||
+        !conversation.participantIds.includes(userId) ||
+        conversation.participantIds.length <= 2
+      ) {
+        return false;
+      }
+
+      const participantIds = conversation.participantIds.filter(
+        (participantId) => participantId !== userId,
+      );
+      const memberJoinedAt = normalizeMemberJoinedAt(
+        conversation.memberJoinedAt,
+        conversation.participantIds,
+        conversation.createdAt,
+      );
+      delete memberJoinedAt[userId];
+
+      const updated = await this.compareAndSetMembership(
+        conversationId,
+        conversation.participantIds,
+        participantIds,
+        memberJoinedAt,
+        { creatorId: currentOwnerUserId },
+      );
+
+      if (updated) {
+        return true;
+      }
     }
 
-    if (
-      conversation.creatorId !== currentOwnerUserId ||
-      !conversation.participantIds.includes(userId)
-    ) {
-      return false;
-    }
-
-    const participantIds = conversation.participantIds.filter(
-      (participantId) => participantId !== userId,
-    );
-    const memberJoinedAt = normalizeMemberJoinedAt(
-      conversation.memberJoinedAt,
-      conversation.participantIds,
-      conversation.createdAt,
-    );
-    delete memberJoinedAt[userId];
-
-    const result = await this.conversationPrisma.conversation.updateMany({
-      where: {
-        id: conversationId,
-        creatorId: currentOwnerUserId,
-        participantIds: { has: userId },
-      },
-      data: {
-        participantIds: { set: participantIds },
-        memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
-      },
-    });
-
-    return result.count === 1;
+    return false;
   }
 
   async removeParticipantAsMember(
     conversationId: string,
     userId: string,
   ): Promise<boolean> {
+    for (let attempt = 0; attempt < MEMBERSHIP_CAS_MAX_ATTEMPTS; attempt += 1) {
+      const conversation = await this.findMembershipSnapshot(conversationId);
+
+      if (
+        conversation.creatorId === userId ||
+        !conversation.participantIds.includes(userId) ||
+        conversation.participantIds.length <= 2
+      ) {
+        return false;
+      }
+
+      const participantIds = conversation.participantIds.filter(
+        (participantId) => participantId !== userId,
+      );
+      const memberJoinedAt = normalizeMemberJoinedAt(
+        conversation.memberJoinedAt,
+        conversation.participantIds,
+        conversation.createdAt,
+      );
+      delete memberJoinedAt[userId];
+
+      const updated = await this.compareAndSetMembership(
+        conversationId,
+        conversation.participantIds,
+        participantIds,
+        memberJoinedAt,
+        { creatorId: { not: userId } },
+      );
+
+      if (updated) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  async removeParticipant(
+    conversationId: string,
+    userId: string,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < MEMBERSHIP_CAS_MAX_ATTEMPTS; attempt += 1) {
+      const conversation = await this.findMembershipSnapshot(conversationId);
+
+      if (!conversation.participantIds.includes(userId)) {
+        return;
+      }
+
+      const participantIds = conversation.participantIds.filter(
+        (participantId) => participantId !== userId,
+      );
+      const memberJoinedAt = normalizeMemberJoinedAt(
+        conversation.memberJoinedAt,
+        conversation.participantIds,
+        conversation.createdAt,
+      );
+      delete memberJoinedAt[userId];
+
+      const updated = await this.compareAndSetMembership(
+        conversationId,
+        conversation.participantIds,
+        participantIds,
+        memberJoinedAt,
+      );
+
+      if (updated) {
+        return;
+      }
+    }
+  }
+
+  private async findMembershipSnapshot(
+    conversationId: string,
+  ): Promise<MembershipSnapshot> {
     const conversation = await this.conversationPrisma.conversation.findUnique({
       where: { id: conversationId },
       select: {
@@ -221,28 +304,21 @@ export class PrismaConversationChatRepository
       throw new NotFoundException('Conversation not found');
     }
 
-    if (
-      conversation.creatorId === userId ||
-      !conversation.participantIds.includes(userId)
-    ) {
-      return false;
-    }
+    return conversation;
+  }
 
-    const participantIds = conversation.participantIds.filter(
-      (participantId) => participantId !== userId,
-    );
-    const memberJoinedAt = normalizeMemberJoinedAt(
-      conversation.memberJoinedAt,
-      conversation.participantIds,
-      conversation.createdAt,
-    );
-    delete memberJoinedAt[userId];
-
+  private async compareAndSetMembership(
+    conversationId: string,
+    expectedParticipantIds: string[],
+    participantIds: string[],
+    memberJoinedAt: Record<string, string>,
+    extraWhere: Record<string, unknown> = {},
+  ): Promise<boolean> {
     const result = await this.conversationPrisma.conversation.updateMany({
       where: {
         id: conversationId,
-        creatorId: { not: userId },
-        participantIds: { has: userId },
+        participantIds: { equals: expectedParticipantIds },
+        ...extraWhere,
       },
       data: {
         participantIds: { set: participantIds },
@@ -251,45 +327,5 @@ export class PrismaConversationChatRepository
     });
 
     return result.count === 1;
-  }
-
-  async removeParticipant(
-    conversationId: string,
-    userId: string,
-  ): Promise<void> {
-    const conversation = await this.conversationPrisma.conversation.findUnique({
-      where: { id: conversationId },
-      select: {
-        participantIds: true,
-        memberJoinedAt: true,
-        createdAt: true,
-      },
-    });
-
-    if (!conversation) {
-      throw new NotFoundException('Conversation not found');
-    }
-
-    if (!conversation.participantIds.includes(userId)) {
-      return;
-    }
-
-    const participantIds = conversation.participantIds.filter(
-      (participantId) => participantId !== userId,
-    );
-    const memberJoinedAt = normalizeMemberJoinedAt(
-      conversation.memberJoinedAt,
-      conversation.participantIds,
-      conversation.createdAt,
-    );
-    delete memberJoinedAt[userId];
-
-    await this.conversationPrisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        participantIds: { set: participantIds },
-        memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
-      },
-    });
   }
 }
