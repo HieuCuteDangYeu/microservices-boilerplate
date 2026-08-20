@@ -28,6 +28,7 @@ import { UserServiceAdapter } from 'apps/conversation-service/src/infrastructure
 import { ConversationMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/conversation.controller';
 import { GroupMembersMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/group-members.controller';
 import { KeyMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/key.controller';
+import { ReactionDetailsMicroserviceController } from 'apps/conversation-service/src/infrastructure/controllers/reaction-details.controller';
 import { PrismaService } from 'apps/conversation-service/src/infrastructure/prisma/prisma.service';
 import { AesEncryptionRepository } from 'apps/conversation-service/src/infrastructure/repositories/aes-encryption.repository';
 import { PrismaConversationChatRepository } from 'apps/conversation-service/src/infrastructure/repositories/prisma-conversation-chat.repository';
@@ -109,6 +110,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
   controllers: [
     ConversationMicroserviceController,
     GroupMembersMicroserviceController,
+    ReactionDetailsMicroserviceController,
     KeyMicroserviceController,
   ],
   providers: [
