@@ -20,6 +20,8 @@ jobs:
   patch-and-verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      RABBITMQ_URL: amqp://127.0.0.1:5672
     steps:
       - uses: actions/checkout@v4
         with:
