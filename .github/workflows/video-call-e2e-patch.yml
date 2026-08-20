@@ -9,6 +9,7 @@ on:
       - scripts/apply-video-call-camera-state-patch.cjs
       - scripts/fix-video-call-e2e-paused-expectations.cjs
       - scripts/finalize-video-call-lifecycle.cjs
+      - scripts/finalize-video-producer-state.cjs
       - scripts/video-call-e2e-ci-trigger.txt
       - .github/workflows/video-call-e2e-patch.yml
 
@@ -51,7 +52,9 @@ jobs:
           expectations=$?
           node scripts/finalize-video-call-lifecycle.cjs >> /tmp/patch.log 2>&1
           lifecycle=$?
-          code=$(( e2e || camera || expectations || lifecycle ))
+          node scripts/finalize-video-producer-state.cjs >> /tmp/patch.log 2>&1
+          producer_state=$?
+          code=$(( e2e || camera || expectations || lifecycle || producer_state ))
           echo "code=$code" >> "$GITHUB_OUTPUT"
           cat /tmp/patch.log
           exit 0
@@ -67,6 +70,7 @@ jobs:
             apps/call-service/src/domain/interfaces/call-media.engine.interface.ts \
             apps/call-service/src/infrastructure/engines/mediasoup-call.engine.ts \
             apps/call-service/src/infrastructure/gateways/call.gateway.ts \
+            apps/call-service/src/infrastructure/repositories/redis-call-state.repository.ts \
             apps/call-service/test/e2e/call-flow.e2e.spec.ts
       - name: Verify call service
         if: steps.patch.outputs.code == '0'
@@ -136,6 +140,7 @@ jobs:
             apps/call-service/src/domain/interfaces/call-media.engine.interface.ts \
             apps/call-service/src/infrastructure/engines/mediasoup-call.engine.ts \
             apps/call-service/src/infrastructure/gateways/call.gateway.ts \
+            apps/call-service/src/infrastructure/repositories/redis-call-state.repository.ts \
             apps/call-service/test/e2e/call-flow.e2e.spec.ts \
             VIDEO_CALL_BACKEND_CI_RESULT.md
           if git diff --cached --quiet; then
