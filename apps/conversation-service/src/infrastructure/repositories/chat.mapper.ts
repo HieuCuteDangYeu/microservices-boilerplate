@@ -1,3 +1,4 @@
+import type { MessageDto } from '@common/conversation/dtos/message.dto';
 import {
   MessageReadStatus,
   Prisma,
@@ -191,7 +192,7 @@ export class ChatMapper {
     };
   }
 
-  static toDto(domain: Message) {
+  static toDto(domain: Message): MessageDto {
     const isRecalled = domain.isRecalled === true;
 
     return {
