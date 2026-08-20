@@ -29,21 +29,19 @@ export const GroupSystemActivitySchema = z.object({
   nextValue: z.string().nullable().optional(),
 });
 
-export const MessageMetadataSchema = z
-  .object({
-    kind: z
-      .enum([
-        'velora_ai_response',
-        'velora_ai_reel_recommendations',
-        'group_system_activity',
-      ])
-      .optional(),
-    citations: z.array(AiRagCitationSchema).optional(),
-    recommendedReels: z.array(AiRecommendedReelSchema).optional(),
-    suggestedQueries: z.array(z.string()).optional(),
-    groupActivity: GroupSystemActivitySchema.optional(),
-  })
-  .passthrough();
+export const MessageMetadataSchema = z.object({
+  kind: z
+    .enum([
+      'velora_ai_response',
+      'velora_ai_reel_recommendations',
+      'group_system_activity',
+    ])
+    .optional(),
+  citations: z.array(AiRagCitationSchema).optional(),
+  recommendedReels: z.array(AiRecommendedReelSchema).optional(),
+  suggestedQueries: z.array(z.string()).optional(),
+  groupActivity: GroupSystemActivitySchema.optional(),
+});
 
 export const MessageSchema = z.object({
   id: z.string(),
