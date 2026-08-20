@@ -1,0 +1,24 @@
+name: Video Call CI
+
+on:
+  push:
+    branches:
+      - feat/video-call-1to1
+  workflow_dispatch:
+
+jobs:
+  call-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build:call
+      - run: pnpm exec jest --runInBand apps/call-service/test/unit/application apps/call-service/test/e2e/call-flow.e2e.spec.ts
