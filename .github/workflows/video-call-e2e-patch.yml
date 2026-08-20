@@ -8,6 +8,7 @@ on:
       - scripts/apply-video-call-e2e-patch.cjs
       - scripts/apply-video-call-camera-state-patch.cjs
       - scripts/fix-video-call-e2e-paused-expectations.cjs
+      - scripts/finalize-video-call-lifecycle.cjs
       - scripts/video-call-e2e-ci-trigger.txt
       - .github/workflows/video-call-e2e-patch.yml
 
@@ -41,16 +42,16 @@ jobs:
         shell: bash
         run: |
           set +e
-          {
-            node scripts/apply-video-call-e2e-patch.cjs
-            e2e=$?
-            node scripts/apply-video-call-camera-state-patch.cjs
-            camera=$?
-            node scripts/fix-video-call-e2e-paused-expectations.cjs
-            expectations=$?
-            exit $(( e2e || camera || expectations ))
-          } > /tmp/patch.log 2>&1
-          code=$?
+          : > /tmp/patch.log
+          node scripts/apply-video-call-e2e-patch.cjs >> /tmp/patch.log 2>&1
+          e2e=$?
+          node scripts/apply-video-call-camera-state-patch.cjs >> /tmp/patch.log 2>&1
+          camera=$?
+          node scripts/fix-video-call-e2e-paused-expectations.cjs >> /tmp/patch.log 2>&1
+          expectations=$?
+          node scripts/finalize-video-call-lifecycle.cjs >> /tmp/patch.log 2>&1
+          lifecycle=$?
+          code=$(( e2e || camera || expectations || lifecycle ))
           echo "code=$code" >> "$GITHUB_OUTPUT"
           cat /tmp/patch.log
           exit 0
@@ -109,7 +110,7 @@ jobs:
             echo
             echo '## Full E2E'
             echo '```text'
-            tail -n 260 /tmp/full-e2e.log
+            tail -n 280 /tmp/full-e2e.log
             echo '```'
           } > VIDEO_CALL_BACKEND_CI_RESULT.md
           exit 0
@@ -140,7 +141,7 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          HUSKY=0 git commit -m 'feat(call): synchronize video camera state'
+          HUSKY=0 git commit -m 'fix(call): finalize 1:1 video lifecycle'
           git fetch origin feat/video-call-1to1
           git rebase origin/feat/video-call-1to1
           git push origin HEAD:feat/video-call-1to1
