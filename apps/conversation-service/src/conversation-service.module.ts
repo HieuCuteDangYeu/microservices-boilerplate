@@ -15,6 +15,7 @@ import { GetMessagesAroundUseCase } from 'apps/conversation-service/src/applicat
 import { GetMessagesUseCase } from 'apps/conversation-service/src/application/use-cases/get-messages.use-case';
 import { GetUserConversationsUseCase } from 'apps/conversation-service/src/application/use-cases/get-user-conversations.use-case';
 import { ManageGroupConversationUseCase } from 'apps/conversation-service/src/application/use-cases/manage-group-conversation.use-case';
+import { ManageGroupRoleUseCase } from 'apps/conversation-service/src/application/use-cases/manage-group-role.use-case';
 import { ProcessBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/process-bot-reply.use-case';
 import { TriggerBotReplyUseCase } from 'apps/conversation-service/src/application/use-cases/trigger-bot-reply.use-case';
 import { AiServiceAdapter } from 'apps/conversation-service/src/infrastructure/adapters/ai-service.adapter';
@@ -108,7 +109,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
   ],
   providers: [
     PrismaService,
-    ChatGateway, // Gateway vẫn phải có vì đây là nơi xử lý logic Socket
+    ChatGateway,
 
     // --- Use Cases ---
     SendMessageUseCase,
@@ -120,6 +121,7 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     GetGroupMembersUseCase,
     CreateConversationUseCase,
     ManageGroupConversationUseCase,
+    ManageGroupRoleUseCase,
     GetUserConversationsUseCase,
     ProcessBotReplyUseCase,
     TriggerBotReplyUseCase,
@@ -148,8 +150,8 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
       useExisting: PrismaConversationMemberRepository,
     },
     {
-      provide: 'IEncryptionRepository', // Token để inject
-      useClass: AesEncryptionRepository, // Class thực thi
+      provide: 'IEncryptionRepository',
+      useClass: AesEncryptionRepository,
     },
     {
       provide: 'IAiService',
@@ -161,7 +163,6 @@ import { ChatGateway } from './infrastructure/gateways/chat.gateway';
     },
     NotificationServiceAdapter,
 
-    // --- REDIS CLIENT (Để lưu cache tin nhắn - Giống Auth Service) ---
     {
       provide: 'REDIS_CLIENT',
       inject: [ConfigService],
