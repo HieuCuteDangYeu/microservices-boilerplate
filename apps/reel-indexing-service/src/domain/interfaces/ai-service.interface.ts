@@ -19,6 +19,42 @@ export interface IndexingVisualFrameInput {
   timestampMs: number;
 }
 
+export interface IndexQualityReviewInput {
+  reelId: string;
+  sourceLengthClass: 'SHORT' | 'LONG';
+  durationMs: number;
+  title?: string;
+  description?: string;
+  tags: string[];
+  documents: Array<{
+    id: string;
+    kind: 'REEL' | 'SECTION' | 'CHUNK' | 'VISUAL_SCENE';
+    ordinal: number;
+    parentId?: string;
+    startTime?: number;
+    endTime?: number;
+    evidenceQuality: 'VERIFIED' | 'LOW_CONFIDENCE' | 'METADATA_ONLY';
+    text: string;
+  }>;
+}
+
+export interface IndexQualityReviewResult {
+  acceptable: boolean;
+  confidence: number;
+  summary: string;
+  issues: Array<{
+    category:
+      | 'METADATA'
+      | 'SECTIONING'
+      | 'GROUNDING'
+      | 'VISUAL_CONTEXT'
+      | 'RETRIEVAL_QUALITY';
+    severity: 'LOW' | 'MEDIUM' | 'HIGH';
+    message: string;
+    documentId?: string;
+  }>;
+}
+
 export interface IIndexingAiService {
   transcribeAudioKey(input: {
     audioKey: string;
@@ -32,6 +68,10 @@ export interface IIndexingAiService {
   extractReelMetadata(
     input: ReelMetadataExtractionInput,
   ): Promise<ExtractedReelMetadata>;
+
+  reviewIndexQuality(
+    input: IndexQualityReviewInput,
+  ): Promise<IndexQualityReviewResult>;
 
   generateEmbeddingBatch(
     input: GenerateEmbeddingBatchRequest,

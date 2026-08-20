@@ -93,7 +93,10 @@
     "ops:reindex:reel": "node scripts/ops/reindex-reel.cjs",
     "ops:reindex:status": "node scripts/ops/reindex-status.cjs",
     "ops:rag:benchmark": "node scripts/ops/rag-hierarchy-benchmark.cjs",
-    "ops:rag:readiness": "node scripts/ops/rag-production-readiness.cjs"
+    "ops:rag:readiness": "node scripts/ops/rag-production-readiness.cjs",
+    "ops:reels:prepare": "node scripts/ops/reel-integration-load.cjs --mode=prepare",
+    "ops:reels:load": "node scripts/ops/reel-integration-load.cjs --mode=run",
+    "ops:reels:all": "node scripts/ops/reel-integration-load.cjs --mode=all"
   },
   "packageManager": "pnpm@9.15.0",
   "overrides": {
@@ -136,7 +139,7 @@
     "reflect-metadata": "^0.2.2",
     "resend": "^6.9.3",
     "rxjs": "^7.8.1",
-    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "stripe": "^20.1.0",
     "wavefile": "^11.0.0",
     "zod": "^4.2.1"
