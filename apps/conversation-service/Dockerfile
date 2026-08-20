@@ -8,7 +8,11 @@ RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
 
-RUN pnpm install --frozen-lockfile --ignore-scripts
+# Keep package files independent inside the Docker layer. pnpm's default
+# import strategy may hardlink files from its content-addressable store;
+# those hardlinks can be preserved when node_modules is copied into the
+# runtime image and fail to unpack on containerd/overlayfs hosts.
+RUN pnpm install --frozen-lockfile --ignore-scripts --package-import-method=copy
 
 RUN pnpm exec prisma generate --schema=./apps/conversation-service/prisma/schema.prisma
 
