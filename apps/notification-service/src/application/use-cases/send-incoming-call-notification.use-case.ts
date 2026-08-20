@@ -33,7 +33,7 @@ export class SendIncomingCallNotificationUseCase {
       conversationId: input.conversationId,
       callId: input.callId,
       title: input.initiatorDisplayName,
-      body: 'Incoming voice call',
+      body: input.callType === 'VIDEO' ? 'Incoming video call' : 'Incoming voice call',
       expiresAt,
       dataJson: {
         type: 'INCOMING_CALL',
