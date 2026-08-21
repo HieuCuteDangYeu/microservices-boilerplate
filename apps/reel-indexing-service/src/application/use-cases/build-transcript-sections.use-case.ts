@@ -1,11 +1,14 @@
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { TranscriptSection } from '@indexing/domain/entities/index-checkpoint.entity';
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
+import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
 export class BuildTranscriptSectionsUseCase {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
+  ) {}
 
   execute(text?: string, segments?: TranscriptSegment[]): TranscriptSection[] {
     if (segments && segments.length > 0) {
