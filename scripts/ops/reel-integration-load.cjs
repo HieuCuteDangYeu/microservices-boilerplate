@@ -44,6 +44,20 @@ function ensureDir(directory) {
   fs.mkdirSync(directory, { recursive: true });
 }
 
+function datasetDirectory(args) {
+  const dataset = String(args.dataset || 'pexels').toLowerCase();
+  if (!['pexels', 'ami'].includes(dataset)) throw new Error('--dataset must be pexels or ami');
+  return path.resolve(args['dataset-dir'] || (dataset === 'ami' ? 'test-data/reel-integration/ami' : 'test-data/reel-integration'));
+}
+
+function originBase(value) {
+  const url = new URL(String(value));
+  if (url.pathname !== '/' || url.search || url.hash) throw new Error('--base-url must be an origin without a path; production gateway routes are rooted at /');
+  return url.origin;
+}
+
+function apiUrl(baseUrl, route) { return new URL(route, `${baseUrl}/`).toString(); }
+
 function runId() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
@@ -102,10 +116,11 @@ async function download(url, destination) {
 }
 
 async function prepareDataset(args) {
+  if (String(args.dataset || 'pexels').toLowerCase() === 'ami') throw new Error('Prepare AMI fixtures with scripts/ops/prepare-ami-fixtures.cjs; this runner uploads the generated manifest.');
   const apiKey = process.env.PEXELS_API_KEY?.trim();
   if (!apiKey) throw new Error('PEXELS_API_KEY is required for prepare/all mode');
 
-  const datasetDir = path.resolve(args['dataset-dir'] || 'test-data/reel-integration');
+  const datasetDir = datasetDirectory(args);
   const videosDir = path.join(datasetDir, 'videos');
   ensureDir(videosDir);
 
@@ -181,7 +196,7 @@ async function authenticate(baseUrl) {
     throw new Error('Set VELORA_TEST_ACCESS_TOKEN or VELORA_TEST_EMAIL + VELORA_TEST_PASSWORD');
   }
 
-  const { response } = await fetchJson(`${baseUrl}/auth/login`, {
+  const { response } = await fetchJson(apiUrl(baseUrl, '/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -195,9 +210,11 @@ async function authenticate(baseUrl) {
   return { cookie };
 }
 
+async function verifyAuthentication(baseUrl, auth) { await fetchJson(apiUrl(baseUrl, '/auth/me'), { headers: authHeaders(auth) }); }
+
 async function getUploadUrl(baseUrl, auth, mimeType) {
   const started = Date.now();
-  const { body } = await fetchJson(`${baseUrl}/media/upload-url`, {
+  const { body } = await fetchJson(apiUrl(baseUrl, '/media/upload-url'), {
     method: 'POST',
     headers: { ...authHeaders(auth), 'Content-Type': 'application/json' },
     body: JSON.stringify({ fileType: mimeType, purpose: 'reel' }),
@@ -234,7 +251,7 @@ async function createReel(baseUrl, auth, fixture, key, id, ordinal) {
     visibility: 'private',
     ...(fixture.durationSeconds ? { clientObservedDurationMs: Math.max(1, Math.round(fixture.durationSeconds * 1000)) } : {}),
   };
-  const { body } = await fetchJson(`${baseUrl}/content/reels`, {
+  const { body } = await fetchJson(apiUrl(baseUrl, '/content/reels'), {
     method: 'POST',
     headers: { ...authHeaders(auth), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -243,7 +260,7 @@ async function createReel(baseUrl, auth, fixture, key, id, ordinal) {
 }
 
 async function status(baseUrl, auth, reelId) {
-  const { body } = await fetchJson(`${baseUrl}/content/reels/${reelId}/status`, { headers: authHeaders(auth) });
+  const { body } = await fetchJson(apiUrl(baseUrl, `/content/reels/${reelId}/status`), { headers: authHeaders(auth) });
   return body;
 }
 
@@ -351,20 +368,29 @@ function report(datasetDir, id, rows, summary) {
 }
 
 async function runLoad(args, prepared) {
-  const datasetDir = path.resolve(args['dataset-dir'] || 'test-data/reel-integration');
+  const datasetDir = datasetDirectory(args);
   const manifest = prepared || JSON.parse(fs.readFileSync(path.join(datasetDir, 'manifest.json'), 'utf8'));
   if (!Array.isArray(manifest.fixtures) || !manifest.fixtures.length) throw new Error('dataset has no fixtures');
+  const requestedFixtureIds = args['fixture-id']
+    ? new Set(String(args['fixture-id']).split(',').map((value) => value.trim()).filter(Boolean))
+    : null;
+  const fixtures = requestedFixtureIds
+    ? manifest.fixtures.filter((fixture) => requestedFixtureIds.has(fixture.id) || requestedFixtureIds.has(fixture.fixtureId))
+    : manifest.fixtures;
+  if (!fixtures.length) throw new Error(`no fixtures matched --fixture-id=${args['fixture-id']}`);
 
-  const baseUrl = String(args['base-url'] || process.env.VELORA_TEST_BASE_URL || process.env.BACKEND_URL || '').replace(/\/$/, '');
-  if (!baseUrl) throw new Error('Set --base-url, VELORA_TEST_BASE_URL, or BACKEND_URL');
+  const configuredBaseUrl = args['base-url'] || process.env.VELORA_TEST_BASE_URL || process.env.BACKEND_URL;
+  if (!configuredBaseUrl) throw new Error('Set --base-url, VELORA_TEST_BASE_URL, or BACKEND_URL');
+  const baseUrl = originBase(configuredBaseUrl);
 
   const concurrency = integer(args.concurrency, 2, '--concurrency', 1, 32);
-  const count = integer(args.count, manifest.fixtures.length, '--count', 1, 10000);
+  const count = integer(args.count, fixtures.length, '--count', 1, 10000);
   const timeoutMs = integer(args['timeout-ms'], 20 * 60 * 1000, '--timeout-ms', 10000, 8 * 60 * 60 * 1000);
   const pollMs = integer(args['poll-ms'], 2000, '--poll-ms', 250, 30000);
   const id = args['run-id'] || runId();
   const auth = await authenticate(baseUrl);
-  const jobs = Array.from({ length: count }, (_, index) => ({ fixture: manifest.fixtures[index % manifest.fixtures.length], ordinal: index + 1 }));
+  await verifyAuthentication(baseUrl, auth);
+  const jobs = Array.from({ length: count }, (_, index) => ({ fixture: fixtures[index % fixtures.length], ordinal: index + 1 }));
 
   console.log(`[run] base=${baseUrl} runId=${id} count=${count} concurrency=${concurrency}`);
   console.log('[run] all automated reels are created as PRIVATE');
