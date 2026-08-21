@@ -1,7 +1,7 @@
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import type { IArtifactStorage } from '@indexing/domain/interfaces/artifact-storage.interface';
-import type { ConfigService } from '@nestjs/config';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
 import { AnalyzeVisualFrameManifestUseCase } from './analyze-visual-frame-manifest.use-case';
 
 describe('AnalyzeVisualFrameManifestUseCase', () => {
@@ -14,7 +14,7 @@ describe('AnalyzeVisualFrameManifestUseCase', () => {
         if (key === 'INDEX_VISUAL_ANALYSIS_CONCURRENCY') return '2';
         return undefined;
       }),
-    } as unknown as ConfigService;
+    } as IIndexingApplicationConfig;
     const storage = {
       artifactExists: jest.fn().mockResolvedValue(true),
       getVisualFrameManifest: jest.fn().mockResolvedValue({
