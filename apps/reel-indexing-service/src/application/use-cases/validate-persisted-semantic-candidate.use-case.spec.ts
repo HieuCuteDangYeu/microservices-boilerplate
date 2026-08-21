@@ -59,14 +59,15 @@ describe('ValidatePersistedSemanticCandidateUseCase', () => {
   it('runs deterministic validation before advisory semantic review', async () => {
     const callOrder: string[] = [];
     const validator = {
-      execute: jest.fn().mockImplementation(async () => {
+      execute: jest.fn().mockImplementation(() => {
         callOrder.push('validator');
+        return Promise.resolve();
       }),
     };
     const ai = {
-      reviewIndexQuality: jest.fn().mockImplementation(async () => {
+      reviewIndexQuality: jest.fn().mockImplementation(() => {
         callOrder.push('reviewer');
-        return {
+        return Promise.resolve({
           acceptable: false,
           confidence: 0.9,
           summary: 'Advisory issue.',
@@ -77,7 +78,7 @@ describe('ValidatePersistedSemanticCandidateUseCase', () => {
               message: 'Could be more specific.',
             },
           ],
-        };
+        });
       }),
     };
     const useCase = new ValidatePersistedSemanticCandidateUseCase(
