@@ -3,8 +3,10 @@ import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-
 import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
 import { GenerateDraftAnswerUseCase } from '@ai/application/use-cases/generate-draft-answer.use-case';
 import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-case';
+import { PlanRetrievalUseCase } from '@ai/application/use-cases/plan-retrieval.use-case';
 import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
-import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
+import { RerankRetrievedEvidenceUseCase } from '@ai/application/use-cases/rerank-retrieved-evidence.use-case';
+import { RetrieveReelEvidenceUseCase } from '@ai/application/use-cases/retrieve-reel-evidence.use-case';
 import { RewriteRetrievalQueryUseCase } from '@ai/application/use-cases/rewrite-retrieval-query.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
@@ -63,7 +65,9 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
   constructor(
     private readonly queryRouterAgentUseCase: QueryRouterAgentUseCase,
-    private readonly retrievalAgentUseCase: RetrievalAgentUseCase,
+    private readonly planRetrievalUseCase: PlanRetrievalUseCase,
+    private readonly retrieveReelEvidenceUseCase: RetrieveReelEvidenceUseCase,
+    private readonly rerankRetrievedEvidenceUseCase: RerankRetrievedEvidenceUseCase,
     private readonly rewriteRetrievalQueryUseCase: RewriteRetrievalQueryUseCase,
     private readonly checkContextSufficiencyUseCase: CheckContextSufficiencyUseCase,
     private readonly memoryAgentUseCase: MemoryAgentUseCase,
@@ -278,7 +282,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         'retrievalPlannerNode',
         nodeTimings,
         () =>
-          this.retrievalAgentUseCase.plan({
+          this.planRetrievalUseCase.execute({
             message: planningMessage,
             route: state.route!,
           }),
@@ -301,7 +305,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         'retrievalNode',
         nodeTimings,
         () =>
-          this.retrievalAgentUseCase.retrieve({
+          this.retrieveReelEvidenceUseCase.execute({
             userId: state.userId,
             conversationId: state.conversationId,
             route: state.route!,
@@ -331,7 +335,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         'neuralRerankerNode',
         nodeTimings,
         () =>
-          this.retrievalAgentUseCase.rerank({
+          this.rerankRetrievedEvidenceUseCase.execute({
             plan: state.retrievalPlan!,
             retrievedChunks: state.retrievedChunks,
           }),
@@ -457,7 +461,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       state: RagChatWorkflowState,
     ): Promise<Partial<RagChatWorkflowState>> => {
       const assessment = await this.timed('citationNode', nodeTimings, () =>
-        this.buildRagCitationsUseCase.assess(state),
+        this.buildRagCitationsUseCase.execute(state),
       );
 
       return {
