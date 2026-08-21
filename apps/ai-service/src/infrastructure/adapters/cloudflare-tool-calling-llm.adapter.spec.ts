@@ -124,10 +124,33 @@ describe('CloudflareToolCallingLlmAdapter', () => {
         },
       },
     ]);
+    expect(request.messages[1]?.['content']).toBe('');
     expect(request.messages[2]).toMatchObject({
       role: 'tool',
       tool_call_id: 'call-1',
       name: 'search_reel_content',
     });
+  });
+
+  it('surfaces a safe Cloudflare validation error', async () => {
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('value'),
+      get: jest.fn().mockReturnValue(undefined),
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: jest.fn().mockResolvedValue({
+        error: { message: "Type mismatch of '/messages/2/content'" },
+      }),
+    } as never);
+    const adapter = new CloudflareToolCallingLlmAdapter(config as never);
+
+    await expect(
+      adapter.complete({
+        messages: [{ role: 'user', content: 'Search.' }],
+        tools: [],
+      }),
+    ).rejects.toThrow("Type mismatch of '/messages/2/content'");
   });
 });

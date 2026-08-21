@@ -130,7 +130,9 @@ export class CloudflareToolCallingLlmAdapter
     if (message.role === 'assistant') {
       return {
         role: 'assistant',
-        content: message.content ?? null,
+        // Workers AI currently validates assistant tool-call content as a
+        // string on the chat-completions endpoint, even when it is empty.
+        content: message.content ?? '',
         ...(message.toolCalls?.length
           ? {
               tool_calls: message.toolCalls.map((call) => ({
