@@ -17,6 +17,7 @@ import type {
   ToolCallingMessage,
 } from '@ai/domain/interfaces/tool-calling-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { RetrievalAgentUseCase } from './retrieval-agent.use-case';
 
 interface RetrievalToolResult {
   items: TranscriptMatch[];
@@ -24,7 +25,7 @@ interface RetrievalToolResult {
 }
 
 @Injectable()
-export class ToolCallingRetrievalAgentUseCase {
+export class ToolCallingRetrievalAgentUseCase implements RetrievalAgentUseCase {
   private readonly toolLogger = new Logger(ToolCallingRetrievalAgentUseCase.name);
 
   constructor(
