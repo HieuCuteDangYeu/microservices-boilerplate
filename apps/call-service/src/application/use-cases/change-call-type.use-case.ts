@@ -35,7 +35,9 @@ export class ChangeCallTypeUseCase {
     }
 
     if (session.status !== 'active') {
-      throw new ForbiddenException('Call type can only change while the call is active');
+      throw new ForbiddenException(
+        'Call type can only change while the call is active',
+      );
     }
 
     const allowedUsers = new Set([session.initiatorId, session.targetUserId]);

@@ -76,9 +76,9 @@ describe('RetrieveReelEvidenceUseCase', () => {
       resolveReelContextAccess: jest.fn().mockResolvedValue(['reel-1']),
     };
     const useCase = new RetrieveReelEvidenceUseCase(
-      retrievalEngine as never,
+      retrievalEngine,
       content as never,
-      toolLlm as never,
+      toolLlm,
       enabledPolicy,
     );
 
@@ -132,9 +132,9 @@ describe('RetrieveReelEvidenceUseCase', () => {
       rerank: jest.fn().mockResolvedValue([]),
     };
     const useCase = new RetrieveReelEvidenceUseCase(
-      retrievalEngine as never,
+      retrievalEngine,
       { resolveReelContextAccess: jest.fn() } as never,
-      toolLlm as never,
+      toolLlm,
       enabledPolicy,
     );
 
@@ -159,9 +159,9 @@ describe('RetrieveReelEvidenceUseCase', () => {
       rerank: jest.fn().mockResolvedValue([match]),
     };
     const useCase = new RetrieveReelEvidenceUseCase(
-      retrievalEngine as never,
+      retrievalEngine,
       { resolveReelContextAccess: jest.fn() } as never,
-      { complete: jest.fn() } as never,
+      { complete: jest.fn() },
       { ...enabledPolicy, enabled: false },
     );
 

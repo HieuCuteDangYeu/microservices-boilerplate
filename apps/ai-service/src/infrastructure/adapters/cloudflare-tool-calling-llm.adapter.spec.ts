@@ -68,7 +68,7 @@ describe('CloudflareToolCallingLlmAdapter', () => {
     });
 
     const request = JSON.parse(
-      String((fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body),
+      String(fetchSpy.mock.calls[0]?.[1]?.body),
     ) as Record<string, unknown>;
     expect(request['tool_choice']).toBe('required');
     expect(request['parallel_tool_calls']).toBe(true);
@@ -111,9 +111,9 @@ describe('CloudflareToolCallingLlmAdapter', () => {
       tools: [],
     });
 
-    const request = JSON.parse(
-      String((fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body),
-    ) as { messages: Array<Record<string, unknown>> };
+    const request = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
+      messages: Array<Record<string, unknown>>;
+    };
     expect(request.messages[1]?.['tool_calls']).toEqual([
       {
         id: 'call-1',

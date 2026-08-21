@@ -11,11 +11,9 @@ describe('GroupMembersMicroserviceController', () => {
       overrides?.getUseCase ??
       ({ execute: jest.fn().mockResolvedValue([]) } as any);
     const roleUseCase =
-      overrides?.roleUseCase ??
-      ({ updateRole: jest.fn() } as any);
+      overrides?.roleUseCase ?? ({ updateRole: jest.fn() } as any);
     const chatGateway =
-      overrides?.chatGateway ??
-      ({ emitConversationUpdated: jest.fn() } as any);
+      overrides?.chatGateway ?? ({ emitConversationUpdated: jest.fn() } as any);
 
     return {
       controller: new GroupMembersMicroserviceController(

@@ -231,7 +231,8 @@ export class RetrieveReelEvidenceUseCase {
           properties: {
             query: {
               type: 'string',
-              description: 'Focused retrieval query grounded in the user request.',
+              description:
+                'Focused retrieval query grounded in the user request.',
             },
             mode: {
               type: 'string',
@@ -323,8 +324,12 @@ Rules:
         startTime: item.startTime,
         endTime: item.endTime,
         score: item.score,
-        text: (item.evidenceText || item.chunkText || item.retrievalText || '')
-          .slice(0, 700),
+        text: (
+          item.evidenceText ||
+          item.chunkText ||
+          item.retrievalText ||
+          ''
+        ).slice(0, 700),
       })),
     });
   }

@@ -51,7 +51,9 @@ interface RetrievalExecutionInput {
 
 @Injectable()
 export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
-  private readonly logger = new Logger(DeterministicRetrievalEngineAdapter.name);
+  private readonly logger = new Logger(
+    DeterministicRetrievalEngineAdapter.name,
+  );
   private hasWarnedBlockedHierarchyPromotion = false;
 
   constructor(

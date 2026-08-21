@@ -19,8 +19,9 @@ describe('CreateConversationUseCase', () => {
 
   beforeEach(() => {
     chatRepository = {
-      createConversation: jest.fn(async (conversation: Conversation) =>
-        new Conversation({ ...conversation, id: 'conversation-id' }),
+      createConversation: jest.fn(
+        async (conversation: Conversation) =>
+          new Conversation({ ...conversation, id: 'conversation-id' }),
       ),
       findPrivateConversation: jest.fn().mockResolvedValue(null),
     };
@@ -131,6 +132,8 @@ describe('CreateConversationUseCase', () => {
         { participantIds: [PEER_ID], type: 'DIRECT', name: 'Not a group' },
         OWNER_ID,
       ),
-    ).rejects.toThrow('Group metadata is only supported for group conversations');
+    ).rejects.toThrow(
+      'Group metadata is only supported for group conversations',
+    );
   });
 });

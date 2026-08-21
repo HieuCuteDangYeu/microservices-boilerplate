@@ -13,7 +13,9 @@ export class RetrievalAgentPolicyAdapter implements IRetrievalAgentPolicy {
       .toLowerCase();
     if (configured === 'true') return true;
     if (configured === 'false') return false;
-    return this.config.get<string>('NODE_ENV')?.trim().toLowerCase() !== 'production';
+    return (
+      this.config.get<string>('NODE_ENV')?.trim().toLowerCase() !== 'production'
+    );
   }
 
   get model(): string | undefined {

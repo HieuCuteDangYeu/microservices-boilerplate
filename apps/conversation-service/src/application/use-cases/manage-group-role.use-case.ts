@@ -91,7 +91,9 @@ export class ManageGroupRoleUseCase {
     });
 
     if (!decision.allowed) {
-      throw new BadRequestException(decision.reason ?? 'Role change is invalid');
+      throw new BadRequestException(
+        decision.reason ?? 'Role change is invalid',
+      );
     }
 
     const changed = await this.memberRepository.changeRoleAsLegacyOwner(
@@ -106,7 +108,8 @@ export class ManageGroupRoleUseCase {
       const currentConversation = await this.loadGroup(conversationId);
       const currentMembers = await this.loadProjection(conversationId);
       const currentTarget = currentMembers.find(
-        (member) => member.userId === targetUserId && member.status === 'ACTIVE',
+        (member) =>
+          member.userId === targetUserId && member.status === 'ACTIVE',
       );
 
       if (
@@ -207,7 +210,9 @@ export class ManageGroupRoleUseCase {
     }
 
     if (!conversation.participantIds.includes(targetUserId)) {
-      throw new BadRequestException('Target user is not an active group member');
+      throw new BadRequestException(
+        'Target user is not an active group member',
+      );
     }
   }
 

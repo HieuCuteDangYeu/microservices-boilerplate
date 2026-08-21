@@ -22,7 +22,9 @@ export class ReviewIndexQualityUseCase {
     private readonly structuredLlm: IStructuredLlmService,
   ) {}
 
-  async execute(input: IndexQualityReviewInput): Promise<IndexQualityReviewResult> {
+  async execute(
+    input: IndexQualityReviewInput,
+  ): Promise<IndexQualityReviewResult> {
     const raw = await this.structuredLlm.generateObject<RawIndexQualityReview>({
       systemPrompt: this.systemPrompt(),
       userPrompt: JSON.stringify(input, null, 2),
@@ -120,7 +122,8 @@ Rules:
           typeof record['message'] === 'string' ? record['message'].trim() : '';
         if (!category || !severity || !message) return null;
         const documentId =
-          typeof record['documentId'] === 'string' && record['documentId'].trim()
+          typeof record['documentId'] === 'string' &&
+          record['documentId'].trim()
             ? record['documentId'].trim()
             : undefined;
         return {

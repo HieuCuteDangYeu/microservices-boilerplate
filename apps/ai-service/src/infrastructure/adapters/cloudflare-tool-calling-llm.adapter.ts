@@ -34,9 +34,7 @@ interface CloudflareToolCompletionResponse {
 }
 
 @Injectable()
-export class CloudflareToolCallingLlmAdapter
-  implements IToolCallingLlmService
-{
+export class CloudflareToolCallingLlmAdapter implements IToolCallingLlmService {
   private readonly logger = new Logger(CloudflareToolCallingLlmAdapter.name);
 
   constructor(private readonly config: ConfigService) {}
@@ -126,7 +124,9 @@ export class CloudflareToolCallingLlmAdapter
     };
   }
 
-  private toProviderMessage(message: ToolCallingMessage): Record<string, unknown> {
+  private toProviderMessage(
+    message: ToolCallingMessage,
+  ): Record<string, unknown> {
     if (message.role === 'assistant') {
       return {
         role: 'assistant',

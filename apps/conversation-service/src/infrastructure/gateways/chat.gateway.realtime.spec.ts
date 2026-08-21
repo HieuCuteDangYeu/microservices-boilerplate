@@ -10,10 +10,7 @@ const MEMBER_ID = '22222222-2222-4222-8222-222222222222';
 const CONVERSATION_ID = '507f1f77bcf86cd799439011';
 const ownerRooms = [OWNER_ID, `user:${OWNER_ID}`];
 const memberRooms = [MEMBER_ID, `user:${MEMBER_ID}`];
-const conversationRooms = [
-  CONVERSATION_ID,
-  `conversation:${CONVERSATION_ID}`,
-];
+const conversationRooms = [CONVERSATION_ID, `conversation:${CONVERSATION_ID}`];
 
 const conversation = () =>
   new Conversation({
@@ -165,10 +162,7 @@ describe('ChatGateway realtime membership helpers', () => {
 
     gateway.emitConversationUpdated(group);
 
-    expect(to).toHaveBeenCalledWith([
-      ...ownerRooms,
-      ...memberRooms,
-    ]);
+    expect(to).toHaveBeenCalledWith([...ownerRooms, ...memberRooms]);
     expect(emit).toHaveBeenCalledWith(
       'conversation_updated',
       expect.objectContaining({

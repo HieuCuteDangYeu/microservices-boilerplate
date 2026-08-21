@@ -77,10 +77,23 @@ describe('1:1 video call use cases', () => {
 
     const result = await useCase.execute(callId, callerId, 'VOICE');
 
-    expect(result.closedVideoProducerIds).toEqual(['video-caller', 'video-callee']);
+    expect(result.closedVideoProducerIds).toEqual([
+      'video-caller',
+      'video-callee',
+    ]);
     expect(closeProducer).toHaveBeenCalledTimes(2);
-    expect(closeProducer).toHaveBeenNthCalledWith(1, callId, callerId, 'video-caller');
-    expect(closeProducer).toHaveBeenNthCalledWith(2, callId, calleeId, 'video-callee');
+    expect(closeProducer).toHaveBeenNthCalledWith(
+      1,
+      callId,
+      callerId,
+      'video-caller',
+    );
+    expect(closeProducer).toHaveBeenNthCalledWith(
+      2,
+      callId,
+      calleeId,
+      'video-callee',
+    );
     expect(session.callType).toBe('VOICE');
   });
 
@@ -90,9 +103,9 @@ describe('1:1 video call use cases', () => {
     const { engine } = makeMediaEngine();
     const useCase = new ChangeCallTypeUseCase(repository, engine);
 
-    await expect(useCase.execute(callId, 'intruder', 'VIDEO')).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(
+      useCase.execute(callId, 'intruder', 'VIDEO'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('rejects video production while the session is VOICE', async () => {

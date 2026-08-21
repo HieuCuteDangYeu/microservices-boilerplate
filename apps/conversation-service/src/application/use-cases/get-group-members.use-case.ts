@@ -92,7 +92,9 @@ export class GetGroupMembersUseCase {
         role,
         status: 'ACTIVE',
         joinedAt:
-          legacyJoinedAt ?? projected?.joinedAt.toISOString() ?? fallbackJoinedAt,
+          legacyJoinedAt ??
+          projected?.joinedAt.toISOString() ??
+          fallbackJoinedAt,
         ...(projected?.invitedBy !== undefined
           ? { invitedBy: projected.invitedBy }
           : {}),
@@ -193,10 +195,7 @@ export class GetGroupMembersUseCase {
     const leftDate = new Date(left);
     const rightDate = new Date(right);
 
-    if (
-      Number.isNaN(leftDate.getTime()) ||
-      Number.isNaN(rightDate.getTime())
-    ) {
+    if (Number.isNaN(leftDate.getTime()) || Number.isNaN(rightDate.getTime())) {
       return left === right;
     }
 

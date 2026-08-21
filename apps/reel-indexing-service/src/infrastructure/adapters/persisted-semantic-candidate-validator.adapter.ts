@@ -3,9 +3,7 @@ import type { ISemanticCandidateInspector } from '@indexing/domain/interfaces/se
 import { Inject, Injectable } from '@nestjs/common';
 
 @Injectable()
-export class PersistedSemanticCandidateValidatorAdapter
-  implements IPersistedSemanticCandidateValidator
-{
+export class PersistedSemanticCandidateValidatorAdapter implements IPersistedSemanticCandidateValidator {
   constructor(
     @Inject('ISemanticCandidateInspector')
     private readonly inspector: ISemanticCandidateInspector,

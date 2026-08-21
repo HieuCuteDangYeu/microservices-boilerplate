@@ -253,10 +253,7 @@ describe('PrismaConversationChatRepository', () => {
       .mockResolvedValueOnce({
         creatorId: OWNER_ID,
         participantIds: [OWNER_ID, MEMBER_ID, THIRD_ID],
-        memberJoinedAt: joinedAtMap(
-          [OWNER_ID, MEMBER_ID, THIRD_ID],
-          createdAt,
-        ),
+        memberJoinedAt: joinedAtMap([OWNER_ID, MEMBER_ID, THIRD_ID], createdAt),
         createdAt,
       });
     prisma.conversation.updateMany
@@ -339,10 +336,7 @@ describe('PrismaConversationChatRepository', () => {
       .mockResolvedValueOnce({
         creatorId: OWNER_ID,
         participantIds: [OWNER_ID, MEMBER_ID, THIRD_ID],
-        memberJoinedAt: joinedAtMap(
-          [OWNER_ID, MEMBER_ID, THIRD_ID],
-          createdAt,
-        ),
+        memberJoinedAt: joinedAtMap([OWNER_ID, MEMBER_ID, THIRD_ID], createdAt),
         createdAt,
       })
       .mockResolvedValueOnce({

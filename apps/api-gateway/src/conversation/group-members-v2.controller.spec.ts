@@ -34,7 +34,9 @@ describe('GroupMembersV2Controller', () => {
         throw new Error(`Unexpected RMQ pattern ${pattern}`);
       }),
     };
-    const controller = new GroupMembersV2Controller(conversationClient as never);
+    const controller = new GroupMembersV2Controller(
+      conversationClient as never,
+    );
 
     await expect(
       controller.getGroupMemberProjection('conversation-id', {
@@ -76,7 +78,9 @@ describe('GroupMembersV2Controller', () => {
         }),
       ),
     };
-    const controller = new GroupMembersV2Controller(conversationClient as never);
+    const controller = new GroupMembersV2Controller(
+      conversationClient as never,
+    );
 
     await expect(
       controller.updateGroupMemberRole(
@@ -102,7 +106,9 @@ describe('GroupMembersV2Controller', () => {
 
   it('rejects unsupported roles before sending an RMQ mutation', async () => {
     const conversationClient = { send: jest.fn() };
-    const controller = new GroupMembersV2Controller(conversationClient as never);
+    const controller = new GroupMembersV2Controller(
+      conversationClient as never,
+    );
 
     await expect(
       controller.updateGroupMemberRole(

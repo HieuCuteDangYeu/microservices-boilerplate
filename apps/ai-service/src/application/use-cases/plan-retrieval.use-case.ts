@@ -1,4 +1,7 @@
-import type { RagChatRouteDecision, RagRetrievalPlan } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+import type {
+  RagChatRouteDecision,
+  RagRetrievalPlan,
+} from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IRetrievalEngine } from '@ai/domain/interfaces/retrieval-engine.interface';
 import { Inject, Injectable } from '@nestjs/common';
 

@@ -106,10 +106,7 @@ export class GroupActivityService {
       return;
     }
 
-    this.realtimePublisher.emitNewMessage(
-      input.conversationId,
-      result.message,
-    );
+    this.realtimePublisher.emitNewMessage(input.conversationId, result.message);
 
     const updatedConversation = await this.chatRepository.findConversation(
       input.conversationId,
@@ -119,7 +116,10 @@ export class GroupActivityService {
     }
   }
 
-  private displayName(conversation: Conversation, userId: string): string | null {
+  private displayName(
+    conversation: Conversation,
+    userId: string,
+  ): string | null {
     const participant = conversation.participants?.find(
       (candidate) => candidate.id === userId,
     );

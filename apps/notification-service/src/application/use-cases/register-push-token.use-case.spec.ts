@@ -65,7 +65,7 @@ describe('RegisterPushTokenUseCase', () => {
     };
     useCase = new RegisterPushTokenUseCase(
       pushTokenRepository as unknown as IPushTokenRepository,
-      lifecycleRepository as unknown as IPushTokenLifecycleRepository,
+      lifecycleRepository,
     );
   });
 
@@ -88,17 +88,23 @@ describe('RegisterPushTokenUseCase', () => {
     expect(lifecycleRepository.advance).toHaveBeenCalledWith(input, 'register');
     expect(lifecycleRepository.isTokenInvalidated).toHaveBeenCalledWith(input);
     expect(pushTokenRepository.upsert).toHaveBeenCalledWith(USER_ID, input);
-    expect(lifecycleRepository.isCurrent).toHaveBeenCalledWith(input, 'register');
-    expect(pushTokenRepository.deactivateOtherDeviceTokens).toHaveBeenCalledWith(
-      USER_ID,
+    expect(lifecycleRepository.isCurrent).toHaveBeenCalledWith(
       input,
+      'register',
     );
-    expect(lifecycleRepository.releaseLock).toHaveBeenCalledWith(input, 'lock-1');
+    expect(
+      pushTokenRepository.deactivateOtherDeviceTokens,
+    ).toHaveBeenCalledWith(USER_ID, input);
+    expect(lifecycleRepository.releaseLock).toHaveBeenCalledWith(
+      input,
+      'lock-1',
+    );
 
     expect(
       lifecycleRepository.releaseLock.mock.invocationCallOrder[0],
     ).toBeGreaterThan(
-      pushTokenRepository.deactivateOtherDeviceTokens.mock.invocationCallOrder[0],
+      pushTokenRepository.deactivateOtherDeviceTokens.mock
+        .invocationCallOrder[0],
     );
   });
 
@@ -110,7 +116,10 @@ describe('RegisterPushTokenUseCase', () => {
     );
 
     expect(pushTokenRepository.upsert).not.toHaveBeenCalled();
-    expect(lifecycleRepository.releaseLock).toHaveBeenCalledWith(input, 'lock-1');
+    expect(lifecycleRepository.releaseLock).toHaveBeenCalledWith(
+      input,
+      'lock-1',
+    );
   });
 
   it('releases the device lock when the lifecycle has already advanced', async () => {
@@ -121,6 +130,9 @@ describe('RegisterPushTokenUseCase', () => {
     );
 
     expect(pushTokenRepository.upsert).not.toHaveBeenCalled();
-    expect(lifecycleRepository.releaseLock).toHaveBeenCalledWith(input, 'lock-1');
+    expect(lifecycleRepository.releaseLock).toHaveBeenCalledWith(
+      input,
+      'lock-1',
+    );
   });
 });

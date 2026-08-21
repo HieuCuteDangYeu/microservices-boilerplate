@@ -81,7 +81,7 @@ describe('ValidatePersistedSemanticCandidateUseCase', () => {
       }),
     };
     const useCase = new ValidatePersistedSemanticCandidateUseCase(
-      validator as never,
+      validator,
       ai as never,
       advisoryPolicy,
     );
@@ -96,7 +96,7 @@ describe('ValidatePersistedSemanticCandidateUseCase', () => {
     };
     const ai = { reviewIndexQuality: jest.fn() };
     const useCase = new ValidatePersistedSemanticCandidateUseCase(
-      validator as never,
+      validator,
       ai as never,
       advisoryPolicy,
     );
@@ -123,7 +123,7 @@ describe('ValidatePersistedSemanticCandidateUseCase', () => {
       }),
     };
     const useCase = new ValidatePersistedSemanticCandidateUseCase(
-      validator as never,
+      validator,
       ai as never,
       { ...advisoryPolicy, enforced: true },
     );
@@ -137,7 +137,7 @@ describe('ValidatePersistedSemanticCandidateUseCase', () => {
     const validator = { execute: jest.fn().mockResolvedValue(undefined) };
     const ai = { reviewIndexQuality: jest.fn() };
     const useCase = new ValidatePersistedSemanticCandidateUseCase(
-      validator as never,
+      validator,
       ai as never,
       { ...advisoryPolicy, enabled: false },
     );

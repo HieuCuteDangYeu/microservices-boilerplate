@@ -138,7 +138,9 @@ export class GroupMembershipConsistencyService {
     projectedMembers: ConversationMemberRecord[],
   ): GroupMembershipConsistencyIssue[] {
     const issues: GroupMembershipConsistencyIssue[] = [];
-    const legacyParticipantIds = Array.from(new Set(conversation.participantIds));
+    const legacyParticipantIds = Array.from(
+      new Set(conversation.participantIds),
+    );
     const legacyParticipantSet = new Set(legacyParticipantIds);
     const activeProjectedMembers = projectedMembers.filter(
       (member) => member.status === 'ACTIVE',
@@ -155,7 +157,10 @@ export class GroupMembershipConsistencyService {
 
     for (const member of activeProjectedMembers) {
       if (!legacyParticipantSet.has(member.userId)) {
-        issues.push({ type: 'UNEXPECTED_ACTIVE_MEMBER', userId: member.userId });
+        issues.push({
+          type: 'UNEXPECTED_ACTIVE_MEMBER',
+          userId: member.userId,
+        });
       }
     }
 
@@ -204,10 +209,7 @@ export class GroupMembershipConsistencyService {
     const leftDate = new Date(left);
     const rightDate = new Date(right);
 
-    if (
-      Number.isNaN(leftDate.getTime()) ||
-      Number.isNaN(rightDate.getTime())
-    ) {
+    if (Number.isNaN(leftDate.getTime()) || Number.isNaN(rightDate.getTime())) {
       return left === right;
     }
 

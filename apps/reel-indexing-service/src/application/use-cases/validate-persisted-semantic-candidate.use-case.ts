@@ -95,9 +95,11 @@ export class ValidatePersistedSemanticCandidateUseCase {
         startTime: document.startTime,
         endTime: document.endTime,
         evidenceQuality: document.evidenceQuality,
-        text: (document.evidenceText ||
+        text: (
+          document.evidenceText ||
           document.derivedSummary ||
-          document.retrievalText)
+          document.retrievalText
+        )
           .replace(/\s+/g, ' ')
           .trim()
           .slice(0, 1_200),

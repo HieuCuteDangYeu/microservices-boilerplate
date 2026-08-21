@@ -45,7 +45,9 @@ const createTx = () => ({
 
 const createRepository = (tx: ReturnType<typeof createTx>) => {
   const prisma = {
-    $transaction: jest.fn().mockImplementation(async (callback: any) => callback(tx)),
+    $transaction: jest
+      .fn()
+      .mockImplementation(async (callback: any) => callback(tx)),
   };
 
   return {
@@ -57,7 +59,9 @@ const createRepository = (tx: ReturnType<typeof createTx>) => {
 describe('PrismaGroupManagementV2Repository', () => {
   it('updates metadata only while the expected active actor role is unchanged', async () => {
     const tx = createTx();
-    tx.conversationMember.findUnique.mockResolvedValue(activeMember(ADMIN_ID, 'ADMIN'));
+    tx.conversationMember.findUnique.mockResolvedValue(
+      activeMember(ADMIN_ID, 'ADMIN'),
+    );
     const { repository } = createRepository(tx);
 
     await expect(
@@ -94,7 +98,9 @@ describe('PrismaGroupManagementV2Repository', () => {
 
   it('rejects a metadata write when the actor was demoted before the guard is acquired', async () => {
     const tx = createTx();
-    tx.conversationMember.findUnique.mockResolvedValue(activeMember(ADMIN_ID, 'MEMBER'));
+    tx.conversationMember.findUnique.mockResolvedValue(
+      activeMember(ADMIN_ID, 'MEMBER'),
+    );
     const { repository } = createRepository(tx);
 
     await expect(
@@ -111,7 +117,9 @@ describe('PrismaGroupManagementV2Repository', () => {
 
   it('rejects a metadata write when the actor role changes during the timestamp CAS guard', async () => {
     const tx = createTx();
-    tx.conversationMember.findUnique.mockResolvedValue(activeMember(ADMIN_ID, 'ADMIN'));
+    tx.conversationMember.findUnique.mockResolvedValue(
+      activeMember(ADMIN_ID, 'ADMIN'),
+    );
     tx.conversationMember.updateMany.mockResolvedValueOnce({ count: 0 });
     const { repository } = createRepository(tx);
 
@@ -130,7 +138,9 @@ describe('PrismaGroupManagementV2Repository', () => {
 
   it('adds a member by atomically updating the legacy projection and ConversationMember row', async () => {
     const tx = createTx();
-    tx.conversationMember.findUnique.mockResolvedValue(activeMember(ADMIN_ID, 'ADMIN'));
+    tx.conversationMember.findUnique.mockResolvedValue(
+      activeMember(ADMIN_ID, 'ADMIN'),
+    );
     const { repository } = createRepository(tx);
     const joinedAt = new Date('2026-08-20T02:00:00.000Z');
 
@@ -188,7 +198,9 @@ describe('PrismaGroupManagementV2Repository', () => {
 
   it('rejects removal when the target was promoted before the expected-role write', async () => {
     const tx = createTx();
-    tx.conversationMember.findUnique.mockResolvedValue(activeMember(ADMIN_ID, 'ADMIN'));
+    tx.conversationMember.findUnique.mockResolvedValue(
+      activeMember(ADMIN_ID, 'ADMIN'),
+    );
     tx.conversationMember.updateMany
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 0 });
@@ -250,7 +262,9 @@ describe('PrismaGroupManagementV2Repository', () => {
 
   it('removes a member from both projections while preserving the actor role guard', async () => {
     const tx = createTx();
-    tx.conversationMember.findUnique.mockResolvedValue(activeMember(ADMIN_ID, 'ADMIN'));
+    tx.conversationMember.findUnique.mockResolvedValue(
+      activeMember(ADMIN_ID, 'ADMIN'),
+    );
     tx.conversationMember.updateMany
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 1 });
@@ -448,7 +462,9 @@ describe('PrismaGroupManagementV2Repository', () => {
 
   it('propagates unexpected transaction failures instead of masking them as conflicts', async () => {
     const prisma = {
-      $transaction: jest.fn().mockRejectedValue(new Error('transaction unavailable')),
+      $transaction: jest
+        .fn()
+        .mockRejectedValue(new Error('transaction unavailable')),
     };
     const repository = new PrismaGroupManagementV2Repository(prisma as never);
 
