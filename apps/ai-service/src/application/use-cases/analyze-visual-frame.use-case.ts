@@ -1,17 +1,18 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type { IVisionService } from '@ai/domain/interfaces/vision.service.interface';
 import type {
   AnalyzeVisualFrameRequest,
   VisualFrameAnalysis,
 } from '@common/ai/interfaces/visual-analysis.interface';
 import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AnalyzeVisualFrameUseCase {
   constructor(
     @Inject('IVisionService')
     private readonly visionService: IVisionService,
-    private readonly configService: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly configService: IAiApplicationConfig,
   ) {}
 
   async execute(
