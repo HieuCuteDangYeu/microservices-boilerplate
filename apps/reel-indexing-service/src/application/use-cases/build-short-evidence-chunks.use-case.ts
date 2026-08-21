@@ -12,6 +12,11 @@ interface TimedToken {
   sentenceEnd: boolean;
 }
 
+interface ChunkWithProvenance {
+  tokens: TimedToken[];
+  leadingOverlapTokens: number;
+}
+
 @Injectable()
 export class BuildShortEvidenceChunksUseCase {
   constructor(
@@ -48,13 +53,15 @@ export class BuildShortEvidenceChunksUseCase {
     const maxSeconds = this.positiveInt(`${prefix}_MAX_SECONDS`, 45, 5, 600);
     const largePauseSeconds =
       this.positiveInt('INDEX_CHUNK_LARGE_PAUSE_MS', 1_500, 100, 30_000) / 1000;
-    const chunks: EvidenceChunk[] = [];
+    const chunks: ChunkWithProvenance[] = [];
     let current: TimedToken[] = [];
+    let leadingOverlapTokens = 0;
 
     const flush = (preserveOverlap = true) => {
       if (!current.length) return;
-      chunks.push(this.toChunk(current));
+      chunks.push({ tokens: current, leadingOverlapTokens });
       current = preserveOverlap && overlap ? current.slice(-overlap) : [];
+      leadingOverlapTokens = current.length;
     };
 
     for (const token of tokens) {
@@ -82,27 +89,16 @@ export class BuildShortEvidenceChunksUseCase {
     if (chunks.length > 1) {
       const last = chunks.at(-1)!;
       const previous = chunks.at(-2)!;
-      const lastWords = last.evidenceText.split(/\s+/);
-      const uniqueLast = lastWords.slice(Math.min(overlap, lastWords.length));
-      const previousWords = previous.evidenceText.split(/\s+/);
+      const uniqueLast = last.tokens.slice(last.leadingOverlapTokens);
       if (
-        lastWords.length < minimum &&
-        previousWords.length + uniqueLast.length <= maximum
+        last.tokens.length < minimum &&
+        previous.tokens.length + uniqueLast.length <= maximum
       ) {
-        previous.evidenceText = [...previousWords, ...uniqueLast].join(' ');
-        previous.endTime = last.endTime;
-        previous.sourceSegmentIds = this.unique([
-          ...previous.sourceSegmentIds,
-          ...last.sourceSegmentIds,
-        ]);
-        previous.sourceAudioArtifactIds = this.unique([
-          ...previous.sourceAudioArtifactIds,
-          ...last.sourceAudioArtifactIds,
-        ]);
+        previous.tokens = [...previous.tokens, ...uniqueLast];
         chunks.pop();
       }
     }
-    return chunks;
+    return chunks.map((chunk) => this.toChunk(chunk.tokens));
   }
 
   private tokensForSegment(
