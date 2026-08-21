@@ -1,19 +1,33 @@
 # Bounded agentic retrieval and indexing
 
-This implementation keeps LangGraph and deterministic infrastructure in control while allowing model reasoning only at bounded semantic boundaries. It follows the repository conventions in `QWEN.md`: application behavior lives under `application`, provider and RabbitMQ details stay under `infrastructure`, new cross-boundary dependencies are exposed as domain interfaces and DI tokens, and inter-service communication remains RabbitMQ-only.
+This implementation keeps LangGraph and deterministic infrastructure in control while allowing model reasoning only at bounded semantic boundaries. It follows the repository conventions in `QWEN.md`: application behavior lives under `application/use-cases`, provider and integration implementations stay under `infrastructure`, domain interfaces define ports, and inter-service communication remains RabbitMQ-only.
 
 ## Retrieval architecture
 
-`LangGraphRagChatWorkflowAdapter` keeps its existing graph topology. `RetrievalAgentUseCase` is now only the workflow-facing runtime contract/token. The Nest module supplies `ToolCallingRetrievalAgentUseCase` under that token, so the graph depends on an agent contract rather than accidentally treating the deterministic retrieval implementation as the agent itself.
+`LangGraphRagChatWorkflowAdapter` keeps its existing graph topology. For compatibility with that graph constructor, the Nest module supplies `ToolCallingRetrievalAgentUseCase` under the existing `RetrievalAgentUseCase` class token. The tool-calling use case remains application behavior and depends only on bounded ports/policies.
 
-The tool-calling agent depends on four bounded ports/policies:
+Those dependencies are:
 
 - `IRetrievalEngine`: planning, deterministic retrieval, and reranking.
 - `IContentService`: already-existing conversation reel access resolution.
 - `IToolCallingLlmService`: provider-neutral tool-calling model interface.
 - `IRetrievalAgentPolicy`: resolved rollout/model/limit policy with no env parsing inside the use case.
 
-`IRetrievalEngine` now has an explicit application implementation: `DeterministicRetrievalEngine` in `application/services/deterministic-retrieval-engine.service.ts`. This separates deterministic execution from the workflow-facing tool agent without inventing an infrastructure adapter for application orchestration.
+`IRetrievalEngine` is now implemented explicitly by `DeterministicRetrievalEngineAdapter` in `infrastructure/adapters/deterministic-retrieval-engine.adapter.ts`. This removes the previous ambiguity where `RetrievalAgentUseCase` was both the deterministic engine implementation and the class token aliased to the tool-calling agent.
+
+The resulting boundary is:
+
+```text
+LangGraphRagChatWorkflowAdapter
+  -> RetrievalAgentUseCase token
+    -> ToolCallingRetrievalAgentUseCase
+      -> IRetrievalEngine
+        -> DeterministicRetrievalEngineAdapter
+          -> IEmbeddingService
+          -> IReelSemanticIndexService
+          -> IRerankerService
+          -> IContentService
+```
 
 The model can call only two high-level tools:
 
@@ -22,7 +36,7 @@ The model can call only two high-level tools:
 
 Both tools delegate through `IRetrievalEngine`, so access control, query embeddings, direct/hierarchical retrieval, reel/section/chunk search, transcript/visual evidence policy, RRF-backed semantic search, neighbour expansion, deduplication, and downstream neural reranking remain deterministic.
 
-Visual retrieval is part of that deterministic engine. When the router requires `VISUAL`, the engine calls `IReelSemanticIndexService.searchVisualScenes(...)` in both direct and hierarchical retrieval. For a visual-only route, transcript chunk search is skipped; mixed evidence routes can retrieve transcript and visual scene candidates together before hydration and reranking.
+Visual retrieval is part of the deterministic engine. When the router requires `VISUAL`, the adapter calls `IReelSemanticIndexService.searchVisualScenes(...)` in both direct and hierarchical retrieval. For a visual-only route, transcript chunk search is skipped. Mixed evidence routes can retrieve transcript and visual-scene candidates together before hydration and reranking.
 
 The model does not receive tools for SQL, pgvector, embeddings, RRF weighting, persistence, or authorization. A tool request can narrow router-approved evidence types but cannot widen them. If the tool loop fails or returns no useful evidence, retrieval falls back through the deterministic engine port.
 
@@ -116,7 +130,7 @@ Run the focused tests first:
 pnpm test -- --runInBand \
   apps/ai-service/src/infrastructure/adapters/cloudflare-tool-calling-llm.adapter.spec.ts \
   apps/ai-service/src/application/use-cases/tool-calling-retrieval-agent.use-case.spec.ts \
-  apps/ai-service/src/application/services/deterministic-retrieval-engine.service.spec.ts \
+  apps/ai-service/src/infrastructure/adapters/deterministic-retrieval-engine.adapter.spec.ts \
   apps/ai-service/src/application/use-cases/review-index-quality.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/index-quality-agent.use-case.spec.ts
 ```
@@ -148,4 +162,4 @@ For indexing, the pre-existing visual/metadata/adaptive-sectioning logs continue
 
 ## Scope note
 
-The repository already contains some older conventions that are stricter or looser than the prose in `QWEN.md` (for example the legacy `ai-service` controller directory is singular and existing LangGraph constructors inject concrete use-case class tokens). This refactor keeps the existing graph constructor stable but makes that class token an explicit workflow contract, while deterministic retrieval now has its own named implementation behind `IRetrievalEngine`.
+This refactor is intentionally narrow: it fixes the `IRetrievalEngine` port/adapter boundary and removes the duplicate architectural identity from the old deterministic retrieval class. It does not rewrite the existing LangGraph constructor or migrate every legacy class-token injection in the AI service.
