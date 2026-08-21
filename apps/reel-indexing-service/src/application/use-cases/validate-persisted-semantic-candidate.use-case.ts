@@ -1,56 +1,114 @@
-import type { ReelIndexDocument } from '@common/processing/interfaces/reel-index-document.interface';
-import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
-import type { ISemanticCandidateInspector } from '@indexing/domain/interfaces/semantic-candidate-inspector.interface';
-import { Inject, Injectable } from '@nestjs/common';
+import type {
+  IIndexingAiService,
+  IndexQualityReviewInput,
+} from '@indexing/domain/interfaces/ai-service.interface';
+import type { IIndexQualityAgentPolicy } from '@indexing/domain/interfaces/index-quality-agent-policy.interface';
+import type { IPersistedSemanticCandidateValidator } from '@indexing/domain/interfaces/persisted-semantic-candidate-validator.interface';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+
+type PersistedCandidateInput = Parameters<
+  IPersistedSemanticCandidateValidator['execute']
+>[0];
+type PersistedCandidateDocument = PersistedCandidateInput['documents'][number];
 
 @Injectable()
 export class ValidatePersistedSemanticCandidateUseCase {
+  private readonly logger = new Logger(
+    ValidatePersistedSemanticCandidateUseCase.name,
+  );
+
   constructor(
-    @Inject('ISemanticCandidateInspector')
-    private readonly inspector: ISemanticCandidateInspector,
+    @Inject('IPersistedSemanticCandidateValidator')
+    private readonly validator: IPersistedSemanticCandidateValidator,
+    @Inject('IIndexingAiService')
+    private readonly ai: IIndexingAiService,
+    @Inject('IIndexQualityAgentPolicy')
+    private readonly policy: IIndexQualityAgentPolicy,
   ) {}
 
-  async execute(input: {
-    job: ReelIndexJob;
-    documents: ReelIndexDocument[];
-    transcriptSegmentCount: number;
-  }): Promise<void> {
-    const expected = {
-      reelDocumentCount: input.documents.filter((item) => item.kind === 'REEL')
-        .length,
-      sectionCount: input.documents.filter((item) => item.kind === 'SECTION')
-        .length,
-      chunkCount: input.documents.filter((item) => item.kind === 'CHUNK')
-        .length,
-      visualSceneCount: input.documents.filter(
-        (item) => item.kind === 'VISUAL_SCENE',
-      ).length,
-      transcriptSegmentCount: input.transcriptSegmentCount,
+  async execute(input: PersistedCandidateInput): Promise<void> {
+    await this.validator.execute(input);
+    if (!this.policy.enabled) return;
+
+    let review;
+    try {
+      review = await this.ai.reviewIndexQuality(
+        this.toReviewRequest(input.job, input.documents),
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.policy.required) throw error;
+      this.logger.warn(
+        `[IndexQualityAgent] review unavailable; structural gate remains authoritative: ${message}`,
+      );
+      return;
+    }
+
+    const issueSummary = review.issues
+      .map((issue) => `${issue.severity}:${issue.category}`)
+      .join(',');
+    this.logger.log(
+      `[IndexQualityAgent] reelId=${input.job.reelId} acceptable=${review.acceptable} confidence=${review.confidence.toFixed(2)} issues=${issueSummary || 'none'}`,
+    );
+
+    if (!review.acceptable && this.policy.enforced) {
+      const details = review.issues
+        .filter((issue) => issue.severity !== 'LOW')
+        .slice(0, 4)
+        .map((issue) => issue.message)
+        .join('; ');
+      throw new Error(
+        `Semantic quality agent rejected inactive index candidate${details ? `: ${details}` : ''}`,
+      );
+    }
+
+    if (!review.acceptable) {
+      this.logger.warn(
+        `[IndexQualityAgent] advisory rejection reelId=${input.job.reelId}: ${review.summary}`,
+      );
+    }
+  }
+
+  private toReviewRequest(
+    job: PersistedCandidateInput['job'],
+    documents: PersistedCandidateInput['documents'],
+  ): IndexQualityReviewInput {
+    const prioritized = [...documents]
+      .sort(
+        (left, right) =>
+          this.kindPriority(left.kind) - this.kindPriority(right.kind),
+      )
+      .slice(0, this.policy.maxDocuments);
+
+    return {
+      reelId: job.reelId,
+      sourceLengthClass: job.sourceLengthClass,
+      durationMs: job.sourceDurationMs,
+      title: job.title,
+      description: job.description,
+      tags: job.tags,
+      documents: prioritized.map((document) => ({
+        id: document.id,
+        kind: document.kind,
+        ordinal: document.ordinal,
+        parentId: document.parentId,
+        startTime: document.startTime,
+        endTime: document.endTime,
+        evidenceQuality: document.evidenceQuality,
+        text: (document.evidenceText ||
+          document.derivedSummary ||
+          document.retrievalText)
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 1_200),
+      })),
     };
+  }
 
-    const actual = await this.inspector.getSnapshot({
-      reelId: input.job.reelId,
-      indexAttemptId: input.job.indexAttemptId,
-    });
-
-    for (const key of Object.keys(expected) as Array<keyof typeof expected>) {
-      if (actual[key] !== expected[key]) {
-        throw new Error(
-          `Persisted semantic candidate integrity mismatch for ${key}; expected=${expected[key]} actual=${actual[key]}`,
-        );
-      }
-    }
-
-    if (actual.reelDocumentCount !== 1) {
-      throw new Error(
-        'Persisted semantic candidate must contain exactly one REEL document',
-      );
-    }
-
-    if (actual.activeDocumentCount !== 0) {
-      throw new Error(
-        `Persisted semantic candidate unexpectedly contains ${actual.activeDocumentCount} active documents before commit`,
-      );
-    }
+  private kindPriority(kind: PersistedCandidateDocument['kind']): number {
+    if (kind === 'REEL') return 0;
+    if (kind === 'SECTION') return 1;
+    if (kind === 'VISUAL_SCENE') return 2;
+    return 3;
   }
 }
