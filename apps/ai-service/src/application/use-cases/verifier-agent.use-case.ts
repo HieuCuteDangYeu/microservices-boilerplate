@@ -1,3 +1,4 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type {
   RagChatWorkflowState,
   RagVerificationResult,
@@ -7,7 +8,6 @@ import type {
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 interface RawVerificationResult {
   passed?: unknown;
@@ -24,7 +24,8 @@ export class VerifierAgentUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
-    private readonly config?: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly config?: IAiApplicationConfig,
   ) {}
 
   async execute(state: RagChatWorkflowState): Promise<RagVerificationResult> {
