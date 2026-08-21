@@ -1,12 +1,16 @@
-import { ConfigService } from '@nestjs/config';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
 import { createHash } from 'crypto';
 import { BuildShortEvidenceChunksUseCase } from './build-short-evidence-chunks.use-case';
 import { ValidateEvidenceIndexCandidateUseCase } from './validate-evidence-index-candidate.use-case';
 
+const applicationConfig = (
+  config: Record<string, string>,
+): IIndexingApplicationConfig => ({
+  get: <T = string>(key: string) => config[key] as T | undefined,
+});
+
 const makeBuilder = (config: Record<string, string>) =>
-  new BuildShortEvidenceChunksUseCase({
-    get: jest.fn((key: string) => config[key]),
-  } as unknown as ConfigService);
+  new BuildShortEvidenceChunksUseCase(applicationConfig(config));
 
 const segment = (start: number, end: number, text: string, id: string) => ({
   start,
@@ -15,7 +19,8 @@ const segment = (start: number, end: number, text: string, id: string) => ({
   sourceSegmentId: id,
 });
 
-const normalize = (value: string) => value.normalize('NFKC').replace(/\s+/g, ' ').trim();
+const normalize = (value: string) =>
+  value.normalize('NFKC').replace(/\s+/g, ' ').trim();
 
 describe('BuildShortEvidenceChunksUseCase', () => {
   const baseConfig = {
@@ -29,7 +34,12 @@ describe('BuildShortEvidenceChunksUseCase', () => {
 
   it('keeps a small tail after a large pause contiguous when merging it', () => {
     const source = [
-      segment(0, 4, 'one two three four five six seven eight nine ten eleven twelve.', 'a'),
+      segment(
+        0,
+        4,
+        'one two three four five six seven eight nine ten eleven twelve.',
+        'a',
+      ),
       segment(6, 7, 'thirteen fourteen fifteen.', 'b'),
     ];
 
@@ -37,11 +47,14 @@ describe('BuildShortEvidenceChunksUseCase', () => {
 
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatchObject({
-      evidenceText: 'one two three four five six seven eight nine ten eleven twelve. thirteen fourteen fifteen.',
+      evidenceText:
+        'one two three four five six seven eight nine ten eleven twelve. thirteen fourteen fifteen.',
       sourceSegmentIds: ['a', 'b'],
       endTime: 7,
     });
-    expect(normalize(source.map((item) => item.text).join(' '))).toContain(normalize(chunks[0].evidenceText));
+    expect(normalize(source.map((item) => item.text).join(' '))).toContain(
+      normalize(chunks[0].evidenceText),
+    );
   });
 
   it('removes only real leading overlap when merging a normal overlapped tail', () => {
@@ -49,27 +62,58 @@ describe('BuildShortEvidenceChunksUseCase', () => {
       segment(0, 1, 'one two three four five.', 'a'),
       segment(1, 2, 'six seven eight.', 'b'),
     ];
-    const chunks = makeBuilder({ ...baseConfig, INDEX_SHORT_CHUNK_TARGET_TOKENS: '5' }).execute(source);
+    const chunks = makeBuilder({
+      ...baseConfig,
+      INDEX_SHORT_CHUNK_TARGET_TOKENS: '5',
+    }).execute(source);
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0].evidenceText).toBe('one two three four five. six seven eight.');
-    expect(normalize(source.map((item) => item.text).join(' '))).toContain(normalize(chunks[0].evidenceText));
+    expect(chunks[0].evidenceText).toBe(
+      'one two three four five. six seven eight.',
+    );
+    expect(normalize(source.map((item) => item.text).join(' '))).toContain(
+      normalize(chunks[0].evidenceText),
+    );
   });
 
   it('keeps a small tail separate when appending its true unique tokens exceeds the maximum', () => {
     const source = [
-      segment(0, 4, 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen.', 'a'),
-      segment(6, 7, 'twenty twenty-one twenty-two twenty-three twenty-four.', 'b'),
+      segment(
+        0,
+        4,
+        'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen.',
+        'a',
+      ),
+      segment(
+        6,
+        7,
+        'twenty twenty-one twenty-two twenty-three twenty-four.',
+        'b',
+      ),
     ];
-    const chunks = makeBuilder({ ...baseConfig, INDEX_SHORT_CHUNK_MAX_TOKENS: '20' }).execute(source);
+    const chunks = makeBuilder({
+      ...baseConfig,
+      INDEX_SHORT_CHUNK_MAX_TOKENS: '20',
+    }).execute(source);
 
     expect(chunks).toHaveLength(2);
-    expect(chunks.every((chunk) => normalize(source.map((item) => item.text).join(' ')).includes(normalize(chunk.evidenceText)))).toBe(true);
+    expect(
+      chunks.every((chunk) =>
+        normalize(source.map((item) => item.text).join(' ')).includes(
+          normalize(chunk.evidenceText),
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('uses the same provenance-aware merge behavior for long chunks', () => {
     const source = [
-      segment(0, 4, 'one two three four five six seven eight nine ten eleven twelve.', 'a'),
+      segment(
+        0,
+        4,
+        'one two three four five six seven eight nine ten eleven twelve.',
+        'a',
+      ),
       segment(6, 7, 'thirteen fourteen fifteen.', 'b'),
     ];
     const chunks = makeBuilder({
@@ -82,18 +126,31 @@ describe('BuildShortEvidenceChunksUseCase', () => {
     }).execute(source, 'INDEX_LONG_CHUNK');
 
     expect(chunks).toHaveLength(1);
-    expect(normalize(source.map((item) => item.text).join(' '))).toContain(normalize(chunks[0].evidenceText));
+    expect(normalize(source.map((item) => item.text).join(' '))).toContain(
+      normalize(chunks[0].evidenceText),
+    );
   });
 
   it('passes the production candidate-grounding invariant after a large-pause tail merge', () => {
     const source = [
-      segment(0, 4, 'one two three four five six seven eight nine ten eleven twelve.', 'a'),
+      segment(
+        0,
+        4,
+        'one two three four five six seven eight nine ten eleven twelve.',
+        'a',
+      ),
       segment(6, 7, 'thirteen fourteen fifteen.', 'b'),
     ];
     const config = { ...baseConfig, INDEX_EMBEDDING_DIMENSIONS: '384' };
     const chunks = makeBuilder(config).execute(source);
-    const hash = (value: string) => createHash('sha256').update(value.normalize('NFKC')).digest('hex');
-    const document = (id: string, kind: 'REEL' | 'CHUNK', ordinal: number, evidenceText?: string) => ({
+    const hash = (value: string) =>
+      createHash('sha256').update(value.normalize('NFKC')).digest('hex');
+    const document = (
+      id: string,
+      kind: 'REEL' | 'CHUNK',
+      ordinal: number,
+      evidenceText?: string,
+    ) => ({
       id,
       reelId: 'reel-1',
       parentId: kind === 'CHUNK' ? 'reel-1' : undefined,
@@ -102,7 +159,10 @@ describe('BuildShortEvidenceChunksUseCase', () => {
       evidenceText,
       retrievalText: evidenceText || 'reel metadata',
       sourceSectionIds: [],
-      sourceSegmentIds: kind === 'CHUNK' ? chunks[ordinal].sourceSegmentIds : source.map((item) => item.sourceSegmentId),
+      sourceSegmentIds:
+        kind === 'CHUNK'
+          ? chunks[ordinal].sourceSegmentIds
+          : source.map((item) => item.sourceSegmentId),
       sourceAudioArtifactIds: [],
       evidenceHash: evidenceText ? hash(evidenceText) : undefined,
       retrievalHash: hash(evidenceText || 'reel metadata'),
@@ -119,13 +179,31 @@ describe('BuildShortEvidenceChunksUseCase', () => {
       embeddingInputHash: 'input',
       embedding: Array(384).fill(0.1),
       tokenCount: 1,
-      ...(kind === 'CHUNK' ? { startTime: chunks[ordinal].startTime, endTime: chunks[ordinal].endTime } : {}),
+      ...(kind === 'CHUNK'
+        ? {
+            startTime: chunks[ordinal].startTime,
+            endTime: chunks[ordinal].endTime,
+          }
+        : {}),
     });
 
-    expect(() => new ValidateEvidenceIndexCandidateUseCase({ get: jest.fn((key: string) => config[key]) } as unknown as ConfigService).execute({
-      job: { reelId: 'reel-1', sourceLengthClass: 'SHORT', sourceDurationMs: 7_000 } as any,
-      documents: [document('reel-1', 'REEL', 0), ...chunks.map((chunk, ordinal) => document(`chunk-${ordinal}`, 'CHUNK', ordinal, chunk.evidenceText))],
-      transcriptSegments: source,
-    })).not.toThrow();
+    expect(() =>
+      new ValidateEvidenceIndexCandidateUseCase(
+        applicationConfig(config),
+      ).execute({
+        job: {
+          reelId: 'reel-1',
+          sourceLengthClass: 'SHORT',
+          sourceDurationMs: 7_000,
+        } as never,
+        documents: [
+          document('reel-1', 'REEL', 0),
+          ...chunks.map((chunk, ordinal) =>
+            document(`chunk-${ordinal}`, 'CHUNK', ordinal, chunk.evidenceText),
+          ),
+        ],
+        transcriptSegments: source,
+      }),
+    ).not.toThrow();
   });
 });
