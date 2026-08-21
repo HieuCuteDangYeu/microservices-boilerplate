@@ -1,15 +1,16 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type {
   GenerateEmbeddingBatchRequest,
   GenerateEmbeddingBatchResult,
 } from '@common/ai/interfaces/generate-embedding.interface';
 import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { IEmbeddingService } from '../../domain/interfaces/embedding.service.interface';
 
 @Injectable()
 export class GenerateEmbeddingBatchUseCase {
   constructor(
-    private readonly configService: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly configService: IAiApplicationConfig,
     @Inject('IEmbeddingService')
     private readonly embeddingService: IEmbeddingService,
   ) {}
