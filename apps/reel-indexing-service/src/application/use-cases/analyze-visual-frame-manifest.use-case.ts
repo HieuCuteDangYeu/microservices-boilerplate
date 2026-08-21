@@ -2,15 +2,16 @@ import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.
 import type { VisualSceneEvidence } from '@common/processing/interfaces/visual-scene-evidence.interface';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import type { IArtifactStorage } from '@indexing/domain/interfaces/artifact-storage.interface';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AnalyzeVisualFrameManifestUseCase {
   private readonly logger = new Logger(AnalyzeVisualFrameManifestUseCase.name);
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
     @Inject('IArtifactStorage') private readonly storage: IArtifactStorage,
     @Inject('IIndexingAiService') private readonly ai: IIndexingAiService,
   ) {}
@@ -105,7 +106,7 @@ export class AnalyzeVisualFrameManifestUseCase {
   }
 
   private boolean(key: string, fallback: boolean): boolean {
-    const value = this.configService.get<string>(key)?.trim().toLowerCase();
+    const value = this.config.get<string>(key)?.trim().toLowerCase();
     if (value === undefined) return fallback;
     if (value === 'true') return true;
     if (value === 'false') return false;
@@ -137,7 +138,7 @@ export class AnalyzeVisualFrameManifestUseCase {
     min: number,
     max: number,
   ): number {
-    const parsed = Number(this.configService.get<string>(key) ?? fallback);
+    const parsed = Number(this.config.get<string>(key) ?? fallback);
     return Number.isFinite(parsed)
       ? Math.min(max, Math.max(min, Math.round(parsed)))
       : fallback;
