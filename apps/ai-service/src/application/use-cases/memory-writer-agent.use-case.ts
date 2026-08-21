@@ -1,16 +1,17 @@
 import { ExtractUserMemoriesFromTurnUseCase } from '@ai/application/use-cases/extract-user-memories-from-turn.use-case';
 import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/update-conversation-memory.use-case';
 import { UpsertUserMemoriesUseCase } from '@ai/application/use-cases/upsert-user-memories.use-case';
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 @Injectable()
 export class MemoryWriterAgentUseCase {
   private readonly logger = new Logger(MemoryWriterAgentUseCase.name);
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly configService: IAiApplicationConfig,
     private readonly updateConversationMemoryUseCase: UpdateConversationMemoryUseCase,
     private readonly extractUserMemoriesFromTurnUseCase: ExtractUserMemoriesFromTurnUseCase,
     private readonly upsertUserMemoriesUseCase: UpsertUserMemoriesUseCase,
