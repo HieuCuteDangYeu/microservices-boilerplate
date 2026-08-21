@@ -72,7 +72,7 @@ describe('BuildRagCitationsUseCase', () => {
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
-    const assessment = await useCase.assess(buildState());
+    const assessment = await useCase.execute(buildState());
     expect(assessment.citations).toEqual([
       {
         sourceType: 'REEL',
@@ -113,7 +113,7 @@ describe('BuildRagCitationsUseCase', () => {
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
-    const assessment = await useCase.assess(buildState());
+    const assessment = await useCase.execute(buildState());
     expect(assessment.citations).toEqual([]);
     expect(assessment.coverage.unsupportedClaims).toEqual([
       'The error is caused by a missing production dependency.',
@@ -126,7 +126,7 @@ describe('BuildRagCitationsUseCase', () => {
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
-    const assessment = await useCase.assess(buildState());
+    const assessment = await useCase.execute(buildState());
     expect(assessment.citations).toEqual([
       expect.objectContaining({
         reelId: 'r1',
@@ -147,7 +147,16 @@ describe('BuildRagCitationsUseCase', () => {
       contextSufficiency: { sufficient: false },
     } as RagChatWorkflowState;
 
-    await expect(useCase.execute(state)).resolves.toEqual([]);
+    await expect(useCase.execute(state)).resolves.toEqual({
+      citations: [],
+      coverage: {
+        mode: 'NOT_REQUIRED',
+        coverage: 1,
+        factualClaimCount: 0,
+        supportedClaimCount: 0,
+        unsupportedClaims: [],
+      },
+    });
     expect(attributionService.attribute).not.toHaveBeenCalled();
   });
 });
