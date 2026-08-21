@@ -1,4 +1,3 @@
-import { DeterministicRetrievalEngine } from '@ai/application/services/deterministic-retrieval-engine.service';
 import { AnalyzeVisualFrameUseCase } from '@ai/application/use-cases/analyze-visual-frame.use-case';
 import { BackfillUserMemoryEmbeddingsUseCase } from '@ai/application/use-cases/backfill-user-memory-embeddings.use-case';
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
@@ -41,6 +40,7 @@ import { CloudflareVisionAdapter } from '@ai/infrastructure/adapters/cloudflare-
 import { CloudflareWorkersAiTextClient } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { ConversationTokenPublisherAdapter } from '@ai/infrastructure/adapters/conversation-token-publisher.adapter';
+import { DeterministicRetrievalEngineAdapter } from '@ai/infrastructure/adapters/deterministic-retrieval-engine.adapter';
 import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
 import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/langgraph-rag-chat-workflow.adapter';
@@ -193,33 +193,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IRetrievalEngine',
-      useFactory: (
-        structuredLlmService,
-        embeddingService,
-        contentService,
-        semanticIndexService,
-        rerankerService,
-        hierarchyObservationRepository,
-        config: ConfigService,
-      ) =>
-        new DeterministicRetrievalEngine(
-          structuredLlmService,
-          embeddingService,
-          contentService,
-          semanticIndexService,
-          rerankerService,
-          hierarchyObservationRepository,
-          config,
-        ),
-      inject: [
-        'IStructuredLlmService',
-        'IEmbeddingService',
-        'IContentService',
-        'IReelSemanticIndexService',
-        'IRerankerService',
-        'IRagHierarchyShadowObservationRepository',
-        ConfigService,
-      ],
+      useClass: DeterministicRetrievalEngineAdapter,
     },
     ToolCallingRetrievalAgentUseCase,
     {
