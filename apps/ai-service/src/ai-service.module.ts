@@ -14,14 +14,15 @@ import { GetRelevantUserMemoriesUseCase } from '@ai/application/use-cases/get-re
 import { HandleConversationTurnCompletedUseCase } from '@ai/application/use-cases/handle-conversation-turn-completed.use-case';
 import { MemoryAgentUseCase } from '@ai/application/use-cases/memory-agent.use-case';
 import { MemoryWriterAgentUseCase } from '@ai/application/use-cases/memory-writer-agent.use-case';
+import { PlanRetrievalUseCase } from '@ai/application/use-cases/plan-retrieval.use-case';
 import { QueryRouterAgentUseCase } from '@ai/application/use-cases/query-router-agent.use-case';
-import { RetrievalAgentUseCase } from '@ai/application/use-cases/retrieval-agent.use-case';
+import { RerankRetrievedEvidenceUseCase } from '@ai/application/use-cases/rerank-retrieved-evidence.use-case';
+import { RetrieveReelEvidenceUseCase } from '@ai/application/use-cases/retrieve-reel-evidence.use-case';
 import { ReviewIndexQualityUseCase } from '@ai/application/use-cases/review-index-quality.use-case';
 import { RewriteRetrievalQueryUseCase } from '@ai/application/use-cases/rewrite-retrieval-query.use-case';
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamChatUseCase } from '@ai/application/use-cases/stream-chat.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
-import { ToolCallingRetrievalAgentUseCase } from '@ai/application/use-cases/tool-calling-retrieval-agent.use-case';
 import { TranscribeAudioBufferUseCase } from '@ai/application/use-cases/transcribe-audio-buffer.use-case';
 import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-audio.use-case';
 import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/update-conversation-memory.use-case';
@@ -45,6 +46,7 @@ import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embed
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
 import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/langgraph-rag-chat-workflow.adapter';
 import { ReelSemanticIndexAdapter } from '@ai/infrastructure/adapters/reel-semantic-index.adapter';
+import { RetrievalAgentPolicyAdapter } from '@ai/infrastructure/adapters/retrieval-agent-policy.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { IndexQualityAgentController } from '@ai/infrastructure/controllers/index-quality-agent.controller';
@@ -145,61 +147,9 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     BackfillUserMemoryEmbeddingsUseCase,
 
     QueryRouterAgentUseCase,
-    {
-      provide: 'IRetrievalAgentPolicy',
-      useFactory: (config: ConfigService) => {
-        const configured = config
-          .get<string>('RAG_TOOL_CALLING_ENABLED')
-          ?.trim()
-          .toLowerCase();
-        const enabled =
-          configured === 'true'
-            ? true
-            : configured === 'false'
-              ? false
-              : config.get<string>('NODE_ENV')?.trim().toLowerCase() !==
-                'production';
-        const boundedInt = (
-          key: string,
-          fallback: number,
-          minimum: number,
-          maximum: number,
-        ) => {
-          const value = Number(config.get<string>(key) ?? fallback);
-          return Number.isFinite(value)
-            ? Math.min(maximum, Math.max(minimum, Math.round(value)))
-            : fallback;
-        };
-
-        return {
-          enabled,
-          model: config.get<string>('CLOUDFLARE_TOOL_MODEL'),
-          maxSteps: boundedInt('RAG_TOOL_MAX_STEPS', 3, 1, 5),
-          maxParallelCalls: boundedInt(
-            'RAG_TOOL_MAX_PARALLEL_CALLS',
-            2,
-            1,
-            4,
-          ),
-          callTimeoutMs: boundedInt(
-            'RAG_TOOL_CALL_TIMEOUT_MS',
-            8_000,
-            1_000,
-            30_000,
-          ),
-        };
-      },
-      inject: [ConfigService],
-    },
-    {
-      provide: 'IRetrievalEngine',
-      useClass: DeterministicRetrievalEngineAdapter,
-    },
-    ToolCallingRetrievalAgentUseCase,
-    {
-      provide: RetrievalAgentUseCase,
-      useExisting: ToolCallingRetrievalAgentUseCase,
-    },
+    PlanRetrievalUseCase,
+    RetrieveReelEvidenceUseCase,
+    RerankRetrievedEvidenceUseCase,
     RewriteRetrievalQueryUseCase,
     MemoryAgentUseCase,
     GenerateDraftAnswerUseCase,
@@ -213,6 +163,14 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ExtractReelMetadataUseCase,
     ReviewIndexQualityUseCase,
 
+    {
+      provide: 'IRetrievalAgentPolicy',
+      useClass: RetrievalAgentPolicyAdapter,
+    },
+    {
+      provide: 'IRetrievalEngine',
+      useClass: DeterministicRetrievalEngineAdapter,
+    },
     {
       provide: 'IEmbeddingService',
       useClass: GeminiEmbeddingAdapter,
