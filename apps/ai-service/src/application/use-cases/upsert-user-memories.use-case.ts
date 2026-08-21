@@ -1,5 +1,6 @@
-import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type { UserMemory } from '@ai/domain/entities/user-memory.entity';
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
+import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type {
   IUserMemoryRepository,
   UserMemoryUpsertInput,
@@ -7,7 +8,6 @@ import type {
 import type { ExtractedUserMemoryCandidate } from '@common/ai/interfaces/extract-user-memory.interface';
 import type { UserMemoryType } from '@common/ai/interfaces/user-memory.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class UpsertUserMemoriesUseCase {
@@ -26,7 +26,8 @@ export class UpsertUserMemoriesUseCase {
   ]);
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly configService: IAiApplicationConfig,
 
     @Inject('IUserMemoryRepository')
     private readonly userMemoryRepository: IUserMemoryRepository,
