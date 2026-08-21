@@ -7,14 +7,14 @@ import { AnalyzeVisualFrameManifestUseCase } from './analyze-visual-frame-manife
 describe('AnalyzeVisualFrameManifestUseCase', () => {
   it('requests checksum-verified bytes and passes raw bytes to the AI domain port', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
-    const config = {
-      get: jest.fn((key: string) => {
-        if (key === 'INDEX_VISUAL_ANALYSIS_ENABLED') return 'true';
-        if (key === 'INDEX_VISUAL_ANALYSIS_REQUIRED') return 'false';
-        if (key === 'INDEX_VISUAL_ANALYSIS_CONCURRENCY') return '2';
-        return undefined;
-      }),
-    } as IIndexingApplicationConfig;
+    const configValues: Record<string, string> = {
+      INDEX_VISUAL_ANALYSIS_ENABLED: 'true',
+      INDEX_VISUAL_ANALYSIS_REQUIRED: 'false',
+      INDEX_VISUAL_ANALYSIS_CONCURRENCY: '2',
+    };
+    const config: IIndexingApplicationConfig = {
+      get: <T = string>(key: string) => configValues[key] as T | undefined,
+    };
     const storage = {
       artifactExists: jest.fn().mockResolvedValue(true),
       getVisualFrameManifest: jest.fn().mockResolvedValue({
