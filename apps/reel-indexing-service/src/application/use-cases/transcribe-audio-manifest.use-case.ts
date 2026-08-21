@@ -4,14 +4,15 @@ import type { AudioSegmentCheckpoint } from '@indexing/domain/entities/index-che
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import type { IArtifactStorage } from '@indexing/domain/interfaces/artifact-storage.interface';
 import type { IIndexCheckpointRepository } from '@indexing/domain/interfaces/index-checkpoint.repository.interface';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
 import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 
 @Injectable()
 export class TranscribeAudioManifestUseCase {
   constructor(
-    private readonly configService: ConfigService,
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
     @Inject('IArtifactStorage') private readonly storage: IArtifactStorage,
     @Inject('IIndexingAiService') private readonly ai: IIndexingAiService,
     @Inject('IIndexCheckpointRepository')
@@ -66,14 +67,13 @@ export class TranscribeAudioManifestUseCase {
         JSON.stringify({
           artifactChecksums: artifacts.map((artifact) => artifact.checksum),
           provider:
-            this.configService.get<string>('INDEX_TRANSCRIPTION_PROVIDER') ||
+            this.config.get<string>('INDEX_TRANSCRIPTION_PROVIDER') ||
             'cloudflare-workers-ai',
           model:
-            this.configService.get<string>('INDEX_TRANSCRIPTION_MODEL') ||
+            this.config.get<string>('INDEX_TRANSCRIPTION_MODEL') ||
             '@cf/openai/whisper-large-v3-turbo',
           version:
-            this.configService.get<string>('INDEX_TRANSCRIPTION_VERSION') ||
-            '1',
+            this.config.get<string>('INDEX_TRANSCRIPTION_VERSION') || '1',
         }),
       )
       .digest('hex');
@@ -176,7 +176,7 @@ export class TranscribeAudioManifestUseCase {
     min: number,
     max: number,
   ): number {
-    const parsed = Number(this.configService.get<string>(key) ?? fallback);
+    const parsed = Number(this.config.get<string>(key) ?? fallback);
     return Number.isFinite(parsed)
       ? Math.min(max, Math.max(min, Math.round(parsed)))
       : fallback;
