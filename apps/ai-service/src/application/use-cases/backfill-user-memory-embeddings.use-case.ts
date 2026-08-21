@@ -1,8 +1,8 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type { IUserMemoryRepository } from '@ai/domain/interfaces/user-memory.repository.interface';
 import type { UserMemoryType } from '@common/ai/interfaces/user-memory.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 export interface BackfillUserMemoryEmbeddingsResult {
   scanned: number;
@@ -17,7 +17,8 @@ export class BackfillUserMemoryEmbeddingsUseCase {
   );
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly configService: IAiApplicationConfig,
 
     @Inject('IUserMemoryRepository')
     private readonly userMemoryRepository: IUserMemoryRepository,
