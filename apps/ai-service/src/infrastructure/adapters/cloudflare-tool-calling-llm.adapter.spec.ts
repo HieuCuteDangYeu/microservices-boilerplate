@@ -67,9 +67,11 @@ describe('CloudflareToolCallingLlmAdapter', () => {
       ],
     });
 
-    const request = JSON.parse(
-      String(fetchSpy.mock.calls[0]?.[1]?.body),
-    ) as Record<string, unknown>;
+    const body = fetchSpy.mock.calls[0]?.[1]?.body;
+    if (typeof body !== 'string') {
+      throw new Error('Expected Cloudflare request body to be a JSON string.');
+    }
+    const request = JSON.parse(body) as Record<string, unknown>;
     expect(request['tool_choice']).toBe('required');
     expect(request['parallel_tool_calls']).toBe(true);
   });
@@ -111,7 +113,11 @@ describe('CloudflareToolCallingLlmAdapter', () => {
       tools: [],
     });
 
-    const request = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
+    const body = fetchSpy.mock.calls[0]?.[1]?.body;
+    if (typeof body !== 'string') {
+      throw new Error('Expected Cloudflare request body to be a JSON string.');
+    }
+    const request = JSON.parse(body) as {
       messages: Array<Record<string, unknown>>;
     };
     expect(request.messages[1]?.['tool_calls']).toEqual([
