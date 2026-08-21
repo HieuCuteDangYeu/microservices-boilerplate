@@ -32,8 +32,7 @@ export class CompleteReelMediaProcessingUseCase {
       return false;
     }
 
-    const completed =
-      await this.contentRepository.completeMediaProcessing(input);
+    const completed = await this.contentRepository.completeMediaProcessing(input);
 
     if (completed) {
       this.outboxDispatchTrigger.trigger();

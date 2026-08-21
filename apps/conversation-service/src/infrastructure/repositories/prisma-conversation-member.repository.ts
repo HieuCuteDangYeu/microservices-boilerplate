@@ -8,7 +8,9 @@ import { PrismaService } from '../prisma/prisma.service';
 class GroupRoleMutationConflict extends Error {}
 
 @Injectable()
-export class PrismaConversationMemberRepository implements IConversationMemberRepository {
+export class PrismaConversationMemberRepository
+  implements IConversationMemberRepository
+{
   constructor(private readonly prisma: PrismaService) {}
 
   async listByConversation(

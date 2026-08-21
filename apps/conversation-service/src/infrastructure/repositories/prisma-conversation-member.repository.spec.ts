@@ -65,9 +65,7 @@ describe('PrismaConversationMemberRepository', () => {
       },
     };
     const prisma = {
-      $transaction: jest
-        .fn()
-        .mockImplementation(async (callback: any) => callback(tx)),
+      $transaction: jest.fn().mockImplementation(async (callback: any) => callback(tx)),
     };
     const repository = new PrismaConversationMemberRepository(prisma as never);
 
@@ -132,9 +130,7 @@ describe('PrismaConversationMemberRepository', () => {
       },
     };
     const prisma = {
-      $transaction: jest
-        .fn()
-        .mockImplementation(async (callback: any) => callback(tx)),
+      $transaction: jest.fn().mockImplementation(async (callback: any) => callback(tx)),
     };
     const repository = new PrismaConversationMemberRepository(prisma as never);
 
@@ -164,9 +160,7 @@ describe('PrismaConversationMemberRepository', () => {
       },
     };
     const prisma = {
-      $transaction: jest
-        .fn()
-        .mockImplementation(async (callback: any) => callback(tx)),
+      $transaction: jest.fn().mockImplementation(async (callback: any) => callback(tx)),
     };
     const repository = new PrismaConversationMemberRepository(prisma as never);
 
@@ -196,9 +190,7 @@ describe('PrismaConversationMemberRepository', () => {
       },
     };
     const prisma = {
-      $transaction: jest
-        .fn()
-        .mockImplementation(async (callback: any) => callback(tx)),
+      $transaction: jest.fn().mockImplementation(async (callback: any) => callback(tx)),
     };
     const repository = new PrismaConversationMemberRepository(prisma as never);
 
@@ -217,9 +209,7 @@ describe('PrismaConversationMemberRepository', () => {
 
   it('propagates unexpected transaction failures', async () => {
     const prisma = {
-      $transaction: jest
-        .fn()
-        .mockRejectedValue(new Error('transaction unavailable')),
+      $transaction: jest.fn().mockRejectedValue(new Error('transaction unavailable')),
     };
     const repository = new PrismaConversationMemberRepository(prisma as never);
 

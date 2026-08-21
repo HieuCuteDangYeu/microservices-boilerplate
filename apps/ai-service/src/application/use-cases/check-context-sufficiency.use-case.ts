@@ -99,6 +99,18 @@ export class CheckContextSufficiencyUseCase {
       };
     }
 
+    if (this.hasExplicitQuantitySupport(state)) {
+      return {
+        sufficient: true,
+        confidence: 1,
+        availableEvidence,
+        missingEvidence: [],
+        reason:
+          'Retrieved transcript explicitly supplies the quantity requested by the user.',
+        recommendedAction: 'ANSWER',
+      };
+    }
+
     try {
       const raw =
         await this.structuredLlmService.generateObject<RawContextSufficiencyResult>(
@@ -351,6 +363,40 @@ ${JSON.stringify(
       .map((chunk) => (chunk.evidenceText ?? chunk.chunkText).toLowerCase())
       .join(' ');
     return terms.filter((term) => !evidence.includes(term));
+  }
+
+  private hasExplicitQuantitySupport(state: RagChatWorkflowState): boolean {
+    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') return false;
+    if (!state.route.requiredEvidence.includes('TRANSCRIPT')) return false;
+    if (!/\b(how many|what number)\b/i.test(state.userMessage)) return false;
+
+    const terms = state.userMessage
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length >= 3)
+      .filter(
+        (term) =>
+          ![
+            'how',
+            'many',
+            'what',
+            'number',
+            'does',
+            'speaker',
+            'they',
+            'say',
+            'using',
+          ].includes(term),
+      );
+    const evidence = state.rerankedChunks
+      .filter((chunk) => (chunk.evidenceType ?? 'TRANSCRIPT') === 'TRANSCRIPT')
+      .map((chunk) => (chunk.evidenceText ?? chunk.chunkText).toLowerCase())
+      .join(' ');
+
+    return (
+      /\b\d+(?:\.\d+)?\b/.test(evidence) &&
+      terms.some((term) => evidence.includes(term))
+    );
   }
 
   private hasEvidenceText(chunk: ReelContextSearchResult): boolean {

@@ -157,9 +157,7 @@ describe('GetGroupMembersUseCase', () => {
 
   it('reads membership and joined-at directly from ConversationMember when the canonical-read flag is enabled', async () => {
     configService.get.mockReturnValue('true');
-    memberRepository.listByConversation.mockResolvedValue(
-      canonicalProjection(),
-    );
+    memberRepository.listByConversation.mockResolvedValue(canonicalProjection());
 
     const result = await useCase.execute('group-id', MEMBER_ID);
 
@@ -241,17 +239,15 @@ describe('GetGroupMembersUseCase', () => {
   });
 
   it('blocks a non-member from reading group membership roles in legacy mode', async () => {
-    await expect(
-      useCase.execute('group-id', OUTSIDER_ID),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(useCase.execute('group-id', OUTSIDER_ID)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
     expect(memberRepository.listByConversation).not.toHaveBeenCalled();
   });
 
   it('blocks a requester that is not active in the canonical projection', async () => {
     configService.get.mockReturnValue('true');
-    memberRepository.listByConversation.mockResolvedValue(
-      canonicalProjection(),
-    );
+    memberRepository.listByConversation.mockResolvedValue(canonicalProjection());
 
     await expect(
       useCase.execute('group-id', OUTSIDER_ID),

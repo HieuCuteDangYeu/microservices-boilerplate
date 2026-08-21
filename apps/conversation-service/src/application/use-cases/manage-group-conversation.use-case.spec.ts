@@ -136,9 +136,9 @@ describe('ManageGroupConversationUseCase', () => {
 
     useCase = new ManageGroupConversationUseCase(
       chatRepository as unknown as IChatRepository,
-      mutationRepository,
-      memberRepository,
-      v2Repository,
+      mutationRepository as unknown as IConversationMutationRepository,
+      memberRepository as unknown as IConversationMemberRepository,
+      v2Repository as unknown as IGroupManagementV2Repository,
       userService as unknown as IUserService,
       configService as never,
       consistencyService as never,

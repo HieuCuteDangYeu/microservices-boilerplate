@@ -58,10 +58,7 @@ export class RegisterPushTokenUseCase {
       }
 
       if (input.deviceId) {
-        await this.pushTokenRepository.deactivateOtherDeviceTokens(
-          userId,
-          input,
-        );
+        await this.pushTokenRepository.deactivateOtherDeviceTokens(userId, input);
       }
 
       return pushToken;

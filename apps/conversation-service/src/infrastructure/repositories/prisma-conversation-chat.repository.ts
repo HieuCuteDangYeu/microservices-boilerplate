@@ -75,9 +75,7 @@ export class PrismaConversationChatRepository
   extends PrismaChatRepository
   implements IConversationMutationRepository
 {
-  private readonly projectionLogger = new Logger(
-    PrismaConversationChatRepository.name,
-  );
+  private readonly projectionLogger = new Logger(PrismaConversationChatRepository.name);
 
   constructor(
     private readonly conversationPrisma: PrismaService,
@@ -386,7 +384,7 @@ export class PrismaConversationChatRepository
       },
       data: {
         participantIds: { set: participantIds },
-        memberJoinedAt: memberJoinedAt,
+        memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
       },
     });
 
@@ -407,17 +405,16 @@ export class PrismaConversationChatRepository
         return;
       }
 
-      const conversation =
-        await this.conversationPrisma.conversation.findUnique({
-          where: { id: conversationId },
-          select: {
-            creatorId: true,
-            participantIds: true,
-            memberJoinedAt: true,
-            createdAt: true,
-            isGroup: true,
-          },
-        });
+      const conversation = await this.conversationPrisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: {
+          creatorId: true,
+          participantIds: true,
+          memberJoinedAt: true,
+          createdAt: true,
+          isGroup: true,
+        },
+      });
 
       if (!conversation?.isGroup) {
         return;
@@ -450,7 +447,7 @@ export class PrismaConversationChatRepository
             ? change.actorUserId
             : change.kind === 'added' && userId === change.userId
               ? change.actorUserId
-              : (existing?.invitedBy ?? null);
+              : existing?.invitedBy ?? null;
 
         await memberRepository.upsert({
           where: {
@@ -479,10 +476,7 @@ export class PrismaConversationChatRepository
       }
 
       for (const existing of existingMembers) {
-        if (
-          participantSet.has(existing.userId) ||
-          existing.status !== 'ACTIVE'
-        ) {
+        if (participantSet.has(existing.userId) || existing.status !== 'ACTIVE') {
           continue;
         }
 

@@ -19,7 +19,9 @@ const sleep = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 @Injectable()
-export class RedisPushTokenLifecycleRepository implements IPushTokenLifecycleRepository {
+export class RedisPushTokenLifecycleRepository
+  implements IPushTokenLifecycleRepository
+{
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
 
   async acquireLock(input: PushTokenLifecycleInput): Promise<string | null> {

@@ -14,9 +14,7 @@ export type ConversationMemberRecord = {
 };
 
 export interface IConversationMemberRepository {
-  listByConversation(
-    conversationId: string,
-  ): Promise<ConversationMemberRecord[]>;
+  listByConversation(conversationId: string): Promise<ConversationMemberRecord[]>;
   changeRoleAsLegacyOwner(
     conversationId: string,
     actorUserId: string,

@@ -67,6 +67,7 @@ export class OutboxDispatcherService
     }
 
     if (this.dispatchScheduled) {
+      this.dispatchRequested = true;
       return;
     }
 
@@ -86,6 +87,9 @@ export class OutboxDispatcherService
 
     this.dispatching = true;
     const batchSize = this.getPositiveInteger('OUTBOX_DISPATCH_BATCH_SIZE', 25);
+    const startedAt = Date.now();
+
+    this.logger.debug(`Outbox dispatch started reason=${reason}`);
 
     try {
       const result = await this.dispatchOutboxEventsUseCase.execute({
@@ -112,6 +116,9 @@ export class OutboxDispatcherService
       this.scheduleRetry(60_000);
     } finally {
       this.dispatching = false;
+      this.logger.debug(
+        `Outbox dispatch ended reason=${reason} durationMs=${Date.now() - startedAt}`,
+      );
 
       if (this.dispatchRequested) {
         this.dispatchRequested = false;

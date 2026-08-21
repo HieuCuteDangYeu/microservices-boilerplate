@@ -28,9 +28,7 @@ export class ProduceUseCase {
     }
 
     if (session.status !== 'active') {
-      throw new ForbiddenException(
-        'Media can only be produced for an active call',
-      );
+      throw new ForbiddenException('Media can only be produced for an active call');
     }
 
     if (kind === 'video' && session.callType !== 'VIDEO') {

@@ -34,7 +34,9 @@ interface CloudflareToolCompletionResponse {
 }
 
 @Injectable()
-export class CloudflareToolCallingLlmAdapter implements IToolCallingLlmService {
+export class CloudflareToolCallingLlmAdapter
+  implements IToolCallingLlmService
+{
   private readonly logger = new Logger(CloudflareToolCallingLlmAdapter.name);
 
   constructor(private readonly config: ConfigService) {}
@@ -124,13 +126,13 @@ export class CloudflareToolCallingLlmAdapter implements IToolCallingLlmService {
     };
   }
 
-  private toProviderMessage(
-    message: ToolCallingMessage,
-  ): Record<string, unknown> {
+  private toProviderMessage(message: ToolCallingMessage): Record<string, unknown> {
     if (message.role === 'assistant') {
       return {
         role: 'assistant',
-        content: message.content ?? null,
+        // Workers AI currently validates assistant tool-call content as a
+        // string on the chat-completions endpoint, even when it is empty.
+        content: message.content ?? '',
         ...(message.toolCalls?.length
           ? {
               tool_calls: message.toolCalls.map((call) => ({

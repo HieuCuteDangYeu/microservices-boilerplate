@@ -12,9 +12,8 @@ export const normalizeConversationParticipantIds = (
   creatorId: string,
 ): string[] => {
   const normalized = participantIds
-    .filter(
-      (participantId): participantId is string =>
-        typeof participantId === 'string',
+    .filter((participantId): participantId is string =>
+      typeof participantId === 'string',
     )
     .map((participantId) => participantId.trim())
     .filter(Boolean);

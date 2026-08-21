@@ -43,7 +43,9 @@ const normalizeMemberJoinedAt = (
 };
 
 @Injectable()
-export class PrismaGroupManagementV2Repository implements IGroupManagementV2Repository {
+export class PrismaGroupManagementV2Repository
+  implements IGroupManagementV2Repository
+{
   constructor(private readonly prisma: PrismaService) {}
 
   async updateMetadataWithRoleGuard(
@@ -133,7 +135,7 @@ export class PrismaGroupManagementV2Repository implements IGroupManagementV2Repo
         },
         data: {
           participantIds: { set: participantIds },
-          memberJoinedAt: memberJoinedAt,
+          memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
         },
       });
 
@@ -236,7 +238,7 @@ export class PrismaGroupManagementV2Repository implements IGroupManagementV2Repo
         },
         data: {
           participantIds: { set: participantIds },
-          memberJoinedAt: memberJoinedAt,
+          memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
         },
       });
 
@@ -304,7 +306,7 @@ export class PrismaGroupManagementV2Repository implements IGroupManagementV2Repo
         },
         data: {
           participantIds: { set: participantIds },
-          memberJoinedAt: memberJoinedAt,
+          memberJoinedAt: memberJoinedAt as Prisma.InputJsonValue,
         },
       });
 
@@ -418,7 +420,11 @@ export class PrismaGroupManagementV2Repository implements IGroupManagementV2Repo
       },
     });
 
-    if (!member || member.status !== 'ACTIVE' || member.role !== expectedRole) {
+    if (
+      !member ||
+      member.status !== 'ACTIVE' ||
+      member.role !== expectedRole
+    ) {
       throw ROLLBACK;
     }
 

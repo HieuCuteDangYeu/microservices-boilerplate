@@ -26,9 +26,10 @@ describe('OutboxDispatcherService', () => {
 
     execute.mockResolvedValue({ claimed: 0, published: 0, failed: 0 });
 
-    const service = new OutboxDispatcherService(configService, {
-      execute,
-    } as unknown as DispatchOutboxEventsUseCase);
+    const service = new OutboxDispatcherService(
+      configService,
+      { execute } as unknown as DispatchOutboxEventsUseCase,
+    );
 
     return { service, execute };
   };
@@ -41,21 +42,24 @@ describe('OutboxDispatcherService', () => {
     jest.useRealTimers();
   });
 
-  it('does not poll Postgres every second and uses the 60 minute safety sweep', async () => {
-    const { service, execute } = createService();
+  it(
+    'does not poll Postgres every second and uses the 60 minute safety sweep',
+    async () => {
+      const { service, execute } = createService();
 
-    service.onApplicationBootstrap();
-    await jest.advanceTimersByTimeAsync(0);
-    expect(execute).toHaveBeenCalledTimes(1);
+      service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(execute).toHaveBeenCalledTimes(1);
 
-    await jest.advanceTimersByTimeAsync(59 * 60_000);
-    expect(execute).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(59 * 60_000);
+      expect(execute).toHaveBeenCalledTimes(1);
 
-    await jest.advanceTimersByTimeAsync(60_000);
-    expect(execute).toHaveBeenCalledTimes(2);
+      await jest.advanceTimersByTimeAsync(60_000);
+      expect(execute).toHaveBeenCalledTimes(2);
 
-    service.onApplicationShutdown();
-  });
+      service.onApplicationShutdown();
+    },
+  );
 
   it('rejects safety sweep values below ten minutes', async () => {
     const { service, execute } = createService({
@@ -72,58 +76,87 @@ describe('OutboxDispatcherService', () => {
     service.onApplicationShutdown();
   });
 
-  it('coalesces multiple outbox-created wake signals into one dispatch', async () => {
-    const { service, execute } = createService();
+  it(
+    'coalesces multiple outbox-created wake signals into an initial and follow-up dispatch',
+    async () => {
+      const { service, execute } = createService();
 
-    service.trigger();
-    service.trigger();
-    service.trigger();
+      service.trigger();
+      service.trigger();
+      service.trigger();
 
-    await jest.advanceTimersByTimeAsync(0);
-    expect(execute).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(execute).toHaveBeenCalledTimes(2);
 
-    service.onApplicationShutdown();
-  });
+      service.onApplicationShutdown();
+    },
+  );
 
-  it('schedules a retry using the publish backoff returned by the use case', async () => {
-    const { service, execute } = createService({
-      results: [
-        {
-          claimed: 1,
-          published: 0,
-          failed: 1,
-          nextRetryDelayMs: 4000,
-        },
-        { claimed: 0, published: 0, failed: 0 },
-      ],
-    });
+  it(
+    'runs a follow-up drain when a trigger arrives while a drain is scheduled',
+    async () => {
+      const { service, execute } = createService({
+        results: [
+          { claimed: 0, published: 0, failed: 0 },
+          { claimed: 1, published: 1, failed: 0 },
+        ],
+      });
 
-    service.trigger();
-    await jest.advanceTimersByTimeAsync(0);
-    expect(execute).toHaveBeenCalledTimes(1);
+      service.trigger();
+      service.trigger();
 
-    await jest.advanceTimersByTimeAsync(3999);
-    expect(execute).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(0);
 
-    await jest.advanceTimersByTimeAsync(1);
-    expect(execute).toHaveBeenCalledTimes(2);
+      expect(execute).toHaveBeenCalledTimes(2);
+      service.onApplicationShutdown();
+    },
+  );
 
-    service.onApplicationShutdown();
-  });
+  it(
+    'schedules a retry using the publish backoff returned by the use case',
+    async () => {
+      const { service, execute } = createService({
+        results: [
+          {
+            claimed: 1,
+            published: 0,
+            failed: 1,
+            nextRetryDelayMs: 4000,
+          },
+          { claimed: 0, published: 0, failed: 0 },
+        ],
+      });
 
-  it('immediately continues draining when a full batch was claimed', async () => {
-    const { service, execute } = createService({
-      config: { OUTBOX_DISPATCH_BATCH_SIZE: '2' },
-      results: [
-        { claimed: 2, published: 2, failed: 0 },
-        { claimed: 0, published: 0, failed: 0 },
-      ],
-    });
+      service.trigger();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(execute).toHaveBeenCalledTimes(1);
 
-    service.trigger();
-    await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(3999);
+      expect(execute).toHaveBeenCalledTimes(1);
 
-    expect(execute).toHaveBeenCalledTimes(2);
-    service.onApplicationShutdown();
-  });
+      await jest.advanceTimersByTimeAsync(1);
+      expect(execute).toHaveBeenCalledTimes(2);
+
+      service.onApplicationShutdown();
+    },
+  );
+
+  it(
+    'immediately continues draining when a full batch was claimed',
+    async () => {
+      const { service, execute } = createService({
+        config: { OUTBOX_DISPATCH_BATCH_SIZE: '2' },
+        results: [
+          { claimed: 2, published: 2, failed: 0 },
+          { claimed: 0, published: 0, failed: 0 },
+        ],
+      });
+
+      service.trigger();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(execute).toHaveBeenCalledTimes(2);
+      service.onApplicationShutdown();
+    },
+  );
 });
