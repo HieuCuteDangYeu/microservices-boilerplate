@@ -1,3 +1,4 @@
+import { DeterministicRetrievalEngine } from '@ai/application/services/deterministic-retrieval-engine.service';
 import { AnalyzeVisualFrameUseCase } from '@ai/application/use-cases/analyze-visual-frame.use-case';
 import { BackfillUserMemoryEmbeddingsUseCase } from '@ai/application/use-cases/backfill-user-memory-embeddings.use-case';
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
@@ -201,7 +202,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
         hierarchyObservationRepository,
         config: ConfigService,
       ) =>
-        new RetrievalAgentUseCase(
+        new DeterministicRetrievalEngine(
           structuredLlmService,
           embeddingService,
           contentService,
