@@ -1,19 +1,19 @@
 # Bounded agentic retrieval and indexing
 
-This implementation keeps LangGraph and deterministic infrastructure in control while allowing model reasoning only at bounded semantic boundaries. It follows the repository conventions in `QWEN.md`: application behavior lives under `application/use-cases`, provider and RabbitMQ details stay under `infrastructure`, new cross-boundary dependencies are exposed as domain interfaces and string DI tokens, and inter-service communication remains RabbitMQ-only.
+This implementation keeps LangGraph and deterministic infrastructure in control while allowing model reasoning only at bounded semantic boundaries. It follows the repository conventions in `QWEN.md`: application behavior lives under `application`, provider and RabbitMQ details stay under `infrastructure`, new cross-boundary dependencies are exposed as domain interfaces and DI tokens, and inter-service communication remains RabbitMQ-only.
 
 ## Retrieval architecture
 
-`LangGraphRagChatWorkflowAdapter` keeps its existing graph topology. For backward compatibility with that pre-existing graph constructor, the Nest module supplies `ToolCallingRetrievalAgentUseCase` under the existing `RetrievalAgentUseCase` class token. The new use case itself does not inherit from or call the concrete deterministic retrieval use case directly.
+`LangGraphRagChatWorkflowAdapter` keeps its existing graph topology. `RetrievalAgentUseCase` is now only the workflow-facing runtime contract/token. The Nest module supplies `ToolCallingRetrievalAgentUseCase` under that token, so the graph depends on an agent contract rather than accidentally treating the deterministic retrieval implementation as the agent itself.
 
-Instead it depends on four bounded ports/policies:
+The tool-calling agent depends on four bounded ports/policies:
 
 - `IRetrievalEngine`: planning, deterministic retrieval, and reranking.
 - `IContentService`: already-existing conversation reel access resolution.
 - `IToolCallingLlmService`: provider-neutral tool-calling model interface.
 - `IRetrievalAgentPolicy`: resolved rollout/model/limit policy with no env parsing inside the use case.
 
-The module binds `IRetrievalEngine` to the existing `RetrievalAgentUseCase`, preserving the proven retrieval implementation without creating an application-to-application dependency inside the new agent.
+`IRetrievalEngine` now has an explicit application implementation: `DeterministicRetrievalEngine` in `application/services/deterministic-retrieval-engine.service.ts`. This separates deterministic execution from the workflow-facing tool agent without inventing an infrastructure adapter for application orchestration.
 
 The model can call only two high-level tools:
 
@@ -21,6 +21,8 @@ The model can call only two high-level tools:
 - `get_reel_context`: focus retrieval on one already-authorized reel.
 
 Both tools delegate through `IRetrievalEngine`, so access control, query embeddings, direct/hierarchical retrieval, reel/section/chunk search, transcript/visual evidence policy, RRF-backed semantic search, neighbour expansion, deduplication, and downstream neural reranking remain deterministic.
+
+Visual retrieval is part of that deterministic engine. When the router requires `VISUAL`, the engine calls `IReelSemanticIndexService.searchVisualScenes(...)` in both direct and hierarchical retrieval. For a visual-only route, transcript chunk search is skipped; mixed evidence routes can retrieve transcript and visual scene candidates together before hydration and reranking.
 
 The model does not receive tools for SQL, pgvector, embeddings, RRF weighting, persistence, or authorization. A tool request can narrow router-approved evidence types but cannot widen them. If the tool loop fails or returns no useful evidence, retrieval falls back through the deterministic engine port.
 
@@ -114,6 +116,7 @@ Run the focused tests first:
 pnpm test -- --runInBand \
   apps/ai-service/src/infrastructure/adapters/cloudflare-tool-calling-llm.adapter.spec.ts \
   apps/ai-service/src/application/use-cases/tool-calling-retrieval-agent.use-case.spec.ts \
+  apps/ai-service/src/application/services/deterministic-retrieval-engine.service.spec.ts \
   apps/ai-service/src/application/use-cases/review-index-quality.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/index-quality-agent.use-case.spec.ts
 ```
@@ -145,4 +148,4 @@ For indexing, the pre-existing visual/metadata/adaptive-sectioning logs continue
 
 ## Scope note
 
-The repository already contains some older conventions that are stricter or looser than the prose in `QWEN.md` (for example the legacy `ai-service` controller directory is singular and existing LangGraph constructors inject concrete use-case classes). This change does not perform an unrelated repository-wide migration. New files follow the documented directory conventions, and compatibility aliases are kept only at the Nest composition boundary so the existing workflows do not need a risky structural rewrite in this feature.
+The repository already contains some older conventions that are stricter or looser than the prose in `QWEN.md` (for example the legacy `ai-service` controller directory is singular and existing LangGraph constructors inject concrete use-case class tokens). This refactor keeps the existing graph constructor stable but makes that class token an explicit workflow contract, while deterministic retrieval now has its own named implementation behind `IRetrievalEngine`.
