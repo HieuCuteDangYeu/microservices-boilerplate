@@ -148,6 +148,8 @@ Expected retrieval logs when tool calling is active include `RetrievalToolAgent`
 
 For indexing, the pre-existing visual/metadata/adaptive-sectioning logs continue unchanged. The semantic quality review remains immediately after deterministic persisted-candidate validation and before candidate commit.
 
-## Scope note
+## Audit note
 
-This refactor fixes the repeated port/implementation and class-token alias issue in both the AI retrieval graph and the reel-indexing persisted-candidate quality gate. The audit also identified pre-existing application-layer configuration reads in some other AI use cases; those are separate layering cleanup items and are intentionally not mixed into this structural refactor.
+The repeated port/implementation and class-token alias issue is fixed in both the AI retrieval graph and the reel-indexing persisted-candidate quality gate.
+
+A separate QWEN layering audit found pre-existing direct `ConfigService` reads in application use cases such as `QueryRouterAgentUseCase`, `VerifierAgentUseCase`, `GetRelevantUserMemoriesUseCase`, and `AnalyzeVisualFrameUseCase`. Those are configuration-boundary cleanup items rather than the same missing-adapter/class-token bug, so they are documented but intentionally not mixed into this structural refactor.
