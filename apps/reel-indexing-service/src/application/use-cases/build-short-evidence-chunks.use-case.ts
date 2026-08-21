@@ -1,7 +1,7 @@
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { EvidenceChunk } from '@indexing/domain/entities/evidence-chunk.entity';
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
+import { Inject, Injectable } from '@nestjs/common';
 
 interface TimedToken {
   value: string;
@@ -14,7 +14,10 @@ interface TimedToken {
 
 @Injectable()
 export class BuildShortEvidenceChunksUseCase {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
+  ) {}
 
   execute(
     segments: TranscriptSegment[],
