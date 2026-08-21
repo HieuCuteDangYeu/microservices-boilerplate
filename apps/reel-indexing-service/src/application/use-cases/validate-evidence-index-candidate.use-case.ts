@@ -1,13 +1,16 @@
 import type { TranscriptSegment } from '@common/ai/interfaces/transcription-result.interface';
 import type { ReelEvidenceDocument } from '@common/processing/interfaces/reel-index-document.interface';
 import type { ReelIndexJob } from '@common/processing/interfaces/reel-index-job.interface';
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
+import { Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 
 @Injectable()
 export class ValidateEvidenceIndexCandidateUseCase {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
+  ) {}
 
   execute(input: {
     job: ReelIndexJob;
