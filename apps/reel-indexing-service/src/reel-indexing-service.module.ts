@@ -19,6 +19,7 @@ import { ValidatePersistedSemanticCandidateUseCase } from './application/use-cas
 import { AiServiceAdapter } from './infrastructure/adapters/ai-service.adapter';
 import { ContentServiceAdapter } from './infrastructure/adapters/content-service.adapter';
 import { IndexQualityAgentPolicyAdapter } from './infrastructure/adapters/index-quality-agent-policy.adapter';
+import { IndexingApplicationConfigAdapter } from './infrastructure/adapters/indexing-application-config.adapter';
 import { PersistedSemanticCandidateValidatorAdapter } from './infrastructure/adapters/persisted-semantic-candidate-validator.adapter';
 import { R2ArtifactStorageAdapter } from './infrastructure/adapters/r2-artifact-storage.adapter';
 import { ReelIndexRetryPublisherAdapter } from './infrastructure/adapters/reel-index-retry-publisher.adapter';
@@ -83,6 +84,10 @@ const rabbitClient = (name: string, queue: string) => ({
     ValidatePersistedSemanticCandidateUseCase,
     CommitSemanticCandidateUseCase,
 
+    {
+      provide: 'IIndexingApplicationConfig',
+      useClass: IndexingApplicationConfigAdapter,
+    },
     {
       provide: 'IIndexQualityAgentPolicy',
       useClass: IndexQualityAgentPolicyAdapter,
