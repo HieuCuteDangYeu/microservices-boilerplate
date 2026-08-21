@@ -77,7 +77,7 @@ describe('OutboxDispatcherService', () => {
   });
 
   it(
-    'coalesces multiple outbox-created wake signals into one dispatch',
+    'coalesces multiple outbox-created wake signals into an initial and follow-up dispatch',
     async () => {
       const { service, execute } = createService();
 
@@ -86,8 +86,28 @@ describe('OutboxDispatcherService', () => {
       service.trigger();
 
       await jest.advanceTimersByTimeAsync(0);
-      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledTimes(2);
 
+      service.onApplicationShutdown();
+    },
+  );
+
+  it(
+    'runs a follow-up drain when a trigger arrives while a drain is scheduled',
+    async () => {
+      const { service, execute } = createService({
+        results: [
+          { claimed: 0, published: 0, failed: 0 },
+          { claimed: 1, published: 1, failed: 0 },
+        ],
+      });
+
+      service.trigger();
+      service.trigger();
+
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(execute).toHaveBeenCalledTimes(2);
       service.onApplicationShutdown();
     },
   );
