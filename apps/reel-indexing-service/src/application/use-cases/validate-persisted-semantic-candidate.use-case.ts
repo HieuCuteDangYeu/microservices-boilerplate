@@ -1,6 +1,7 @@
 import type {
   IIndexingAiService,
   IndexQualityReviewInput,
+  IndexQualityReviewResult,
 } from '@indexing/domain/interfaces/ai-service.interface';
 import type { IIndexQualityAgentPolicy } from '@indexing/domain/interfaces/index-quality-agent-policy.interface';
 import type { IPersistedSemanticCandidateValidator } from '@indexing/domain/interfaces/persisted-semantic-candidate-validator.interface';
@@ -30,7 +31,7 @@ export class ValidatePersistedSemanticCandidateUseCase {
     await this.validator.execute(input);
     if (!this.policy.enabled) return;
 
-    let review;
+    let review: IndexQualityReviewResult;
     try {
       review = await this.ai.reviewIndexQuality(
         this.toReviewRequest(input.job, input.documents),
