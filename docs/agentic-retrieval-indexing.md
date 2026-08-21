@@ -63,6 +63,24 @@ CLOUDFLARE_TOOL_TIMEOUT_MS=10000
 
 `RetrievalAgentPolicyAdapter` resolves those infrastructure settings and is bound to the `IRetrievalAgentPolicy` string token. `RetrieveReelEvidenceUseCase` receives only the policy port.
 
+## Application configuration boundary
+
+Application use cases no longer import `ConfigService` directly. Runtime configuration is exposed through domain ports and implemented by infrastructure adapters:
+
+```text
+AI application use cases
+  -> IAiApplicationConfig
+     -> AiApplicationConfigAdapter
+        -> ConfigService
+
+reel-indexing application use cases
+  -> IIndexingApplicationConfig
+     -> IndexingApplicationConfigAdapter
+        -> ConfigService
+```
+
+The AI port covers the application settings currently consumed by routing, verification, visual analysis, embedding batches, conversation memory, user-memory retrieval/upsert, and memory embedding backfill. The indexing port covers application-level chunking configuration. Environment access remains in infrastructure while existing environment keys and fallback behavior remain unchanged.
+
 ## Indexing architecture
 
 `ReelIndexLangGraphWorkflow` remains the deterministic orchestrator and retains its checkpoint graph, transcription workers, visual branch, metadata processing, adaptive sectioning, embedding generation, candidate validation, inactive persistence, and atomic activation behavior.
@@ -119,10 +137,24 @@ INDEX_QUALITY_AGENT_MAX_DOCUMENTS=36
 
 ## Validation
 
-Run the focused tests first:
+Run architecture checks first. These commands should print no matches:
+
+```bash
+rg -n "@nestjs/config|/infrastructure/" \
+  apps/ai-service/src/application \
+  apps/reel-indexing-service/src/application
+
+rg -n "provide:\s*[A-Za-z0-9_]+UseCase|provide:\s*RetrievalAgentUseCase|provide:\s*ValidatePersistedSemanticCandidateUseCase" \
+  apps/ai-service/src/ai-service.module.ts \
+  apps/reel-indexing-service/src/reel-indexing-service.module.ts
+```
+
+Run focused tests next:
 
 ```bash
 pnpm test -- --runInBand \
+  apps/ai-service/src/application/use-cases/query-router-agent.use-case.spec.ts \
+  apps/ai-service/src/application/use-cases/verifier-agent.use-case.spec.ts \
   apps/ai-service/src/infrastructure/adapters/cloudflare-tool-calling-llm.adapter.spec.ts \
   apps/ai-service/src/application/use-cases/retrieve-reel-evidence.use-case.spec.ts \
   apps/ai-service/src/infrastructure/adapters/deterministic-retrieval-engine.adapter.spec.ts \
@@ -130,14 +162,14 @@ pnpm test -- --runInBand \
   apps/reel-indexing-service/src/application/use-cases/validate-persisted-semantic-candidate.use-case.spec.ts
 ```
 
-Compile the affected services:
+Compile both affected services:
 
 ```bash
 pnpm build:ai
 pnpm build:reel-indexing
 ```
 
-Run regression tests and the existing retrieval benchmark:
+Then run the full regression suite and retrieval benchmark:
 
 ```bash
 pnpm test -- --runInBand
@@ -150,6 +182,4 @@ For indexing, the pre-existing visual/metadata/adaptive-sectioning logs continue
 
 ## Audit note
 
-The repeated port/implementation and class-token alias issue is fixed in both the AI retrieval graph and the reel-indexing persisted-candidate quality gate.
-
-A separate QWEN layering audit found pre-existing direct `ConfigService` reads in application use cases such as `QueryRouterAgentUseCase`, `VerifierAgentUseCase`, `GetRelevantUserMemoriesUseCase`, and `AnalyzeVisualFrameUseCase`. Those are configuration-boundary cleanup items rather than the same missing-adapter/class-token bug, so they are documented but intentionally not mixed into this structural refactor.
+The repeated port/implementation and class-token alias issue is fixed in both the AI retrieval graph and the reel-indexing persisted-candidate quality gate. The application-layer configuration leaks found during the follow-up audit are also fixed: the scoped AI and reel-indexing application directories no longer need direct `ConfigService` dependencies.
