@@ -29,11 +29,7 @@ export class BuildRagCitationsUseCase {
     private readonly citationAttributionService: ICitationAttributionService,
   ) {}
 
-  async execute(state: RagChatWorkflowState): Promise<RagCitation[]> {
-    return (await this.assess(state)).citations;
-  }
-
-  async assess(state: RagChatWorkflowState): Promise<RagCitationAssessment> {
+  async execute(state: RagChatWorkflowState): Promise<RagCitationAssessment> {
     if (
       state.route?.intent !== 'REEL_VIDEO_QUESTION' ||
       state.contextSufficiency?.sufficient === false
