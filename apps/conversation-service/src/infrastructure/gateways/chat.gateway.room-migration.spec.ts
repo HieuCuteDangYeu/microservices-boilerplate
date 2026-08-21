@@ -40,10 +40,7 @@ describe('ChatGateway room namespace migration', () => {
         await gateway.handleIceCandidate(payload, client);
       }
 
-      expect(to).toHaveBeenCalledWith([
-        CALLEE_ID,
-        `user:${CALLEE_ID}`,
-      ]);
+      expect(to).toHaveBeenCalledWith([CALLEE_ID, `user:${CALLEE_ID}`]);
       expect(emit).toHaveBeenCalledWith(eventName, {
         ...payload,
         fromUserId: CALLER_ID,

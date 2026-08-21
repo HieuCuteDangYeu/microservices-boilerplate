@@ -99,7 +99,8 @@ describe('GroupActivityService', () => {
     });
 
     expect(chatRepository.createMessageIdempotently).toHaveBeenCalledTimes(1);
-    const message = chatRepository.createMessageIdempotently.mock.calls[0][0] as Message;
+    const message = chatRepository.createMessageIdempotently.mock
+      .calls[0][0] as Message;
     expect(message.conversationId).toBe(CONVERSATION_ID);
     expect(message.senderId).toBe(ACTOR_ID);
     expect(message.type).toBe('text');
@@ -134,7 +135,8 @@ describe('GroupActivityService', () => {
       actorUserId: OWNER_ID,
     });
 
-    const message = chatRepository.createMessageIdempotently.mock.calls[0][0] as Message;
+    const message = chatRepository.createMessageIdempotently.mock
+      .calls[0][0] as Message;
     expect(message.senderId).toBe(OWNER_ID);
     expect(message.content).toBe('Owner User created the group');
     expect(message.metadata?.groupActivity).toEqual({
@@ -176,7 +178,8 @@ describe('GroupActivityService', () => {
       actorName: 'Alice Admin',
     });
 
-    const message = chatRepository.createMessageIdempotently.mock.calls[0][0] as Message;
+    const message = chatRepository.createMessageIdempotently.mock
+      .calls[0][0] as Message;
     expect(message.senderId).toBe(OWNER_ID);
     expect(message.content).toBe('Alice Admin left the group');
     expect(message.metadata?.groupActivity).toEqual(

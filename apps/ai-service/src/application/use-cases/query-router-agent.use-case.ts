@@ -379,9 +379,7 @@ Classify the current user message.
     }
 
     if (
-      /\bwhat is (this|that) (reel|video|clip|media) about\b/.test(
-        normalized,
-      )
+      /\bwhat is (this|that) (reel|video|clip|media) about\b/.test(normalized)
     ) {
       return 'GENERAL_REEL_SUMMARY';
     }

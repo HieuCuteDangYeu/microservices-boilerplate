@@ -448,7 +448,9 @@ export class ManageGroupConversationUseCase {
       );
     }
 
-    const activeMembers = members.filter((member) => member.status === 'ACTIVE');
+    const activeMembers = members.filter(
+      (member) => member.status === 'ACTIVE',
+    );
     const legacyIds = [...new Set(conversation.participantIds)].sort();
     const projectedIds = activeMembers.map((member) => member.userId).sort();
     const hasMemberSetDrift =
@@ -463,8 +465,7 @@ export class ManageGroupConversationUseCase {
         conversation.createdAt.toISOString();
       const expectedMs = Date.parse(expectedJoinedAt);
       return (
-        !Number.isFinite(expectedMs) ||
-        member.joinedAt.getTime() !== expectedMs
+        !Number.isFinite(expectedMs) || member.joinedAt.getTime() !== expectedMs
       );
     });
 
@@ -562,7 +563,11 @@ export class ManageGroupConversationUseCase {
 
   private scheduleConsistencyCheck(
     conversationId: string,
-    trigger: 'add-member' | 'remove-member' | 'leave-group' | 'transfer-ownership',
+    trigger:
+      | 'add-member'
+      | 'remove-member'
+      | 'leave-group'
+      | 'transfer-ownership',
   ): void {
     void this.consistencyService
       .checkAfterMutation(conversationId, trigger)

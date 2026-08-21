@@ -19,7 +19,9 @@ type StoredReaction = {
 
 @Controller()
 export class ReactionDetailsMicroserviceController {
-  private readonly logger = new Logger(ReactionDetailsMicroserviceController.name);
+  private readonly logger = new Logger(
+    ReactionDetailsMicroserviceController.name,
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -106,7 +108,9 @@ export class ReactionDetailsMicroserviceController {
     }
 
     const normalized: Record<string, StoredReaction> = {};
-    for (const [userId, raw] of Object.entries(value as Record<string, unknown>)) {
+    for (const [userId, raw] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         continue;
       }

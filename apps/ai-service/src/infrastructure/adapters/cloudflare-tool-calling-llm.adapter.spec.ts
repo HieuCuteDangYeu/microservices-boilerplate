@@ -67,7 +67,7 @@ describe('CloudflareToolCallingLlmAdapter', () => {
       ],
     });
 
-    const body = (fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body;
+    const body = fetchSpy.mock.calls[0]?.[1]?.body;
     if (typeof body !== 'string') {
       throw new Error('Expected Cloudflare request body to be a JSON string.');
     }
@@ -113,7 +113,7 @@ describe('CloudflareToolCallingLlmAdapter', () => {
       tools: [],
     });
 
-    const body = (fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body;
+    const body = fetchSpy.mock.calls[0]?.[1]?.body;
     if (typeof body !== 'string') {
       throw new Error('Expected Cloudflare request body to be a JSON string.');
     }

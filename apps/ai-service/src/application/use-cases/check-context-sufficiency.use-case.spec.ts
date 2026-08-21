@@ -72,42 +72,45 @@ describe('CheckContextSufficiencyUseCase', () => {
   it.each([
     'How many bands is the speaker using?',
     'What number of bands does the speaker say they are using?',
-  ])('answers when transcript evidence explicitly supports a quantity: %s', async (userMessage) => {
-    const structuredLlmService = {
-      generateObject: jest.fn().mockResolvedValue({
-        sufficient: false,
-        confidence: 0.1,
-        availableEvidence: ['TRANSCRIPT'],
-        missingEvidence: ['TRANSCRIPT'],
-        reason: 'Conservative refusal.',
-        userFacingReason: 'Missing evidence.',
-        recommendedAction: 'REFUSE_NO_CONTEXT',
-      }),
-    };
-    const useCase = new CheckContextSufficiencyUseCase(
-      structuredLlmService as never,
-    );
-    const state = {
-      userMessage,
-      route: {
-        intent: 'REEL_VIDEO_QUESTION',
-        needsRetrieval: true,
-        requiredEvidence: ['TRANSCRIPT'],
-      },
-      rerankedChunks: [
-        {
-          evidenceType: 'TRANSCRIPT',
-          evidenceText: "The speaker says, 'what I am using are 15 bands.'",
-          chunkText: "The speaker says, 'what I am using are 15 bands.'",
-          tags: [],
+  ])(
+    'answers when transcript evidence explicitly supports a quantity: %s',
+    async (userMessage) => {
+      const structuredLlmService = {
+        generateObject: jest.fn().mockResolvedValue({
+          sufficient: false,
+          confidence: 0.1,
+          availableEvidence: ['TRANSCRIPT'],
+          missingEvidence: ['TRANSCRIPT'],
+          reason: 'Conservative refusal.',
+          userFacingReason: 'Missing evidence.',
+          recommendedAction: 'REFUSE_NO_CONTEXT',
+        }),
+      };
+      const useCase = new CheckContextSufficiencyUseCase(
+        structuredLlmService as never,
+      );
+      const state = {
+        userMessage,
+        route: {
+          intent: 'REEL_VIDEO_QUESTION',
+          needsRetrieval: true,
+          requiredEvidence: ['TRANSCRIPT'],
         },
-      ],
-    } as RagChatWorkflowState;
+        rerankedChunks: [
+          {
+            evidenceType: 'TRANSCRIPT',
+            evidenceText: "The speaker says, 'what I am using are 15 bands.'",
+            chunkText: "The speaker says, 'what I am using are 15 bands.'",
+            tags: [],
+          },
+        ],
+      } as RagChatWorkflowState;
 
-    await expect(useCase.execute(state)).resolves.toMatchObject({
-      sufficient: true,
-      recommendedAction: 'ANSWER',
-    });
-    expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
-  });
+      await expect(useCase.execute(state)).resolves.toMatchObject({
+        sufficient: true,
+        recommendedAction: 'ANSWER',
+      });
+      expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -103,9 +103,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   emitToUsers(userIds: string[], eventName: string, payload: unknown): void {
     const rooms = Array.from(
       new Set(
-        userIds
-          .filter(Boolean)
-          .flatMap((userId) => this.userRooms(userId)),
+        userIds.filter(Boolean).flatMap((userId) => this.userRooms(userId)),
       ),
     );
 

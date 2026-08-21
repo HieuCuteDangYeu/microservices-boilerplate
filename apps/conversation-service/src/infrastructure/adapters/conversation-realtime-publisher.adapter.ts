@@ -7,9 +7,7 @@ import { ChatGateway } from '../gateways/chat.gateway';
 import { ChatMapper } from '../repositories/chat.mapper';
 
 @Injectable()
-export class ConversationRealtimePublisherAdapter
-  implements IConversationRealtimePublisher
-{
+export class ConversationRealtimePublisherAdapter implements IConversationRealtimePublisher {
   constructor(private readonly chatGateway: ChatGateway) {}
 
   emitNewMessage(conversationId: string, message: Message): void {
