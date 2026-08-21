@@ -1,6 +1,6 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type { ConversationTurnCompletedPayload } from '@common/ai/interfaces/user-memory.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { IConversationMemoryRepository } from '../../domain/interfaces/conversation-memory.repository.interface';
 import type { IConversationSummarizerService } from '../../domain/interfaces/conversation-summarizer.service.interface';
 
@@ -14,7 +14,8 @@ export class UpdateConversationMemoryUseCase {
   private readonly logger = new Logger(UpdateConversationMemoryUseCase.name);
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly configService: IAiApplicationConfig,
 
     @Inject('IConversationMemoryRepository')
     private readonly conversationMemoryRepository: IConversationMemoryRepository,
