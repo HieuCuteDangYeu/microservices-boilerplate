@@ -378,6 +378,18 @@ Classify the current user message.
     }
 
     if (
+      /\bwhat is (this|that) (reel|video|clip|media) about\b/.test(
+        normalized,
+      )
+    ) {
+      return 'GENERAL_REEL_SUMMARY';
+    }
+
+    if (this.isStandaloneSharedReelFactQuestion(normalized)) {
+      return 'TRANSCRIPT_CONTENT';
+    }
+
+    if (
       /\b(about|summary|summarize|main point|meaning|topic)\b/.test(normalized)
     ) {
       return 'GENERAL_REEL_SUMMARY';
@@ -392,6 +404,18 @@ Classify the current user message.
     }
 
     return 'AMBIGUOUS_REEL_REFERENCE';
+  }
+
+  private isStandaloneSharedReelFactQuestion(message: string): boolean {
+    if (
+      /\b(typescript|javascript|python|dockerfile|docker|capital of|remember|preference|recommend|recommendation|hello|hi)\b/.test(
+        message,
+      )
+    ) {
+      return false;
+    }
+
+    return /\b(who|what|which|when|where|why|how many)\b/.test(message);
   }
 
   private normalizeReelQuestionType(
