@@ -28,6 +28,7 @@ import { TranscribeAudioUseCase } from '@ai/application/use-cases/transcribe-aud
 import { UpdateConversationMemoryUseCase } from '@ai/application/use-cases/update-conversation-memory.use-case';
 import { UpsertUserMemoriesUseCase } from '@ai/application/use-cases/upsert-user-memories.use-case';
 import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.use-case';
+import { AiApplicationConfigAdapter } from '@ai/infrastructure/adapters/ai-application-config.adapter';
 import { ChatPromptBuilderAdapter } from '@ai/infrastructure/adapters/chat-prompt-builder.adapter';
 import { CloudflareCitationAttributionAdapter } from '@ai/infrastructure/adapters/cloudflare-citation-attribution.adapter';
 import { CloudflareConversationSummarizerAdapter } from '@ai/infrastructure/adapters/cloudflare-conversation-summarizer.adapter';
@@ -163,6 +164,10 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ExtractReelMetadataUseCase,
     ReviewIndexQualityUseCase,
 
+    {
+      provide: 'IAiApplicationConfig',
+      useClass: AiApplicationConfigAdapter,
+    },
     {
       provide: 'IRetrievalAgentPolicy',
       useClass: RetrievalAgentPolicyAdapter,
