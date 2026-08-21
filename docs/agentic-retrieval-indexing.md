@@ -4,32 +4,38 @@ This implementation keeps LangGraph and deterministic infrastructure in control 
 
 ## Retrieval architecture
 
-`LangGraphRagChatWorkflowAdapter` keeps its existing graph topology. For compatibility with that graph constructor, the Nest module supplies `ToolCallingRetrievalAgentUseCase` under the existing `RetrievalAgentUseCase` class token. The tool-calling use case remains application behavior and depends only on bounded ports/policies.
+`LangGraphRagChatWorkflowAdapter` keeps the high-level graph topology, but each retrieval graph node now calls a single-entry application use case:
 
-Those dependencies are:
+- `retrievalPlannerNode` -> `PlanRetrievalUseCase.execute(...)`
+- `retrievalNode` -> `RetrieveReelEvidenceUseCase.execute(...)`
+- `neuralRerankerNode` -> `RerankRetrievedEvidenceUseCase.execute(...)`
 
-- `IRetrievalEngine`: planning, deterministic retrieval, and reranking.
-- `IContentService`: already-existing conversation reel access resolution.
-- `IToolCallingLlmService`: provider-neutral tool-calling model interface.
-- `IRetrievalAgentPolicy`: resolved rollout/model/limit policy with no env parsing inside the use case.
-
-`IRetrievalEngine` is now implemented explicitly by `DeterministicRetrievalEngineAdapter` in `infrastructure/adapters/deterministic-retrieval-engine.adapter.ts`. This removes the previous ambiguity where `RetrievalAgentUseCase` was both the deterministic engine implementation and the class token aliased to the tool-calling agent.
+All three use cases depend on the `IRetrievalEngine` domain port rather than a concrete retrieval class. The module binds that port directly to `DeterministicRetrievalEngineAdapter` in `infrastructure/adapters`.
 
 The resulting boundary is:
 
 ```text
 LangGraphRagChatWorkflowAdapter
-  -> RetrievalAgentUseCase token
-    -> ToolCallingRetrievalAgentUseCase
-      -> IRetrievalEngine
+  -> PlanRetrievalUseCase
+     -> IRetrievalEngine
         -> DeterministicRetrievalEngineAdapter
-          -> IEmbeddingService
-          -> IReelSemanticIndexService
-          -> IRerankerService
-          -> IContentService
+
+  -> RetrieveReelEvidenceUseCase
+     -> IToolCallingLlmService
+        -> CloudflareToolCallingLlmAdapter
+     -> IRetrievalAgentPolicy
+        -> RetrievalAgentPolicyAdapter
+     -> IRetrievalEngine
+        -> DeterministicRetrievalEngineAdapter
+
+  -> RerankRetrievedEvidenceUseCase
+     -> IRetrievalEngine
+        -> DeterministicRetrievalEngineAdapter
 ```
 
-The model can call only two high-level tools:
+There is no retrieval class-token alias and no application use case acting as the implementation of `IRetrievalEngine`.
+
+The retrieval model can call only two high-level tools:
 
 - `search_reel_content`: search reels already authorized for the current conversation.
 - `get_reel_context`: focus retrieval on one already-authorized reel.
@@ -39,8 +45,6 @@ Both tools delegate through `IRetrievalEngine`, so access control, query embeddi
 Visual retrieval is part of the deterministic engine. When the router requires `VISUAL`, the adapter calls `IReelSemanticIndexService.searchVisualScenes(...)` in both direct and hierarchical retrieval. For a visual-only route, transcript chunk search is skipped. Mixed evidence routes can retrieve transcript and visual-scene candidates together before hydration and reranking.
 
 The model does not receive tools for SQL, pgvector, embeddings, RRF weighting, persistence, or authorization. A tool request can narrow router-approved evidence types but cannot widen them. If the tool loop fails or returns no useful evidence, retrieval falls back through the deterministic engine port.
-
-The Cloudflare implementation lives in `infrastructure/adapters/cloudflare-tool-calling-llm.adapter.ts`; Cloudflare request/response shapes do not leak into the application use case or domain interface.
 
 ### Retrieval rollout flags
 
@@ -57,28 +61,29 @@ RAG_TOOL_CALL_TIMEOUT_MS=8000
 CLOUDFLARE_TOOL_TIMEOUT_MS=10000
 ```
 
-`ConfigService` resolves these values in `AiServiceModule` into `IRetrievalAgentPolicy`; the application use case receives only the policy object. For production, explicitly enable `RAG_TOOL_CALLING_ENABLED=true` only after focused tests and a representative RAG benchmark pass.
+`RetrievalAgentPolicyAdapter` resolves those infrastructure settings and is bound to the `IRetrievalAgentPolicy` string token. `RetrieveReelEvidenceUseCase` receives only the policy port.
 
 ## Indexing architecture
 
 `ReelIndexLangGraphWorkflow` remains the deterministic orchestrator and retains its checkpoint graph, transcription workers, visual branch, metadata processing, adaptive sectioning, embedding generation, candidate validation, inactive persistence, and atomic activation behavior.
 
-The existing semantic use cases remain the bounded specialists instead of creating a parallel `application/agents` layer:
+The persisted-candidate quality node now uses one normal application use case:
 
-- `AnalyzeVisualFrameManifestUseCase`: visual understanding over sampled, verified frame artifacts.
-- `ExtractHierarchicalMetadataUseCase`: metadata curation while preserving creator-authored metadata authority.
-- `BuildAdaptiveTranscriptSectionsUseCase`: semantic/pause/lexical section boundary selection with the existing quality/fallback path.
-- `IndexQualityAgentUseCase`: the new semantic critic before activation.
+```text
+persisted_candidate_integrity_gate
+  -> ValidatePersistedSemanticCandidateUseCase.execute(...)
+     -> IPersistedSemanticCandidateValidator
+        -> PersistedSemanticCandidateValidatorAdapter
+           -> ISemanticCandidateInspector
+     -> IIndexingAiService
+        -> AiServiceAdapter
+     -> IIndexQualityAgentPolicy
+        -> IndexQualityAgentPolicyAdapter
+```
 
-Only the last role required genuinely new application behavior. `IndexQualityAgentUseCase` depends on:
+`ValidatePersistedSemanticCandidateUseCase` always runs the deterministic persisted-state integrity validator first. If structural validation fails, semantic review does not run. If it succeeds, the optional semantic quality review runs while the candidate is still inactive. `CommitSemanticCandidateUseCase` remains the only activation path.
 
-- `IPersistedSemanticCandidateValidator`: deterministic persisted-candidate integrity gate.
-- `IIndexingAiService`: the indexing service's existing AI port, extended with semantic quality review.
-- `IIndexQualityAgentPolicy`: resolved enable/enforcement/availability/document-limit policy.
-
-The quality use case always invokes `IPersistedSemanticCandidateValidator` first. If deterministic validation fails, no model review runs. The reviewer executes while the candidate is still inactive and cannot activate documents itself; `CommitSemanticCandidateUseCase` remains the only activation path.
-
-For compatibility with the pre-existing LangGraph constructor, the module supplies the quality use case under the existing `ValidatePersistedSemanticCandidateUseCase` class token, while the new use case itself depends on the string-token validator port.
+There is no class-token alias from `ValidatePersistedSemanticCandidateUseCase` to another use case, and `IPersistedSemanticCandidateValidator` is implemented by an infrastructure adapter rather than by constructing an application use case in the module.
 
 ### Inter-service quality-review boundary
 
@@ -93,8 +98,6 @@ reel-indexing-service
 ```
 
 The request transport is validated with `IndexQualityReviewSchema` from `libs/common/src/ai/dtos/index-quality-review.dto.ts`. The indexing adapter validates before sending, and the AI controller validates again at the receiving boundary. The caller converts structured RMQ failures with `isRpcError()`.
-
-The AI-side `ReviewIndexQualityUseCase` consumes an AI-domain `IndexQualityReviewInput`, not the RMQ DTO. The Cloudflare structured-model dependency remains behind `IStructuredLlmService`.
 
 ### Quality-agent rollout flags
 
@@ -112,15 +115,7 @@ INDEX_QUALITY_AGENT_REQUIRED=false
 INDEX_QUALITY_AGENT_MAX_DOCUMENTS=36
 ```
 
-`ConfigService` resolves these values in `ReelIndexingServiceModule` into `IIndexQualityAgentPolicy`; the quality use case contains no environment parsing.
-
-Recommended rollout:
-
-1. In development/staging, leave the default advisory behavior or set `INDEX_QUALITY_AGENT_ENABLED=true` explicitly and inspect reviewer logs.
-2. Evaluate false positives on short, long, visual-heavy, silent/no-audio, and multilingual reels.
-3. In production, explicitly set `INDEX_QUALITY_AGENT_ENABLED=true` only after validation.
-4. Turn on `INDEX_QUALITY_AGENT_ENFORCE=true` only after reviewer quality is acceptable.
-5. Keep `INDEX_QUALITY_AGENT_REQUIRED=false` unless indexing should stop whenever the model provider is unavailable.
+`IndexQualityAgentPolicyAdapter` resolves these values and is bound to the `IIndexQualityAgentPolicy` domain port.
 
 ## Validation
 
@@ -129,13 +124,13 @@ Run the focused tests first:
 ```bash
 pnpm test -- --runInBand \
   apps/ai-service/src/infrastructure/adapters/cloudflare-tool-calling-llm.adapter.spec.ts \
-  apps/ai-service/src/application/use-cases/tool-calling-retrieval-agent.use-case.spec.ts \
+  apps/ai-service/src/application/use-cases/retrieve-reel-evidence.use-case.spec.ts \
   apps/ai-service/src/infrastructure/adapters/deterministic-retrieval-engine.adapter.spec.ts \
-  apps/ai-service/src/application/use-cases/review-index-quality.use-case.spec.ts \
-  apps/reel-indexing-service/src/application/use-cases/index-quality-agent.use-case.spec.ts
+  apps/ai-service/src/application/use-cases/build-rag-citations.use-case.spec.ts \
+  apps/reel-indexing-service/src/application/use-cases/validate-persisted-semantic-candidate.use-case.spec.ts
 ```
 
-Compile the two affected services:
+Compile the affected services:
 
 ```bash
 pnpm build:ai
@@ -149,17 +144,10 @@ pnpm test -- --runInBand
 pnpm ops:rag:benchmark
 ```
 
-For an integration smoke test, start the AI and indexing services with RabbitMQ, the normal databases, R2, and Cloudflare credentials available:
-
-```bash
-pnpm start:ai
-pnpm start:reel-indexing
-```
-
 Expected retrieval logs when tool calling is active include `RetrievalToolAgent` entries showing selected tool names and accumulated result counts. Existing `RagGraph` retrieval, reranking, sufficiency, verification, and citation logs should continue afterward.
 
-For indexing, the pre-existing visual/metadata/adaptive-sectioning logs continue unchanged. The new semantic gate adds `IndexQualityAgent` immediately after deterministic persisted-candidate validation and before candidate commit.
+For indexing, the pre-existing visual/metadata/adaptive-sectioning logs continue unchanged. The semantic quality review remains immediately after deterministic persisted-candidate validation and before candidate commit.
 
 ## Scope note
 
-This refactor is intentionally narrow: it fixes the `IRetrievalEngine` port/adapter boundary and removes the duplicate architectural identity from the old deterministic retrieval class. It does not rewrite the existing LangGraph constructor or migrate every legacy class-token injection in the AI service.
+This refactor fixes the repeated port/implementation and class-token alias issue in both the AI retrieval graph and the reel-indexing persisted-candidate quality gate. The audit also identified pre-existing application-layer configuration reads in some other AI use cases; those are separate layering cleanup items and are intentionally not mixed into this structural refactor.
