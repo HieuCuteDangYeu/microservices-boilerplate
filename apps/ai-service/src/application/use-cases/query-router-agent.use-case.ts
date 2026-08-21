@@ -1,3 +1,4 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type {
   RagChatIntent,
   RagChatRouteDecision,
@@ -10,7 +11,6 @@ import type {
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 interface RawRouteDecision {
   intent?: unknown;
@@ -60,7 +60,8 @@ export class QueryRouterAgentUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
-    private readonly config?: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly config?: IAiApplicationConfig,
   ) {}
 
   async execute(input: {
