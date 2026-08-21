@@ -79,7 +79,11 @@ reel-indexing application use cases
         -> ConfigService
 ```
 
-The AI port covers the application settings currently consumed by routing, verification, visual analysis, embedding batches, conversation memory, user-memory retrieval/upsert, and memory embedding backfill. The indexing port covers application-level chunking configuration. Environment access remains in infrastructure while existing environment keys and fallback behavior remain unchanged.
+The AI port covers the application settings consumed by routing, verification, visual analysis, embedding batches, conversation memory, user-memory retrieval/upsert, and memory embedding backfill.
+
+The reel-indexing port covers chunking, transcript sectioning, transcription-manifest processing, visual-manifest analysis, and evidence-candidate validation. Environment access remains in infrastructure while existing environment keys and fallback behavior remain unchanged.
+
+The follow-up audit migrated nine AI production use cases and five reel-indexing production use cases away from direct `ConfigService` dependencies. Application-layer tests that previously depended on `ConfigService` now use the same domain configuration ports as their production use cases.
 
 ## Indexing architecture
 
@@ -137,16 +141,33 @@ INDEX_QUALITY_AGENT_MAX_DOCUMENTS=36
 
 ## Validation
 
-Run architecture checks first. These commands should print no matches:
+Make sure the local checkout is on the current branch before validation:
 
 ```bash
-rg -n "@nestjs/config|/infrastructure/" \
+git fetch origin
+git checkout refactor/retrieval-engine-boundary
+git pull --ff-only origin refactor/retrieval-engine-boundary
+```
+
+If the earlier repository-wide `pnpm lint` left local `--fix` edits, inspect `git status --short` before pulling. Stash any local work you want to keep rather than discarding it blindly.
+
+Run the QWEN dependency-direction checks first. These commands should print no matches:
+
+```bash
+rg -n "from ['\"]@nestjs/config['\"]|from ['\"][^'\"]*infrastructure/" \
   apps/ai-service/src/application \
   apps/reel-indexing-service/src/application
 
 rg -n "provide:\s*[A-Za-z0-9_]+UseCase|provide:\s*RetrievalAgentUseCase|provide:\s*ValidatePersistedSemanticCandidateUseCase" \
   apps/ai-service/src/ai-service.module.ts \
   apps/reel-indexing-service/src/reel-indexing-service.module.ts
+```
+
+Lint only the TypeScript files changed by this branch first. This avoids mutating the whole repository and isolates PR-specific lint failures:
+
+```bash
+git diff --name-only origin/master...HEAD -- '*.ts' \
+  | xargs -r pnpm exec eslint
 ```
 
 Run focused tests next:
@@ -159,6 +180,8 @@ pnpm test -- --runInBand \
   apps/ai-service/src/application/use-cases/retrieve-reel-evidence.use-case.spec.ts \
   apps/ai-service/src/infrastructure/adapters/deterministic-retrieval-engine.adapter.spec.ts \
   apps/ai-service/src/application/use-cases/build-rag-citations.use-case.spec.ts \
+  apps/reel-indexing-service/src/application/use-cases/analyze-visual-frame-manifest.use-case.spec.ts \
+  apps/reel-indexing-service/src/application/use-cases/build-short-evidence-chunks.use-case.spec.ts \
   apps/reel-indexing-service/src/application/use-cases/validate-persisted-semantic-candidate.use-case.spec.ts
 ```
 
@@ -169,12 +192,14 @@ pnpm build:ai
 pnpm build:reel-indexing
 ```
 
-Then run the full regression suite and retrieval benchmark:
+Then run the broader regression suite and retrieval benchmark:
 
 ```bash
 pnpm test -- --runInBand
 pnpm ops:rag:benchmark
 ```
+
+The repository-wide `pnpm lint` command executes ESLint with `--fix`. Run it only after the branch-specific checks are clean and after reviewing/stashing local work, because unrelated services may still have independent lint debt.
 
 Expected retrieval logs when tool calling is active include `RetrievalToolAgent` entries showing selected tool names and accumulated result counts. Existing `RagGraph` retrieval, reranking, sufficiency, verification, and citation logs should continue afterward.
 
@@ -182,4 +207,4 @@ For indexing, the pre-existing visual/metadata/adaptive-sectioning logs continue
 
 ## Audit note
 
-The repeated port/implementation and class-token alias issue is fixed in both the AI retrieval graph and the reel-indexing persisted-candidate quality gate. The application-layer configuration leaks found during the follow-up audit are also fixed: the scoped AI and reel-indexing application directories no longer need direct `ConfigService` dependencies.
+The repeated port/implementation and class-token alias issue is fixed in both the AI retrieval graph and the reel-indexing persisted-candidate quality gate. The application-layer configuration leaks found during the follow-up audit are also fixed: the scoped AI and reel-indexing application production code no longer imports `ConfigService` directly, and application tests use the corresponding domain config ports rather than infrastructure configuration types.
