@@ -110,7 +110,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     let result: RagChatWorkflowState = initialState;
 
     try {
-      result = await graph.invoke(initialState);
+      result = await graph.invoke(initialState, { recursionLimit: 64 });
 
       return {
         answer: result.answer?.trim() ?? '',

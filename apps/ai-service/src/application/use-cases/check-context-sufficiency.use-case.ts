@@ -111,6 +111,18 @@ export class CheckContextSufficiencyUseCase {
       };
     }
 
+    if (this.hasDirectTranscriptFactSupport(state)) {
+      return {
+        sufficient: true,
+        confidence: 1,
+        availableEvidence,
+        missingEvidence: [],
+        reason:
+          'A retrieved transcript directly shares the question entities and a factual relation marker.',
+        recommendedAction: 'ANSWER',
+      };
+    }
+
     try {
       const raw =
         await this.structuredLlmService.generateObject<RawContextSufficiencyResult>(
@@ -368,7 +380,8 @@ ${JSON.stringify(
   private hasExplicitQuantitySupport(state: RagChatWorkflowState): boolean {
     if (state.route?.intent !== 'REEL_VIDEO_QUESTION') return false;
     if (!state.route.requiredEvidence.includes('TRANSCRIPT')) return false;
-    if (!/\b(how many|what number)\b/i.test(state.userMessage)) return false;
+    if (!/\b(how many|what number|how low)\b/i.test(state.userMessage))
+      return false;
 
     const terms = state.userMessage
       .toLowerCase()
@@ -381,6 +394,7 @@ ${JSON.stringify(
             'many',
             'what',
             'number',
+            'low',
             'does',
             'speaker',
             'they',
@@ -397,6 +411,54 @@ ${JSON.stringify(
       /\b\d+(?:\.\d+)?\b/.test(evidence) &&
       terms.some((term) => evidence.includes(term))
     );
+  }
+
+  private hasDirectTranscriptFactSupport(state: RagChatWorkflowState): boolean {
+    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') return false;
+    if (!state.route.requiredEvidence.includes('TRANSCRIPT')) return false;
+    if (!/\b(what|which|why|where|who|how)\b/i.test(state.userMessage))
+      return false;
+
+    const questionTerms = state.userMessage
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length >= 4)
+      .filter(
+        (term) =>
+          ![
+            'what',
+            'which',
+            'where',
+            'when',
+            'does',
+            'they',
+            'someone',
+            'example',
+            'shared',
+            'video',
+            'reel',
+            'about',
+            'with',
+            'that',
+            'this',
+          ].includes(term),
+      );
+
+    if (questionTerms.length === 0) return false;
+
+    return state.rerankedChunks.some((chunk) => {
+      if ((chunk.evidenceType ?? 'TRANSCRIPT') !== 'TRANSCRIPT') return false;
+      const evidence = (chunk.evidenceText ?? chunk.chunkText).toLowerCase();
+      const sharedTerms = questionTerms.filter((term) =>
+        evidence.includes(term),
+      );
+      return (
+        sharedTerms.length >= Math.min(2, questionTerms.length) &&
+        /\b(assigned|called|named|label(?:led)?|same|common|because|belongs?|causes?|means?|can|could)\b/i.test(
+          evidence,
+        )
+      );
+    });
   }
 
   private hasEvidenceText(chunk: ReelContextSearchResult): boolean {
