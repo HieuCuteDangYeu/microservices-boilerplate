@@ -72,6 +72,35 @@ function formatStatus(runId, state) {
   };
 }
 
+function pendingCases(state, definitions) {
+  return definitions.filter((definition) => {
+    const status = state.cases[definition.caseId]?.status || 'PENDING';
+    if (status === 'COMPLETED') return false;
+    if (status !== 'PENDING')
+      fail(
+        `case ${definition.caseId} is ${status}; reconcile it through supported read-only APIs before retrying`,
+      );
+    return true;
+  });
+}
+
+function markCaseInFlight(state, caseId, persist) {
+  state.cases[caseId] = {
+    status: 'IN_FLIGHT',
+    requestStartedAt: new Date().toISOString(),
+  };
+  persist(state);
+}
+
+function completeCase(state, caseId, result, persist) {
+  state.cases[caseId] = {
+    status: 'COMPLETED',
+    completedAt: new Date().toISOString(),
+    ...result,
+  };
+  persist(state);
+}
+
 function lockRun(runId) {
   const file = path.join(STATE_DIR, `${runId}.lock`);
   fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -218,15 +247,10 @@ async function main() {
         resultCases.push(progress.result);
         continue;
       }
-      if (progress.status !== 'PENDING')
-        fail(
-          `case ${definition.caseId} is ${progress.status}; reconcile it through supported read-only APIs before retrying`,
-        );
-      state.cases[definition.caseId] = {
-        status: 'IN_FLIGHT',
-        requestStartedAt: new Date().toISOString(),
-      };
-      writeJsonAtomically(statePath(benchmarkRunId), state);
+      if (progress.status !== 'PENDING') pendingCases(state, [definition]);
+      markCaseInFlight(state, definition.caseId, (nextState) =>
+        writeJsonAtomically(statePath(benchmarkRunId), nextState),
+      );
       const name = `AMI controlled RAG ${definition.caseId} ${Date.now()}`;
       const created = await request('POST', '/conversations', {
         participantIds: [BOT_USER_ID],
@@ -316,15 +340,18 @@ async function main() {
           [],
       };
       resultCases.push(result);
-      state.cases[definition.caseId] = {
-        status: 'COMPLETED',
-        completedAt: new Date().toISOString(),
-        conversationId,
-        userMessageId: userMessage.id,
-        assistantMessageId: assistantMessage.id,
-        result,
-      };
-      writeJsonAtomically(statePath(benchmarkRunId), state);
+      completeCase(
+        state,
+        definition.caseId,
+        {
+          conversationId,
+          userMessageId: userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          result,
+        },
+        (nextState) =>
+          writeJsonAtomically(statePath(benchmarkRunId), nextState),
+      );
       console.log(
         JSON.stringify({
           caseId: definition.caseId,
@@ -363,7 +390,10 @@ async function main() {
 
 module.exports = {
   formatStatus,
+  completeCase,
   lockRun,
+  markCaseInFlight,
+  pendingCases,
   readState,
   statePath,
   writeJsonAtomically,
