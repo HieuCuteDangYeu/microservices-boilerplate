@@ -47,6 +47,31 @@ function readState(runId) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+function formatStatus(runId, state) {
+  const cases = state.cases || {};
+  const counts = Object.values(cases).reduce(
+    (result, item) => {
+      const status = item?.status || 'PENDING';
+      result[status] = (result[status] || 0) + 1;
+      return result;
+    },
+    { PENDING: 0, IN_FLIGHT: 0, COMPLETED: 0, FAILED: 0 },
+  );
+  return {
+    benchmarkRunId: runId,
+    statePath: statePath(runId),
+    lockState: fs.existsSync(path.join(STATE_DIR, `${runId}.lock`))
+      ? 'LOCKED'
+      : 'UNLOCKED',
+    counts,
+    cases,
+    warning:
+      counts.IN_FLIGHT > 0
+        ? 'DO NOT RESEND — RECONCILIATION REQUIRED'
+        : undefined,
+  };
+}
+
 function lockRun(runId) {
   const file = path.join(STATE_DIR, `${runId}.lock`);
   fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -87,17 +112,7 @@ async function main() {
   const statusRunId = arg('--status');
   if (statusRunId) {
     const state = readState(statusRunId);
-    console.log(
-      JSON.stringify(
-        {
-          runId: statusRunId,
-          statePath: statePath(statusRunId),
-          cases: state.cases,
-        },
-        null,
-        2,
-      ),
-    );
+    console.log(JSON.stringify(formatStatus(statusRunId, state), null, 2));
     return;
   }
   const definitionsPath = arg('--definitions-report');
@@ -346,7 +361,16 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+module.exports = {
+  formatStatus,
+  lockRun,
+  readState,
+  statePath,
+  writeJsonAtomically,
+};
+
+if (require.main === module)
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
