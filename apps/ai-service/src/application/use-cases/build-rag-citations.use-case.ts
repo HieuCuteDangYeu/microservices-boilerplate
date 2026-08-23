@@ -8,6 +8,7 @@ import type {
   RagCitationCoverageResult,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { assessDirectTranscriptFactSupport } from './direct-transcript-fact-support';
 
 interface GroundedCitationCandidate {
   attribution: CitationAttributionCandidate;
@@ -74,18 +75,43 @@ export class BuildRagCitationsUseCase {
         if (citations.length >= this.maxCitations) break;
       }
 
+      const coverage: RagCitationCoverageResult = {
+        mode: 'LLM',
+        coverage: attribution.coverage,
+        factualClaimCount: attribution.factualClaimCount,
+        supportedClaimCount: attribution.supportedClaimCount,
+        unsupportedClaims: attribution.claims
+          .filter((claim) => !claim.supported)
+          .map((claim) => claim.claim)
+          .slice(0, 6),
+      };
+      const directSupport = assessDirectTranscriptFactSupport({
+        question: state.userMessage,
+        answer,
+        candidates: candidates.map((candidate) => candidate.attribution),
+      });
+      if (coverage.coverage < 1 && directSupport.supported) {
+        const directCitations = directSupport.supportingEvidenceIndexes
+          .slice(0, this.maxCitations)
+          .map((index) => candidates[index]?.citation)
+          .filter((citation): citation is RagCitation => Boolean(citation));
+        if (directCitations.length > 0) {
+          return {
+            citations: directCitations,
+            coverage: {
+              mode: 'DETERMINISTIC',
+              coverage: 1,
+              factualClaimCount: 1,
+              supportedClaimCount: 1,
+              unsupportedClaims: [],
+            },
+          };
+        }
+      }
+
       return {
         citations,
-        coverage: {
-          mode: 'LLM',
-          coverage: attribution.coverage,
-          factualClaimCount: attribution.factualClaimCount,
-          supportedClaimCount: attribution.supportedClaimCount,
-          unsupportedClaims: attribution.claims
-            .filter((claim) => !claim.supported)
-            .map((claim) => claim.claim)
-            .slice(0, 6),
-        },
+        coverage,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

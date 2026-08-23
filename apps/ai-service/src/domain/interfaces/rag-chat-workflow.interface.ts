@@ -108,7 +108,7 @@ export interface RagContextSufficiencyResult {
 }
 
 export interface RagCitationCoverageResult {
-  mode: 'LLM' | 'FALLBACK' | 'NOT_REQUIRED';
+  mode: 'LLM' | 'DETERMINISTIC' | 'FALLBACK' | 'NOT_REQUIRED';
   coverage: number;
   factualClaimCount: number;
   supportedClaimCount: number;

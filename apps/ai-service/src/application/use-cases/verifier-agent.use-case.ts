@@ -8,6 +8,7 @@ import type {
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { assessDirectTranscriptFactSupport } from './direct-transcript-fact-support';
 
 interface RawVerificationResult {
   passed?: unknown;
@@ -52,7 +53,31 @@ export class VerifierAgentUseCase {
           timeoutMs: this.timeout('AI_RAG_VERIFIER_TIMEOUT_MS'),
         });
 
-      return this.normalize(raw);
+      const verification = this.normalize(raw);
+      const directSupport = assessDirectTranscriptFactSupport({
+        question: state.userMessage,
+        answer: state.answer ?? '',
+        candidates: state.rerankedChunks.map((chunk) => ({
+          evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
+          evidenceText:
+            chunk.evidenceText?.trim() ||
+            (chunk.evidenceType === 'METADATA' ? chunk.chunkText.trim() : ''),
+        })),
+      });
+
+      if (!verification.passed && directSupport.supported) {
+        return {
+          passed: true,
+          confidence: 1,
+          issues: [
+            ...verification.issues,
+            'A compact factual answer is directly supported by transcript evidence.',
+          ],
+          requiresRevision: false,
+        };
+      }
+
+      return verification;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
@@ -80,6 +105,8 @@ Check:
 - Whether metadata claims come from metadata evidence.
 - Whether memory recall is supported by recent history, conversation summary, or user memory.
 - Whether the answer adds unsupported causes, identities, quantities, chronology, or certainty.
+- Whether the answer responds to the exact relation or slot requested by the user; a fact can be present in evidence but still be the wrong answer.
+- Whether supplied evidence contradicts the answer or supports a materially different value for the requested relation.
 
 Rules:
 1. Return only structured JSON matching the schema.
@@ -89,6 +116,7 @@ Rules:
 5. Retrieval text and search-enrichment fields are not evidence. Judge reel claims only from evidenceText supplied below.
 6. If a required factual claim is unsupported, passed must be false.
 7. A direct claim that a fact is visible is supported when grounded visual evidence contains that fact. The answer does not need to repeat the evidence timestamp unless the user asks when it appears or the answer makes a timing claim.
+8. Do not pass an answer that substitutes a nearby count, property, or topic for the requested person, location, cause, safety measure, or other relation.
 `.trim();
   }
 

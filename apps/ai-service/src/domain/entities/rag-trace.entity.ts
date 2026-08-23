@@ -4,7 +4,7 @@ export interface RagWorkflowTraceMetrics {
   retrievalRetryCount: number;
   answerRetryCount: number;
   citationRetryCount: number;
-  citationCoverageMode?: 'LLM' | 'FALLBACK' | 'NOT_REQUIRED';
+  citationCoverageMode?: 'LLM' | 'DETERMINISTIC' | 'FALLBACK' | 'NOT_REQUIRED';
   citationCoverage?: number;
   factualClaimCount?: number;
   supportedClaimCount?: number;

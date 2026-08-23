@@ -3,6 +3,38 @@ import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm
 import { VerifierAgentUseCase } from './verifier-agent.use-case';
 
 describe('VerifierAgentUseCase', () => {
+  const transcriptState = (input: {
+    question: string;
+    answer: string;
+    evidenceText: string;
+  }) =>
+    ({
+      userMessage: input.question,
+      answer: input.answer,
+      rerankedChunks: [
+        {
+          evidenceType: 'TRANSCRIPT',
+          evidenceText: input.evidenceText,
+          chunkText: input.evidenceText,
+          tags: [],
+        },
+      ],
+      route: {
+        intent: 'REEL_VIDEO_QUESTION',
+        needsRetrieval: true,
+        needsUserMemory: false,
+        needsConversationSummary: false,
+        needsVerification: true,
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['TRANSCRIPT'],
+        recommendationAction: { type: 'NONE', reason: 'none' },
+        reason: 'transcript question',
+      },
+      retryCount: 0,
+      retrievalRetryCount: 0,
+      citationRetryCount: 0,
+    }) as RagChatWorkflowState;
+
   it('fails closed when a route requires verification and the provider fails', async () => {
     const structuredLlmService: IStructuredLlmService = {
       generateObject: jest.fn().mockRejectedValue(new Error('provider down')),
@@ -119,5 +151,80 @@ describe('VerifierAgentUseCase', () => {
     expect(systemPrompt).toContain(
       'does not need to repeat the evidence timestamp',
     );
+  });
+
+  it.each([
+    [
+      'Who is the shot detector being presented to?',
+      'Olivier.',
+      'The shot detector is being presented to Olivier.',
+    ],
+    [
+      'What example label is used for a marble in a bag?',
+      'Blue.',
+      'The marble put in the bag is assigned the blue label.',
+    ],
+    [
+      'How many frequency bands is the speaker currently using?',
+      'Fifteen frequency bands.',
+      'What I am using are 15 frequency bands.',
+    ],
+  ])(
+    'keeps a compact directly supported transcript fact when the LLM rejects it',
+    async (question, answer, evidenceText) => {
+      const structuredLlmService: IStructuredLlmService = {
+        generateObject: jest.fn().mockResolvedValue({
+          passed: false,
+          confidence: 1,
+          issues: ['Incorrectly conservative provider judgment.'],
+          requiresRevision: true,
+          revisedInstruction: 'Rewrite it.',
+        }),
+      };
+      const useCase = new VerifierAgentUseCase(structuredLlmService);
+
+      await expect(
+        useCase.execute(transcriptState({ question, answer, evidenceText })),
+      ).resolves.toMatchObject({
+        passed: true,
+        confidence: 1,
+        requiresRevision: false,
+      });
+    },
+  );
+
+  it('does not override an LLM rejection for topic-only transcript overlap', async () => {
+    const structuredLlmService: IStructuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue({
+        passed: false,
+        confidence: 0.9,
+        issues: ['The requested label is absent.'],
+        requiresRevision: true,
+        revisedInstruction: 'Do not infer a label.',
+      }),
+    };
+    const useCase = new VerifierAgentUseCase(structuredLlmService);
+
+    await expect(
+      useCase.execute(
+        transcriptState({
+          question: 'What label is assigned to the marble in the bag?',
+          answer: 'Blue.',
+          evidenceText: 'A blue marble is beside a bag.',
+        }),
+      ),
+    ).resolves.toMatchObject({ passed: false, requiresRevision: true });
+  });
+
+  it('asks the LLM verifier to reject a supported fact that answers the wrong slot', () => {
+    const useCase = new VerifierAgentUseCase({
+      generateObject: jest.fn(),
+    } as never);
+    const systemPrompt = (
+      useCase as unknown as { buildSystemPrompt: () => string }
+    ).buildSystemPrompt();
+
+    expect(systemPrompt).toContain('wrong answer');
+    expect(systemPrompt).toContain('nearby count');
   });
 });

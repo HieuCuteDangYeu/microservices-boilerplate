@@ -137,6 +137,89 @@ describe('BuildRagCitationsUseCase', () => {
     expect(assessment.coverage.mode).toBe('FALLBACK');
   });
 
+  it.each([
+    [
+      'Who is the shot detector being presented to?',
+      'Olivier.',
+      'The shot detector is being presented to Olivier.',
+    ],
+    [
+      'What example label is used for a marble in a bag?',
+      'Blue.',
+      'The marble put in the bag is assigned the blue label.',
+    ],
+    [
+      'How many frequency bands is the speaker currently using?',
+      'Fifteen frequency bands.',
+      'What I am using are 15 frequency bands.',
+    ],
+    [
+      'How low can the number of bands go while still being okay?',
+      'About twelve bands.',
+      'We can go down till like 12 bands and it is still okay.',
+    ],
+  ])(
+    'repairs a false-negative citation attribution for a compact transcript fact',
+    async (question, answer, evidenceText) => {
+      const attributionService: ICitationAttributionService = {
+        attribute: jest.fn().mockResolvedValue({
+          selections: [],
+          claims: [{ claim: answer, supported: false, evidenceIds: [] }],
+          factualClaimCount: 1,
+          supportedClaimCount: 0,
+          coverage: 0,
+        }),
+      };
+      const useCase = new BuildRagCitationsUseCase(attributionService);
+      const state = buildState();
+      state.userMessage = question;
+      state.answer = answer;
+      state.rerankedChunks[0] = {
+        ...state.rerankedChunks[0],
+        evidenceType: 'TRANSCRIPT',
+        evidenceText,
+        chunkText: evidenceText,
+      };
+
+      await expect(useCase.execute(state)).resolves.toMatchObject({
+        citations: [expect.objectContaining({ evidenceType: 'TRANSCRIPT' })],
+        coverage: {
+          mode: 'DETERMINISTIC',
+          coverage: 1,
+          factualClaimCount: 1,
+          supportedClaimCount: 1,
+        },
+      });
+    },
+  );
+
+  it('does not repair a topic-only citation attribution failure', async () => {
+    const attributionService: ICitationAttributionService = {
+      attribute: jest.fn().mockResolvedValue({
+        selections: [],
+        claims: [{ claim: 'Blue.', supported: false, evidenceIds: [] }],
+        factualClaimCount: 1,
+        supportedClaimCount: 0,
+        coverage: 0,
+      }),
+    };
+    const useCase = new BuildRagCitationsUseCase(attributionService);
+    const state = buildState();
+    state.userMessage = 'What label is assigned to the marble in the bag?';
+    state.answer = 'Blue.';
+    state.rerankedChunks[0] = {
+      ...state.rerankedChunks[0],
+      evidenceType: 'TRANSCRIPT',
+      evidenceText: 'A blue marble is beside a bag.',
+      chunkText: 'A blue marble is beside a bag.',
+    };
+
+    await expect(useCase.execute(state)).resolves.toMatchObject({
+      citations: [],
+      coverage: { mode: 'LLM', coverage: 0 },
+    });
+  });
+
   it('does not emit citations for insufficient context', async () => {
     const attributionService: ICitationAttributionService = {
       attribute: jest.fn(),
