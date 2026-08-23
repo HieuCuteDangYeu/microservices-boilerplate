@@ -84,6 +84,27 @@ export class VerifierAgentUseCase {
         `[VerifierAgent] provider failed; required verification is fail-closed: ${message}`,
       );
 
+      const directSupport = assessDirectTranscriptFactSupport({
+        question: state.userMessage,
+        answer: state.answer ?? '',
+        candidates: state.rerankedChunks.map((chunk) => ({
+          evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
+          evidenceText:
+            chunk.evidenceText?.trim() ||
+            (chunk.evidenceType === 'METADATA' ? chunk.chunkText.trim() : ''),
+        })),
+      });
+      if (directSupport.supported) {
+        return {
+          passed: true,
+          confidence: 1,
+          issues: [
+            'Verifier provider was unavailable; a compact factual answer is directly supported by transcript evidence.',
+          ],
+          requiresRevision: false,
+        };
+      }
+
       return {
         passed: false,
         confidence: 0,

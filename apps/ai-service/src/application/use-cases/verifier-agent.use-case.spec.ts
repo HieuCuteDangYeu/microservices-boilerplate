@@ -71,6 +71,49 @@ describe('VerifierAgentUseCase', () => {
     });
   });
 
+  it('accepts a directly supported quantity when the verifier provider fails', async () => {
+    const structuredLlmService: IStructuredLlmService = {
+      generateObject: jest.fn().mockRejectedValue(new Error('provider down')),
+    };
+    const useCase = new VerifierAgentUseCase(structuredLlmService);
+
+    await expect(
+      useCase.execute(
+        transcriptState({
+          question: 'How many frequency bands is the speaker currently using?',
+          answer: 'Fifteen frequency bands.',
+          evidenceText:
+            'The speaker says what I am using are 15 frequency bands.',
+        }),
+      ),
+    ).resolves.toMatchObject({
+      passed: true,
+      confidence: 1,
+      requiresRevision: false,
+    });
+  });
+
+  it('remains fail-closed on a provider failure without direct quantity support', async () => {
+    const structuredLlmService: IStructuredLlmService = {
+      generateObject: jest.fn().mockRejectedValue(new Error('provider down')),
+    };
+    const useCase = new VerifierAgentUseCase(structuredLlmService);
+
+    await expect(
+      useCase.execute(
+        transcriptState({
+          question: 'How many frequency bands is the speaker currently using?',
+          answer: 'Fifteen frequency bands.',
+          evidenceText: 'The speaker discusses frequency bands generally.',
+        }),
+      ),
+    ).resolves.toMatchObject({
+      passed: false,
+      confidence: 0,
+      requiresRevision: false,
+    });
+  });
+
   it('does not call the verifier for routes that do not require it', async () => {
     const structuredLlmService: IStructuredLlmService = {
       generateObject: jest.fn(),
