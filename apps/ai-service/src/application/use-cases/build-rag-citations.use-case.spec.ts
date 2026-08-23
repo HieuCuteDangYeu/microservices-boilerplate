@@ -67,6 +67,11 @@ describe('BuildRagCitationsUseCase', () => {
         ],
         factualClaimCount: 1,
         supportedClaimCount: 1,
+        diagnostics: {
+          decisionSource: 'LLM',
+          selectedEvidenceIds: ['e0'],
+          deterministicSupportingEvidenceIds: [],
+        },
         coverage: 1,
       }),
     };
@@ -134,7 +139,10 @@ describe('BuildRagCitationsUseCase', () => {
         quote: 'Visible text: Cannot find module @nestjs/config',
       }),
     ]);
-    expect(assessment.coverage.mode).toBe('FALLBACK');
+    expect(assessment.coverage).toMatchObject({
+      mode: 'FALLBACK',
+      diagnostics: { decisionSource: 'FALLBACK', selectedEvidenceIds: ['e0'] },
+    });
   });
 
   it.each([
@@ -188,6 +196,10 @@ describe('BuildRagCitationsUseCase', () => {
           coverage: 1,
           factualClaimCount: 1,
           supportedClaimCount: 1,
+          diagnostics: {
+            decisionSource: 'DETERMINISTIC',
+            deterministicSupportingEvidenceIds: ['e0'],
+          },
         },
       });
     },

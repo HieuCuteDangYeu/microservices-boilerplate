@@ -66,6 +66,7 @@ describe('CheckContextSufficiencyUseCase', () => {
     await expect(useCase.execute(state)).resolves.toMatchObject({
       sufficient: true,
       recommendedAction: 'ANSWER',
+      diagnostics: { providerStatus: 'SUCCESS', decisionSource: 'LLM' },
     });
   });
 
@@ -109,6 +110,10 @@ describe('CheckContextSufficiencyUseCase', () => {
       await expect(useCase.execute(state)).resolves.toMatchObject({
         sufficient: true,
         recommendedAction: 'ANSWER',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'DETERMINISTIC_QUANTITY',
+        },
       });
       expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
     },
@@ -160,6 +165,10 @@ describe('CheckContextSufficiencyUseCase', () => {
       await expect(useCase.execute(state)).resolves.toMatchObject({
         sufficient: true,
         recommendedAction: 'ANSWER',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'DETERMINISTIC_DIRECT_FACT',
+        },
       });
       expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
     },
@@ -202,5 +211,39 @@ describe('CheckContextSufficiencyUseCase', () => {
       recommendedAction: 'REFUSE_NO_CONTEXT',
     });
     expect(structuredLlmService.generateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('records provider fallback provenance after an LLM error', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockRejectedValue(new Error('down')),
+    };
+    const useCase = new CheckContextSufficiencyUseCase(
+      structuredLlmService as never,
+    );
+    await expect(
+      useCase.execute({
+        userMessage: 'What does the speaker say?',
+        route: {
+          intent: 'REEL_VIDEO_QUESTION',
+          needsRetrieval: true,
+          requiredEvidence: ['TRANSCRIPT'],
+        },
+        rerankedChunks: [
+          {
+            evidenceType: 'TRANSCRIPT',
+            evidenceText: 'The speaker says hello.',
+            chunkText: 'The speaker says hello.',
+            tags: [],
+          },
+        ],
+      } as RagChatWorkflowState),
+    ).resolves.toMatchObject({
+      sufficient: true,
+      recommendedAction: 'ANSWER',
+      diagnostics: {
+        providerStatus: 'ERROR',
+        decisionSource: 'PROVIDER_FALLBACK',
+      },
+    });
   });
 });
