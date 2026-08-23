@@ -12,6 +12,7 @@ const dotenv = require('dotenv');
 
 const ROOT = path.resolve(__dirname, '../..');
 const REPORT_DIR = path.join(ROOT, 'test-data/reel-integration/ami/reports');
+const STATE_DIR = path.join(REPORT_DIR, 'state');
 const BOT_USER_ID = 'b6ddf921-c87c-4f68-8d71-f1b1fd33f3e7';
 const REEL_IDS = [
   '9f5ed300-8b47-4715-a23f-d5082987ff43',
@@ -27,6 +28,43 @@ function arg(name) {
 
 function fail(message) {
   throw new Error(message);
+}
+
+function writeJsonAtomically(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`);
+  fs.renameSync(temporary, file);
+}
+
+function statePath(runId) {
+  return path.join(STATE_DIR, `${runId}.json`);
+}
+
+function readState(runId) {
+  const file = statePath(runId);
+  if (!fs.existsSync(file)) fail(`benchmark run state not found: ${runId}`);
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function lockRun(runId) {
+  const file = path.join(STATE_DIR, `${runId}.lock`);
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  let descriptor;
+  try {
+    descriptor = fs.openSync(file, 'wx');
+    fs.writeFileSync(descriptor, `${process.pid}\n`);
+  } catch (error) {
+    if (error && error.code === 'EEXIST')
+      fail(
+        `benchmark run is already locked: ${runId}; use --status before resuming`,
+      );
+    throw error;
+  }
+  return () => {
+    fs.closeSync(descriptor);
+    fs.unlinkSync(file);
+  };
 }
 
 async function retry(operation, description) {
@@ -46,198 +84,266 @@ async function retry(operation, description) {
 }
 
 async function main() {
+  const statusRunId = arg('--status');
+  if (statusRunId) {
+    const state = readState(statusRunId);
+    console.log(
+      JSON.stringify(
+        {
+          runId: statusRunId,
+          statePath: statePath(statusRunId),
+          cases: state.cases,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   const definitionsPath = arg('--definitions-report');
   if (!definitionsPath) fail('--definitions-report is required');
-  dotenv.config({
-    path: arg('--env-file') || path.join(ROOT, '.env.test.local'),
-  });
-  const baseUrl = process.env.BACKEND_URL;
-  if (
-    !baseUrl ||
-    !process.env.VELORA_TEST_EMAIL ||
-    !process.env.VELORA_TEST_PASSWORD
-  ) {
-    fail(
-      'BACKEND_URL, VELORA_TEST_EMAIL, and VELORA_TEST_PASSWORD are required',
-    );
-  }
-  const definitions = JSON.parse(fs.readFileSync(definitionsPath, 'utf8'));
-  const allCases = definitions?.ragBenchmark?.cases;
-  if (!Array.isArray(allCases) || allCases.length !== 8)
-    fail('definitions report must contain exactly eight cases');
-  const onlyCaseId = arg('--case-id');
-  const cases = onlyCaseId
-    ? allCases.filter((item) => item.caseId === onlyCaseId)
-    : allCases;
-  if (cases.length === 0) fail(`unknown --case-id ${onlyCaseId}`);
-
-  let cookies = '';
-  async function request(method, pathname, body) {
-    const response = await fetch(new URL(pathname, baseUrl), {
-      method,
-      headers: {
-        ...(body ? { 'content-type': 'application/json' } : {}),
-        ...(cookies ? { cookie: cookies } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+  const resumeRunId = arg('--resume');
+  const benchmarkRunId =
+    resumeRunId ||
+    arg('--run-id') ||
+    `existing-ami-rag-${Date.now()}-${crypto.randomUUID()}`;
+  const releaseLock = lockRun(benchmarkRunId);
+  let state;
+  try {
+    dotenv.config({
+      path: arg('--env-file') || path.join(ROOT, '.env.test.local'),
     });
-    const setCookie = response.headers.get('set-cookie');
-    if (setCookie)
-      cookies = setCookie
-        .split(/,(?=\s*[^;=]+=)/)
-        .map((value) => value.split(';')[0])
-        .join('; ');
-    const text = await response.text();
-    let payload;
-    try {
-      payload = text ? JSON.parse(text) : null;
-    } catch {
-      payload = text;
-    }
-    if (!response.ok)
-      fail(
-        `${method} ${pathname} -> ${response.status}: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}`,
-      );
-    return payload;
-  }
-
-  await request('POST', '/auth/login', {
-    email: process.env.VELORA_TEST_EMAIL,
-    password: process.env.VELORA_TEST_PASSWORD,
-  });
-  const statuses = [];
-  for (const reelId of REEL_IDS)
-    statuses.push({
-      reelId,
-      status: await request('GET', `/content/reels/${reelId}/status`),
-    });
-  const nonCompleted = statuses.filter(
-    ({ status }) => status?.status !== 'COMPLETED',
-  );
-  if (nonCompleted.length)
-    fail(`reel status precondition failed: ${JSON.stringify(nonCompleted)}`);
-
-  const startedAt = new Date().toISOString();
-  const resultCases = [];
-  for (const [index, definition] of cases.entries()) {
-    const name = `AMI controlled RAG ${definition.caseId} ${Date.now()}`;
-    const created = await request('POST', '/conversations', {
-      participantIds: [BOT_USER_ID],
-      type: 'GROUP',
-      isGroup: true,
-      name,
-    });
-    const conversationId = created?.id;
-    if (!conversationId)
-      fail(`conversation create returned no id for ${definition.caseId}`);
-    for (const reelId of REEL_IDS) {
-      await retry(
-        () =>
-          request('POST', `/content/reels/${reelId}/share`, {
-            conversationId,
-            sharedWithUserId: BOT_USER_ID,
-          }),
-        `share ${reelId} to ${conversationId}`,
-      );
-    }
-    const before = await request(
-      'GET',
-      `/conversations/${conversationId}/messages?limit=50`,
-    );
-    const messages = Array.isArray(before) ? before : before?.messages;
-    const accessibleReelIds = [
-      ...new Set(
-        (messages || [])
-          .map((message) => message?.media?.reelId)
-          .filter(Boolean),
-      ),
-    ].sort();
+    const baseUrl = process.env.BACKEND_URL;
     if (
-      JSON.stringify(accessibleReelIds) !== JSON.stringify([...REEL_IDS].sort())
+      !baseUrl ||
+      !process.env.VELORA_TEST_EMAIL ||
+      !process.env.VELORA_TEST_PASSWORD
     ) {
       fail(
-        `conversation ${conversationId} has unexpected reel scope: ${JSON.stringify(accessibleReelIds)}`,
+        'BACKEND_URL, VELORA_TEST_EMAIL, and VELORA_TEST_PASSWORD are required',
       );
     }
-    const requestStartedAt = new Date().toISOString();
-    const timer = Date.now();
-    const userMessage = await request(
-      'POST',
-      `/conversations/${conversationId}/messages`,
-      {
-        clientMessageId: `ami-rag-${definition.caseId}-${crypto.randomUUID()}`,
-        content: definition.question,
-        type: 'text',
-        signalType: 0,
-      },
+    const definitions = JSON.parse(fs.readFileSync(definitionsPath, 'utf8'));
+    const allCases = definitions?.ragBenchmark?.cases;
+    if (!Array.isArray(allCases) || allCases.length !== 8)
+      fail('definitions report must contain exactly eight cases');
+    const onlyCaseId = arg('--case-id');
+    const cases = onlyCaseId
+      ? allCases.filter((item) => item.caseId === onlyCaseId)
+      : allCases;
+    if (cases.length === 0) fail(`unknown --case-id ${onlyCaseId}`);
+    state = resumeRunId
+      ? readState(benchmarkRunId)
+      : {
+          runId: benchmarkRunId,
+          createdAt: new Date().toISOString(),
+          definitionsReport: definitionsPath,
+          cases: Object.fromEntries(
+            cases.map((item) => [item.caseId, { status: 'PENDING' }]),
+          ),
+        };
+    if (resumeRunId && state.definitionsReport !== definitionsPath)
+      fail('resume definitions report does not match the original run');
+    writeJsonAtomically(statePath(benchmarkRunId), state);
+    console.log(
+      JSON.stringify({ benchmarkRunId, statePath: statePath(benchmarkRunId) }),
     );
-    let assistantMessage;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const after = await request(
+
+    let cookies = '';
+    async function request(method, pathname, body) {
+      const response = await fetch(new URL(pathname, baseUrl), {
+        method,
+        headers: {
+          ...(body ? { 'content-type': 'application/json' } : {}),
+          ...(cookies ? { cookie: cookies } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const setCookie = response.headers.get('set-cookie');
+      if (setCookie)
+        cookies = setCookie
+          .split(/,(?=\s*[^;=]+=)/)
+          .map((value) => value.split(';')[0])
+          .join('; ');
+      const text = await response.text();
+      let payload;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        payload = text;
+      }
+      if (!response.ok)
+        fail(
+          `${method} ${pathname} -> ${response.status}: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}`,
+        );
+      return payload;
+    }
+
+    await request('POST', '/auth/login', {
+      email: process.env.VELORA_TEST_EMAIL,
+      password: process.env.VELORA_TEST_PASSWORD,
+    });
+    const statuses = [];
+    for (const reelId of REEL_IDS)
+      statuses.push({
+        reelId,
+        status: await request('GET', `/content/reels/${reelId}/status`),
+      });
+    const nonCompleted = statuses.filter(
+      ({ status }) => status?.status !== 'COMPLETED',
+    );
+    if (nonCompleted.length)
+      fail(`reel status precondition failed: ${JSON.stringify(nonCompleted)}`);
+
+    const startedAt = new Date().toISOString();
+    const resultCases = [];
+    for (const [index, definition] of cases.entries()) {
+      const progress = state.cases[definition.caseId] || { status: 'PENDING' };
+      if (progress.status === 'COMPLETED') {
+        resultCases.push(progress.result);
+        continue;
+      }
+      if (progress.status !== 'PENDING')
+        fail(
+          `case ${definition.caseId} is ${progress.status}; reconcile it through supported read-only APIs before retrying`,
+        );
+      state.cases[definition.caseId] = {
+        status: 'IN_FLIGHT',
+        requestStartedAt: new Date().toISOString(),
+      };
+      writeJsonAtomically(statePath(benchmarkRunId), state);
+      const name = `AMI controlled RAG ${definition.caseId} ${Date.now()}`;
+      const created = await request('POST', '/conversations', {
+        participantIds: [BOT_USER_ID],
+        type: 'GROUP',
+        isGroup: true,
+        name,
+      });
+      const conversationId = created?.id;
+      if (!conversationId)
+        fail(`conversation create returned no id for ${definition.caseId}`);
+      for (const reelId of REEL_IDS) {
+        await retry(
+          () =>
+            request('POST', `/content/reels/${reelId}/share`, {
+              conversationId,
+              sharedWithUserId: BOT_USER_ID,
+            }),
+          `share ${reelId} to ${conversationId}`,
+        );
+      }
+      const before = await request(
         'GET',
         `/conversations/${conversationId}/messages?limit=50`,
       );
-      const rows = Array.isArray(after) ? after : after?.messages || [];
-      assistantMessage = rows.find(
-        (message) =>
-          message?.senderId === BOT_USER_ID &&
-          new Date(message.createdAt).getTime() >=
-            new Date(userMessage.createdAt).getTime(),
+      const messages = Array.isArray(before) ? before : before?.messages;
+      const accessibleReelIds = [
+        ...new Set(
+          (messages || [])
+            .map((message) => message?.media?.reelId)
+            .filter(Boolean),
+        ),
+      ].sort();
+      if (
+        JSON.stringify(accessibleReelIds) !==
+        JSON.stringify([...REEL_IDS].sort())
+      ) {
+        fail(
+          `conversation ${conversationId} has unexpected reel scope: ${JSON.stringify(accessibleReelIds)}`,
+        );
+      }
+      const requestStartedAt = new Date().toISOString();
+      const timer = Date.now();
+      const userMessage = await request(
+        'POST',
+        `/conversations/${conversationId}/messages`,
+        {
+          clientMessageId: `ami-rag-${definition.caseId}-${crypto.randomUUID()}`,
+          content: definition.question,
+          type: 'text',
+          signalType: 0,
+        },
       );
-      if (assistantMessage) break;
-    }
-    if (!assistantMessage)
-      fail(
-        `bot response timeout for ${definition.caseId}; no further benchmark questions were sent`,
-      );
-    resultCases.push({
-      ...definition,
-      status: 'EVALUATED',
-      conversationId,
-      accessibleReelIds,
-      userMessageId: userMessage.id,
-      assistantMessageId: assistantMessage.id,
-      requestStartedAt,
-      responseCompletedAt: new Date().toISOString(),
-      latencyMs: Date.now() - timer,
-      finalAnswer: assistantMessage.content ?? '',
-      citations:
-        assistantMessage.metadata?.citations ??
-        assistantMessage.citations ??
-        [],
-    });
-    console.log(
-      JSON.stringify({
-        caseId: definition.caseId,
+      let assistantMessage;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const after = await request(
+          'GET',
+          `/conversations/${conversationId}/messages?limit=50`,
+        );
+        const rows = Array.isArray(after) ? after : after?.messages || [];
+        assistantMessage = rows.find(
+          (message) =>
+            message?.senderId === BOT_USER_ID &&
+            new Date(message.createdAt).getTime() >=
+              new Date(userMessage.createdAt).getTime(),
+        );
+        if (assistantMessage) break;
+      }
+      if (!assistantMessage)
+        fail(
+          `bot response timeout for ${definition.caseId}; no further benchmark questions were sent`,
+        );
+      const result = {
+        ...definition,
+        status: 'EVALUATED',
         conversationId,
-        latencyMs: resultCases.at(-1).latencyMs,
-      }),
+        accessibleReelIds,
+        userMessageId: userMessage.id,
+        assistantMessageId: assistantMessage.id,
+        requestStartedAt,
+        responseCompletedAt: new Date().toISOString(),
+        latencyMs: Date.now() - timer,
+        finalAnswer: assistantMessage.content ?? '',
+        citations:
+          assistantMessage.metadata?.citations ??
+          assistantMessage.citations ??
+          [],
+      };
+      resultCases.push(result);
+      state.cases[definition.caseId] = {
+        status: 'COMPLETED',
+        completedAt: new Date().toISOString(),
+        conversationId,
+        userMessageId: userMessage.id,
+        assistantMessageId: assistantMessage.id,
+        result,
+      };
+      writeJsonAtomically(statePath(benchmarkRunId), state);
+      console.log(
+        JSON.stringify({
+          caseId: definition.caseId,
+          conversationId,
+          latencyMs: resultCases.at(-1).latencyMs,
+        }),
+      );
+    }
+    const report = {
+      runId: benchmarkRunId,
+      generatedAt: new Date().toISOString(),
+      startedAt,
+      mode: 'existing-ami-rag-retest-public-api',
+      strategy:
+        'one fresh supported group conversation per case; all four existing reels shared to BOT_USER_ID before the one authorised question',
+      preRun: { reelStatuses: statuses, expectedReelIds: REEL_IDS },
+      cases: resultCases,
+    };
+    fs.mkdirSync(REPORT_DIR, { recursive: true });
+    const reportPath = path.join(REPORT_DIR, `${report.runId}.json`);
+    fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+    console.log(
+      JSON.stringify(
+        {
+          reportPath,
+          conversationIds: resultCases.map((item) => item.conversationId),
+        },
+        null,
+        2,
+      ),
     );
+  } finally {
+    releaseLock();
   }
-  const report = {
-    runId: `existing-ami-rag-retest-${Date.now()}`,
-    generatedAt: new Date().toISOString(),
-    startedAt,
-    mode: 'existing-ami-rag-retest-public-api',
-    strategy:
-      'one fresh supported group conversation per case; all four existing reels shared to BOT_USER_ID before the one authorised question',
-    preRun: { reelStatuses: statuses, expectedReelIds: REEL_IDS },
-    cases: resultCases,
-  };
-  fs.mkdirSync(REPORT_DIR, { recursive: true });
-  const reportPath = path.join(REPORT_DIR, `${report.runId}.json`);
-  fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
-  console.log(
-    JSON.stringify(
-      {
-        reportPath,
-        conversationIds: resultCases.map((item) => item.conversationId),
-      },
-      null,
-      2,
-    ),
-  );
 }
 
 main().catch((error) => {
