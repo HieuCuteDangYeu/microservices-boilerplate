@@ -22,6 +22,15 @@ describe('LangGraphRagChatWorkflowAdapter routing', () => {
   const routeAfterVerifier = workflow as unknown as {
     routeAfterVerifier: (state: RagChatWorkflowState) => string;
     routeAfterCitationCoverage: (state: RagChatWorkflowState) => string;
+    createPrepareAnswerRevisionNode: () => (
+      state: RagChatWorkflowState,
+    ) => Partial<RagChatWorkflowState>;
+    createPrepareCitationRevisionNode: () => (
+      state: RagChatWorkflowState,
+    ) => Partial<RagChatWorkflowState>;
+    createVerificationFailureNode: () => (
+      state: RagChatWorkflowState,
+    ) => Partial<RagChatWorkflowState>;
   };
   const state = (overrides: Partial<RagChatWorkflowState> = {}) =>
     ({
@@ -145,5 +154,48 @@ describe('LangGraphRagChatWorkflowAdapter routing', () => {
         }),
       ),
     ).toBe('finalAnswerNode');
+  });
+
+  it('labels verifier and citation revisions explicitly in graph state', () => {
+    expect(
+      routeAfterVerifier.createPrepareAnswerRevisionNode()(state()),
+    ).toMatchObject({
+      retryCount: 1,
+      nextDraftSource: 'VERIFIER_REVISION',
+    });
+    expect(
+      routeAfterVerifier.createPrepareCitationRevisionNode()(
+        state({
+          citationCoverage: {
+            mode: 'LLM',
+            coverage: 0,
+            factualClaimCount: 1,
+            supportedClaimCount: 0,
+            unsupportedClaims: [],
+          },
+        }),
+      ),
+    ).toMatchObject({
+      citationRetryCount: 1,
+      nextDraftSource: 'CITATION_REVISION',
+    });
+  });
+
+  it('sets an explicit terminal failure source rather than parsing the refusal text', () => {
+    const terminal = routeAfterVerifier.createVerificationFailureNode();
+    expect(terminal(state())).toMatchObject({ finalFailureSource: 'VERIFIER' });
+    expect(
+      terminal(
+        state({
+          citationCoverage: {
+            mode: 'LLM',
+            coverage: 0,
+            factualClaimCount: 1,
+            supportedClaimCount: 0,
+            unsupportedClaims: [],
+          },
+        }),
+      ),
+    ).toMatchObject({ finalFailureSource: 'CITATION' });
   });
 });
