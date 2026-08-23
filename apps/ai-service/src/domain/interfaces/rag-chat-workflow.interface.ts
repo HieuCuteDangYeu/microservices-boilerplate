@@ -207,6 +207,7 @@ export interface RagChatWorkflowState {
   citations?: RagCitation[];
   citationCoverage?: RagCitationCoverageResult;
   draftHistory: RagDraftHistoryEntry[];
+  draftRevision: number;
   citationAttempts: Array<{
     attempt: number;
     decisionSource: RagCitationDiagnostics['decisionSource'];

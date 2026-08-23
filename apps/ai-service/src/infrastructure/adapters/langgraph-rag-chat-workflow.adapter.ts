@@ -54,6 +54,7 @@ const RagChatStateSchema = new StateSchema({
   citations: z.array(z.any()).default([]),
   citationCoverage: z.any().optional(),
   draftHistory: z.array(z.any()).default([]),
+  draftRevision: z.number().default(0),
   citationAttempts: z.array(z.any()).default([]),
   nextDraftSource: z.any().default('INITIAL'),
   finalFailureSource: z.any().default('UNKNOWN'),
@@ -110,6 +111,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       retrievalRetryCount: 0,
       citationRetryCount: 0,
       draftHistory: [],
+      draftRevision: 0,
       citationAttempts: [],
       nextDraftSource: 'INITIAL',
       finalFailureSource: 'UNKNOWN',
@@ -439,11 +441,12 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         draftHistory: [
           ...state.draftHistory,
           {
-            revision: state.draftHistory.length,
+            revision: state.draftRevision,
             source: state.nextDraftSource,
             answer: answer.slice(0, 1500),
           },
         ].slice(-this.integer('AI_RAG_MAX_ANSWER_REVISIONS', 1, 0, 2) - 1),
+        draftRevision: state.draftRevision + 1,
       };
     };
   }
