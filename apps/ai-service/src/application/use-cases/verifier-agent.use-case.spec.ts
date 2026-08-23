@@ -135,7 +135,10 @@ describe('VerifierAgentUseCase', () => {
       confidence: 1,
       issues: [],
       requiresRevision: false,
-      diagnostics: { providerStatus: 'NOT_CALLED', decisionSource: 'NOT_REQUIRED' },
+      diagnostics: {
+        providerStatus: 'NOT_CALLED',
+        decisionSource: 'NOT_REQUIRED',
+      },
     });
     expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
   });
