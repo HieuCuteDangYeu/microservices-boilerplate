@@ -49,6 +49,33 @@ export class SaveRagTraceUseCase {
           factualClaimCount: input.state.citationCoverage?.factualClaimCount,
           supportedClaimCount:
             input.state.citationCoverage?.supportedClaimCount,
+          diagnostics: {
+            contextSufficiency: input.state.contextSufficiency
+              ? {
+                  providerStatus:
+                    input.state.contextSufficiency.diagnostics
+                      ?.providerStatus ?? 'UNKNOWN',
+                  decisionSource:
+                    input.state.contextSufficiency.diagnostics
+                      ?.decisionSource ?? 'UNKNOWN',
+                  sufficient: input.state.contextSufficiency.sufficient,
+                  confidence: input.state.contextSufficiency.confidence,
+                  recommendedAction:
+                    input.state.contextSufficiency.recommendedAction,
+                  reason: input.state.contextSufficiency.reason,
+                  userFacingReason:
+                    input.state.contextSufficiency.userFacingReason,
+                  availableEvidence:
+                    input.state.contextSufficiency.availableEvidence,
+                  missingEvidence:
+                    input.state.contextSufficiency.missingEvidence,
+                }
+              : undefined,
+            draftHistory: input.state.draftHistory,
+            verification: input.state.verification?.diagnostics,
+            citationAttempts: input.state.citationAttempts,
+            finalFailureSource: input.state.finalFailureSource,
+          },
         },
       });
     } catch (error: unknown) {

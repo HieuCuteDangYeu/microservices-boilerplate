@@ -36,6 +36,15 @@ export class VerifierAgentUseCase {
         confidence: 1,
         issues: [],
         requiresRevision: false,
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'NOT_REQUIRED',
+          finalPassed: true,
+          confidence: 1,
+          issues: [],
+          requiresRevision: false,
+          directSupport: { supported: false, supportingEvidenceIndexes: [] },
+        },
       };
     }
 
@@ -74,10 +83,33 @@ export class VerifierAgentUseCase {
             'A compact factual answer is directly supported by transcript evidence.',
           ],
           requiresRevision: false,
+          diagnostics: {
+            providerStatus: 'SUCCESS',
+            decisionSource: 'DETERMINISTIC_DIRECT_SUPPORT',
+            providerPassed: false,
+            finalPassed: true,
+            confidence: 1,
+            issues: [...verification.issues],
+            requiresRevision: false,
+            directSupport,
+          },
         };
       }
 
-      return verification;
+      return {
+        ...verification,
+        diagnostics: {
+          providerStatus: 'SUCCESS',
+          decisionSource: 'LLM',
+          providerPassed: verification.passed,
+          finalPassed: verification.passed,
+          confidence: verification.confidence,
+          issues: verification.issues,
+          requiresRevision: verification.requiresRevision,
+          revisedInstruction: verification.revisedInstruction,
+          directSupport,
+        },
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
@@ -102,6 +134,17 @@ export class VerifierAgentUseCase {
             'Verifier provider was unavailable; a compact factual answer is directly supported by transcript evidence.',
           ],
           requiresRevision: false,
+          diagnostics: {
+            providerStatus: 'ERROR',
+            decisionSource: 'DETERMINISTIC_DIRECT_SUPPORT',
+            finalPassed: true,
+            confidence: 1,
+            issues: [
+              'Verifier provider was unavailable; a compact factual answer is directly supported by transcript evidence.',
+            ],
+            requiresRevision: false,
+            directSupport,
+          },
         };
       }
 
@@ -110,6 +153,15 @@ export class VerifierAgentUseCase {
         confidence: 0,
         issues: ['Required answer verification was unavailable.'],
         requiresRevision: false,
+        diagnostics: {
+          providerStatus: 'ERROR',
+          decisionSource: 'FAIL_CLOSED',
+          finalPassed: false,
+          confidence: 0,
+          issues: ['Required answer verification was unavailable.'],
+          requiresRevision: false,
+          directSupport,
+        },
       };
     }
   }

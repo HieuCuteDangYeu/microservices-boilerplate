@@ -104,6 +104,16 @@ export class BuildRagCitationsUseCase {
               factualClaimCount: 1,
               supportedClaimCount: 1,
               unsupportedClaims: [],
+              diagnostics: {
+                decisionSource: 'DETERMINISTIC',
+                selectedEvidenceIds: directSupport.supportingEvidenceIndexes
+                  .slice(0, this.maxCitations)
+                  .map((index) => `e${index}`),
+                deterministicSupportingEvidenceIds:
+                  directSupport.supportingEvidenceIndexes
+                    .slice(0, this.maxCitations)
+                    .map((index) => `e${index}`),
+              },
             },
           };
         }
@@ -111,7 +121,16 @@ export class BuildRagCitationsUseCase {
 
       return {
         citations,
-        coverage,
+        coverage: {
+          ...coverage,
+          diagnostics: {
+            decisionSource: 'LLM',
+            selectedEvidenceIds: citations.map(
+              (_citation, index) => `e${index}`,
+            ),
+            deterministicSupportingEvidenceIds: [],
+          },
+        },
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -129,6 +148,13 @@ export class BuildRagCitationsUseCase {
           factualClaimCount: 0,
           supportedClaimCount: 0,
           unsupportedClaims: [],
+          diagnostics: {
+            decisionSource: 'FALLBACK',
+            selectedEvidenceIds: candidates
+              .slice(0, this.maxCitations)
+              .map((candidate) => candidate.attribution.evidenceId),
+            deterministicSupportingEvidenceIds: [],
+          },
         },
       };
     }
@@ -143,6 +169,11 @@ export class BuildRagCitationsUseCase {
         factualClaimCount: 0,
         supportedClaimCount: 0,
         unsupportedClaims: [],
+        diagnostics: {
+          decisionSource: 'NOT_REQUIRED',
+          selectedEvidenceIds: [],
+          deterministicSupportingEvidenceIds: [],
+        },
       },
     };
   }

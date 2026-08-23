@@ -15,6 +15,8 @@ const normalize = (value) =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 const overlaps = (a, b, c, d) => Math.max(a, c) <= Math.min(b, d);
+const unavailable = (value) =>
+  value === undefined || value === null ? 'NOT_AVAILABLE' : value;
 const cases = definitions.ragBenchmark.cases.map((definition) => {
   const trace = byQuestion.get(definition.question) || null;
   const answer = trace?.answer || '';
@@ -59,6 +61,8 @@ const cases = definitions.ragBenchmark.cases.map((definition) => {
   const expectedInRetrieved = (trace?.retrievedChunkIds || []).some((id) =>
     id.includes(definition.reelId),
   );
+  const diagnostics = trace?.workflowMetrics?.diagnostics || {};
+  const finalFailureSource = unavailable(diagnostics.finalFailureSource);
   return {
     ...definition,
     trace,
@@ -72,17 +76,27 @@ const cases = definitions.ragBenchmark.cases.map((definition) => {
     citationCount: citations.length,
     matchingCitation: matchingCitation || null,
     correctAndGrounded: answerCorrect && Boolean(matchingCitation),
-    firstFailingStage: !trace
-      ? 'RAG_TRACE_MISSING'
-      : !(trace.intent === 'REEL_VIDEO_QUESTION' && trace.needsRetrieval)
-        ? 'ROUTER'
-        : !expectedInRetrieved
-          ? 'RETRIEVAL'
-          : !answerCorrect
-            ? 'ANSWER_OR_CONTEXT_SUFFICIENCY'
-            : !matchingCitation
-              ? 'CITATION_GROUNDING'
-              : null,
+    diagnostics: {
+      context: unavailable(diagnostics.contextSufficiency),
+      drafts: unavailable(diagnostics.draftHistory),
+      verifier: unavailable(diagnostics.verification),
+      citationAttempts: unavailable(diagnostics.citationAttempts),
+      finalFailureSource,
+    },
+    firstFailingStage:
+      finalFailureSource !== 'NOT_AVAILABLE' && finalFailureSource !== 'NONE'
+        ? finalFailureSource
+        : !trace
+          ? 'RAG_TRACE_MISSING'
+          : !(trace.intent === 'REEL_VIDEO_QUESTION' && trace.needsRetrieval)
+            ? 'ROUTER'
+            : !expectedInRetrieved
+              ? 'RETRIEVAL'
+              : !answerCorrect
+                ? 'ANSWER_OR_CONTEXT_SUFFICIENCY'
+                : !matchingCitation
+                  ? 'CITATION_GROUNDING'
+                  : null,
   };
 });
 const count = (predicate) => cases.filter(predicate).length;

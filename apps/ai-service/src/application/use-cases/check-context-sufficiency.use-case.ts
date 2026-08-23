@@ -50,6 +50,10 @@ export class CheckContextSufficiencyUseCase {
         missingEvidence: [],
         reason: 'Retrieval is not required for this intent.',
         recommendedAction: 'ANSWER',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'UNKNOWN',
+        },
       };
     }
 
@@ -63,6 +67,10 @@ export class CheckContextSufficiencyUseCase {
         userFacingReason:
           'No relevant shared reel evidence is available in this conversation.',
         recommendedAction: 'REFUSE_NO_CONTEXT',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'DETERMINISTIC_NO_CONTEXT',
+        },
       };
     }
 
@@ -82,6 +90,10 @@ export class CheckContextSufficiencyUseCase {
           deterministicallyMissing,
         ),
         recommendedAction: 'REFUSE_NO_CONTEXT',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'DETERMINISTIC_REQUIRED_MODALITY',
+        },
       };
     }
 
@@ -96,6 +108,10 @@ export class CheckContextSufficiencyUseCase {
         userFacingReason:
           'I do not have relevant shared reel transcript context to answer that reliably.',
         recommendedAction: 'REFUSE_NO_CONTEXT',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'DETERMINISTIC_EXPLICIT_MENTION',
+        },
       };
     }
 
@@ -108,6 +124,10 @@ export class CheckContextSufficiencyUseCase {
         reason:
           'Retrieved transcript explicitly supplies the quantity requested by the user.',
         recommendedAction: 'ANSWER',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'DETERMINISTIC_QUANTITY',
+        },
       };
     }
 
@@ -120,6 +140,10 @@ export class CheckContextSufficiencyUseCase {
         reason:
           'A retrieved transcript directly shares the question entities and a factual relation marker.',
         recommendedAction: 'ANSWER',
+        diagnostics: {
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'DETERMINISTIC_DIRECT_FACT',
+        },
       };
     }
 
@@ -135,7 +159,10 @@ export class CheckContextSufficiencyUseCase {
           },
         );
 
-      return this.normalize(raw, state);
+      return {
+        ...this.normalize(raw, state),
+        diagnostics: { providerStatus: 'SUCCESS', decisionSource: 'LLM' },
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
@@ -149,6 +176,10 @@ export class CheckContextSufficiencyUseCase {
         reason:
           'Context sufficiency checker failed after required evidence was verified.',
         recommendedAction: 'ANSWER',
+        diagnostics: {
+          providerStatus: 'ERROR',
+          decisionSource: 'PROVIDER_FALLBACK',
+        },
       };
     }
   }

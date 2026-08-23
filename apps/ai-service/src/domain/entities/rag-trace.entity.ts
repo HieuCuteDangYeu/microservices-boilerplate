@@ -8,6 +8,13 @@ export interface RagWorkflowTraceMetrics {
   citationCoverage?: number;
   factualClaimCount?: number;
   supportedClaimCount?: number;
+  diagnostics?: {
+    contextSufficiency?: unknown;
+    draftHistory?: unknown[];
+    verification?: unknown;
+    citationAttempts?: unknown[];
+    finalFailureSource?: string;
+  };
 }
 
 export interface RagTraceProps {

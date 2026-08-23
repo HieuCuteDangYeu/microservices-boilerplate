@@ -118,7 +118,13 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
       citationCoverage: value.citationCoverage ?? null,
       factualClaimCount: value.factualClaimCount ?? null,
       supportedClaimCount: value.supportedClaimCount ?? null,
+      diagnostics: this.toJsonDiagnostics(value.diagnostics),
     };
+  }
+
+  private toJsonDiagnostics(value: unknown): Prisma.InputJsonValue | null {
+    if (!value) return null;
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 
   private fromJsonStringArray(value: Prisma.JsonValue | null): string[] {
@@ -210,6 +216,7 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
       citationCoverage: this.readJsonNumber(value, 'citationCoverage'),
       factualClaimCount: this.readJsonNumber(value, 'factualClaimCount'),
       supportedClaimCount: this.readJsonNumber(value, 'supportedClaimCount'),
+      diagnostics: this.readJsonObject(value, 'diagnostics'),
     };
   }
 
@@ -232,6 +239,14 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
     const trimmed = item.trim();
 
     return trimmed ? trimmed : undefined;
+  }
+
+  private readJsonObject(
+    value: Prisma.JsonObject,
+    key: string,
+  ): Prisma.JsonObject | undefined {
+    const item = value[key];
+    return this.isJsonObject(item) ? item : undefined;
   }
 
   private readJsonNumber(

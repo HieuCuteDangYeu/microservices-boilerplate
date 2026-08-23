@@ -63,11 +63,12 @@ describe('VerifierAgentUseCase', () => {
       citationRetryCount: 0,
     } as RagChatWorkflowState;
 
-    await expect(useCase.execute(state)).resolves.toEqual({
+    await expect(useCase.execute(state)).resolves.toMatchObject({
       passed: false,
       confidence: 0,
       issues: ['Required answer verification was unavailable.'],
       requiresRevision: false,
+      diagnostics: { providerStatus: 'ERROR', decisionSource: 'FAIL_CLOSED' },
     });
   });
 
@@ -90,6 +91,11 @@ describe('VerifierAgentUseCase', () => {
       passed: true,
       confidence: 1,
       requiresRevision: false,
+      diagnostics: {
+        providerStatus: 'ERROR',
+        decisionSource: 'DETERMINISTIC_DIRECT_SUPPORT',
+        finalPassed: true,
+      },
     });
   });
 
@@ -111,6 +117,7 @@ describe('VerifierAgentUseCase', () => {
       passed: false,
       confidence: 0,
       requiresRevision: false,
+      diagnostics: { providerStatus: 'ERROR', decisionSource: 'FAIL_CLOSED' },
     });
   });
 
@@ -123,11 +130,12 @@ describe('VerifierAgentUseCase', () => {
       route: { needsVerification: false },
     } as RagChatWorkflowState;
 
-    await expect(useCase.execute(state)).resolves.toEqual({
+    await expect(useCase.execute(state)).resolves.toMatchObject({
       passed: true,
       confidence: 1,
       issues: [],
       requiresRevision: false,
+      diagnostics: { providerStatus: 'NOT_CALLED', decisionSource: 'NOT_REQUIRED' },
     });
     expect(structuredLlmService.generateObject).not.toHaveBeenCalled();
   });

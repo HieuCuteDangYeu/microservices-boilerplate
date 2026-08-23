@@ -230,7 +230,7 @@ describe('BuildRagCitationsUseCase', () => {
       contextSufficiency: { sufficient: false },
     } as RagChatWorkflowState;
 
-    await expect(useCase.execute(state)).resolves.toEqual({
+    await expect(useCase.execute(state)).resolves.toMatchObject({
       citations: [],
       coverage: {
         mode: 'NOT_REQUIRED',
@@ -238,6 +238,7 @@ describe('BuildRagCitationsUseCase', () => {
         factualClaimCount: 0,
         supportedClaimCount: 0,
         unsupportedClaims: [],
+        diagnostics: { decisionSource: 'NOT_REQUIRED' },
       },
     });
     expect(attributionService.attribute).not.toHaveBeenCalled();

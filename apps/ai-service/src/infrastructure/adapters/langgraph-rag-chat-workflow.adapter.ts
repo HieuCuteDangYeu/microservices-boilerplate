@@ -53,6 +53,10 @@ const RagChatStateSchema = new StateSchema({
   verification: z.any().optional(),
   citations: z.array(z.any()).default([]),
   citationCoverage: z.any().optional(),
+  draftHistory: z.array(z.any()).default([]),
+  citationAttempts: z.array(z.any()).default([]),
+  nextDraftSource: z.any().default('INITIAL'),
+  finalFailureSource: z.any().default('UNKNOWN'),
 
   retryCount: z.number().default(0),
   retrievalRetryCount: z.number().default(0),
@@ -105,6 +109,10 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       retryCount: 0,
       retrievalRetryCount: 0,
       citationRetryCount: 0,
+      draftHistory: [],
+      citationAttempts: [],
+      nextDraftSource: 'INITIAL',
+      finalFailureSource: 'UNKNOWN',
     };
 
     let result: RagChatWorkflowState = initialState;
@@ -428,6 +436,14 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         answer,
         citations: [],
         citationCoverage: undefined,
+        draftHistory: [
+          ...state.draftHistory,
+          {
+            revision: state.draftHistory.length,
+            source: state.nextDraftSource,
+            answer: answer.slice(0, 1500),
+          },
+        ].slice(-this.integer('AI_RAG_MAX_ANSWER_REVISIONS', 1, 0, 2) - 1),
       };
     };
   }
@@ -451,6 +467,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
   private createPrepareAnswerRevisionNode() {
     return (state: RagChatWorkflowState): Partial<RagChatWorkflowState> => ({
       retryCount: state.retryCount + 1,
+      nextDraftSource: 'VERIFIER_REVISION',
       citations: [],
       citationCoverage: undefined,
     });
@@ -467,6 +484,21 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       return {
         citations: assessment.citations,
         citationCoverage: assessment.coverage,
+        citationAttempts: [
+          ...state.citationAttempts,
+          {
+            attempt: state.citationAttempts.length,
+            decisionSource:
+              assessment.coverage.diagnostics?.decisionSource ??
+              assessment.coverage.mode,
+            coverage: assessment.coverage.coverage,
+            selectedEvidenceIds:
+              assessment.coverage.diagnostics?.selectedEvidenceIds ?? [],
+            deterministicSupportingEvidenceIds:
+              assessment.coverage.diagnostics
+                ?.deterministicSupportingEvidenceIds ?? [],
+          },
+        ].slice(-this.integer('AI_RAG_MAX_CITATION_REVISIONS', 1, 0, 2) - 1),
       };
     };
   }
@@ -495,6 +527,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
       return {
         citationRetryCount: state.citationRetryCount + 1,
+        nextDraftSource: 'CITATION_REVISION',
         citations: [],
         citationCoverage: undefined,
         verification: {
@@ -522,6 +555,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         supportedClaimCount: 0,
         unsupportedClaims: [],
       },
+      finalFailureSource: state.citationCoverage ? 'CITATION' : 'VERIFIER',
     });
   }
 
@@ -533,7 +567,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         this.streamFinalAnswerUseCase.execute(state),
       );
 
-      return { answer };
+      return { answer, finalFailureSource: 'NONE' };
     };
   }
 
@@ -555,6 +589,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
           supportedClaimCount: 0,
           unsupportedClaims: [],
         },
+        finalFailureSource: 'NO_CONTEXT',
       };
     };
   }

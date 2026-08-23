@@ -92,6 +92,23 @@ export interface RagVerificationResult {
   issues: string[];
   requiresRevision: boolean;
   revisedInstruction?: string;
+  diagnostics?: RagVerificationDiagnostics;
+}
+
+export interface RagVerificationDiagnostics {
+  providerStatus: 'NOT_CALLED' | 'SUCCESS' | 'ERROR';
+  decisionSource:
+    | 'NOT_REQUIRED'
+    | 'LLM'
+    | 'DETERMINISTIC_DIRECT_SUPPORT'
+    | 'FAIL_CLOSED';
+  providerPassed?: boolean;
+  finalPassed: boolean;
+  confidence: number;
+  issues: string[];
+  requiresRevision: boolean;
+  revisedInstruction?: string;
+  directSupport: { supported: boolean; supportingEvidenceIndexes: number[] };
 }
 
 export interface RagContextSufficiencyResult {
@@ -105,6 +122,20 @@ export interface RagContextSufficiencyResult {
   userFacingReason?: string;
 
   recommendedAction: 'ANSWER' | 'REFUSE_NO_CONTEXT' | 'REWRITE_AND_RETRY';
+  diagnostics?: RagContextSufficiencyDiagnostics;
+}
+
+export interface RagContextSufficiencyDiagnostics {
+  providerStatus: 'NOT_CALLED' | 'SUCCESS' | 'ERROR';
+  decisionSource:
+    | 'DETERMINISTIC_NO_CONTEXT'
+    | 'DETERMINISTIC_REQUIRED_MODALITY'
+    | 'DETERMINISTIC_EXPLICIT_MENTION'
+    | 'DETERMINISTIC_QUANTITY'
+    | 'DETERMINISTIC_DIRECT_FACT'
+    | 'LLM'
+    | 'PROVIDER_FALLBACK'
+    | 'UNKNOWN';
 }
 
 export interface RagCitationCoverageResult {
@@ -113,6 +144,19 @@ export interface RagCitationCoverageResult {
   factualClaimCount: number;
   supportedClaimCount: number;
   unsupportedClaims: string[];
+  diagnostics?: RagCitationDiagnostics;
+}
+
+export interface RagCitationDiagnostics {
+  decisionSource: 'NOT_REQUIRED' | 'LLM' | 'DETERMINISTIC' | 'FALLBACK';
+  selectedEvidenceIds: string[];
+  deterministicSupportingEvidenceIds: string[];
+}
+
+export interface RagDraftHistoryEntry {
+  revision: number;
+  source: 'INITIAL' | 'VERIFIER_REVISION' | 'CITATION_REVISION';
+  answer: string;
 }
 
 export type RagCitation = AiRagCitation;
@@ -162,6 +206,23 @@ export interface RagChatWorkflowState {
   verification?: RagVerificationResult;
   citations?: RagCitation[];
   citationCoverage?: RagCitationCoverageResult;
+  draftHistory: RagDraftHistoryEntry[];
+  citationAttempts: Array<{
+    attempt: number;
+    decisionSource: RagCitationDiagnostics['decisionSource'];
+    coverage: number;
+    selectedEvidenceIds: string[];
+    deterministicSupportingEvidenceIds: string[];
+  }>;
+  nextDraftSource: RagDraftHistoryEntry['source'];
+  finalFailureSource:
+    | 'NONE'
+    | 'NO_CONTEXT'
+    | 'VERIFIER'
+    | 'CITATION'
+    | 'PROVIDER_ERROR'
+    | 'WORKFLOW'
+    | 'UNKNOWN';
 
   retryCount: number;
   retrievalRetryCount: number;
