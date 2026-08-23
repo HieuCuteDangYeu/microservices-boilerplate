@@ -14,7 +14,7 @@ export class ResetPasswordUseCase {
   ) {}
 
   async execute(dto: ResetPasswordDto) {
-    const userId = await this.redisRepository.getUserId(
+    const userId = await this.redisRepository.consumeUserId(
       `reset_password:${dto.token}`,
     );
 
@@ -30,8 +30,6 @@ export class ResetPasswordUseCase {
     };
 
     await this.userService.updateUser(payload);
-
-    await this.redisRepository.delete(`reset_password:${dto.token}`);
 
     return { message: 'Password has been reset successfully.' };
   }
