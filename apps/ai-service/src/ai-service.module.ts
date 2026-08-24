@@ -1,6 +1,7 @@
 import { AnalyzeVisualFrameUseCase } from '@ai/application/use-cases/analyze-visual-frame.use-case';
 import { BackfillUserMemoryEmbeddingsUseCase } from '@ai/application/use-cases/backfill-user-memory-embeddings.use-case';
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
+import { BuildGroundedAnswerRevisionUseCase } from '@ai/application/use-cases/build-grounded-answer-revision.use-case';
 import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-context-sufficiency.use-case';
 import { CountDocumentTokensUseCase } from '@ai/application/use-cases/count-document-tokens.use-case';
 import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
@@ -159,6 +160,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     CheckContextSufficiencyUseCase,
     CreateNoContextAnswerUseCase,
     BuildRagCitationsUseCase,
+    BuildGroundedAnswerRevisionUseCase,
     SaveRagTraceUseCase,
     MemoryWriterAgentUseCase,
     ExtractReelMetadataUseCase,

@@ -140,12 +140,14 @@ export function assessDirectTranscriptFactSupport(input: {
         );
       const hasDirectRelation =
         sharedQuestionTerms.length >= 2 &&
+        (!explanationQuestion || hasExplanationFact(answerTokens)) &&
         /\b(assigned|called|named|label(?:led)?|same|common|because|belongs?|causes?|means?|can|could)\b/.test(
           evidence,
         );
       const hasExplanationRelation =
         explanationQuestion &&
         sharedQuestionTerms.length >= 2 &&
+        hasExplanationFact(answerTokens) &&
         /\b(because|since|therefore|so)\b/.test(evidence);
 
       return hasQuantitySupport ||
@@ -162,6 +164,21 @@ export function assessDirectTranscriptFactSupport(input: {
     supported: supportingEvidenceIndexes.length > 0,
     supportingEvidenceIndexes,
   };
+}
+
+function hasExplanationFact(answerTokens: string[]): boolean {
+  const connectiveTokens = new Set([
+    'because',
+    'even',
+    'not',
+    'since',
+    'so',
+    'therefore',
+  ]);
+  return (
+    new Set(answerTokens.filter((token) => !connectiveTokens.has(token)))
+      .size >= 2
+  );
 }
 
 function contentTokens(value: string): string[] {

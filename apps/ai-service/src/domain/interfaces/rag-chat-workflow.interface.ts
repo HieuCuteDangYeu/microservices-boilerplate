@@ -155,7 +155,11 @@ export interface RagCitationDiagnostics {
 
 export interface RagDraftHistoryEntry {
   revision: number;
-  source: 'INITIAL' | 'VERIFIER_REVISION' | 'CITATION_REVISION';
+  source:
+    | 'INITIAL'
+    | 'VERIFIER_REVISION'
+    | 'GROUNDED_VERIFIER_REVISION'
+    | 'CITATION_REVISION';
   answer: string;
 }
 

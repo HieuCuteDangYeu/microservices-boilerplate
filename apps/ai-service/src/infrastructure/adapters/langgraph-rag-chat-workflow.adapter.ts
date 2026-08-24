@@ -1,4 +1,5 @@
 import { BuildRagCitationsUseCase } from '@ai/application/use-cases/build-rag-citations.use-case';
+import { BuildGroundedAnswerRevisionUseCase } from '@ai/application/use-cases/build-grounded-answer-revision.use-case';
 import { CheckContextSufficiencyUseCase } from '@ai/application/use-cases/check-context-sufficiency.use-case';
 import { CreateNoContextAnswerUseCase } from '@ai/application/use-cases/create-no-context-answer.use-case';
 import { GenerateDraftAnswerUseCase } from '@ai/application/use-cases/generate-draft-answer.use-case';
@@ -86,6 +87,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
     @Inject('IContentService')
     private readonly contentService: IContentService,
+    private readonly buildGroundedAnswerRevisionUseCase?: BuildGroundedAnswerRevisionUseCase,
   ) {}
 
   async execute(input: RagChatWorkflowInput): Promise<RagChatWorkflowResult> {
@@ -430,9 +432,13 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     return async (
       state: RagChatWorkflowState,
     ): Promise<Partial<RagChatWorkflowState>> => {
-      const answer = await this.timed('draftAnswerNode', nodeTimings, () =>
-        this.generateDraftAnswerUseCase.execute(state),
-      );
+      const groundedAnswer =
+        this.buildGroundedAnswerRevisionUseCase?.execute(state);
+      const answer =
+        groundedAnswer ??
+        (await this.timed('draftAnswerNode', nodeTimings, () =>
+          this.generateDraftAnswerUseCase.execute(state),
+        ));
 
       return {
         answer,
@@ -442,7 +448,9 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
           ...state.draftHistory,
           {
             revision: state.draftRevision,
-            source: state.nextDraftSource,
+            source: groundedAnswer
+              ? 'GROUNDED_VERIFIER_REVISION'
+              : state.nextDraftSource,
             answer: answer.slice(0, 1500),
           },
         ].slice(-this.integer('AI_RAG_MAX_ANSWER_REVISIONS', 1, 0, 2) - 1),
