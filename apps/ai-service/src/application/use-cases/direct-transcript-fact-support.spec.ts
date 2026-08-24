@@ -69,4 +69,17 @@ describe('assessDirectTranscriptFactSupport', () => {
       expect(assess(question, answer, evidenceText).supported).toBe(false);
     },
   );
+
+  it('rejects the IN1002 wrong-slot backup count', () => {
+    const evidenceText =
+      'They have three backups in the university, but they will have backup at different physical places and some underground, so it is fireproof.';
+
+    expect(
+      assess(
+        'What safety measure do they say protects data if a building has a fire?',
+        'Three backups in the university.',
+        evidenceText,
+      ).supported,
+    ).toBe(false);
+  });
 });
