@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 
 interface CloudflareChatCompletionResponse {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
       content?: string | Record<string, unknown>;
     };
@@ -17,6 +18,78 @@ interface CloudflareChatCompletionResponse {
   errors?: Array<{
     message?: string;
   }>;
+}
+
+export class StructuredCompletionTruncatedError extends Error {
+  readonly code = 'STRUCTURED_COMPLETION_TRUNCATED';
+
+  constructor(
+    readonly model: string,
+    readonly requestedMaxTokens: number,
+    readonly finishReason: string,
+  ) {
+    super(
+      `Structured completion was truncated (model=${model}, maxTokens=${requestedMaxTokens}, finishReason=${finishReason})`,
+    );
+    this.name = 'StructuredCompletionTruncatedError';
+  }
+}
+
+export class StructuredCompletionInvalidJsonError extends Error {
+  readonly code = 'STRUCTURED_COMPLETION_INVALID_JSON';
+
+  constructor() {
+    super('Structured completion returned invalid JSON');
+    this.name = 'StructuredCompletionInvalidJsonError';
+  }
+}
+
+export class StructuredCompletionSchemaError extends Error {
+  readonly code = 'STRUCTURED_COMPLETION_SCHEMA_INVALID';
+
+  constructor() {
+    super('Structured completion failed local schema validation');
+    this.name = 'StructuredCompletionSchemaError';
+  }
+}
+
+export class StructuredCompletionEmptyContentError extends Error {
+  readonly code = 'STRUCTURED_COMPLETION_EMPTY_CONTENT';
+
+  constructor() {
+    super('Structured completion returned empty content');
+    this.name = 'StructuredCompletionEmptyContentError';
+  }
+}
+
+export class StructuredCompletionProviderError extends Error {
+  readonly code = 'STRUCTURED_COMPLETION_PROVIDER_ERROR';
+
+  constructor(
+    readonly model: string,
+    readonly status?: number,
+  ) {
+    super(
+      status
+        ? `Structured completion provider request failed (model=${model}, status=${status})`
+        : `Structured completion provider request failed (model=${model})`,
+    );
+    this.name = 'StructuredCompletionProviderError';
+  }
+}
+
+export class StructuredCompletionTimeoutError extends Error {
+  readonly code = 'STRUCTURED_COMPLETION_TIMEOUT';
+
+  constructor(
+    readonly model: string,
+    readonly timeoutMs: number,
+  ) {
+    super(
+      `Structured completion timed out (model=${model}, timeoutMs=${timeoutMs})`,
+    );
+    this.name = 'StructuredCompletionTimeoutError';
+  }
 }
 
 @Injectable()
@@ -39,6 +112,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
 
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
     const timeoutMs = this.resolveTimeout(input.timeoutMs);
+    const maxTokens = input.maxTokens ?? 500;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref();
@@ -65,7 +139,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
               content: input.userPrompt,
             },
           ],
-          max_tokens: input.maxTokens ?? 500,
+          max_tokens: maxTokens,
           temperature: input.temperature ?? 0.1,
           ...this.reasoningEffort(),
           response_format: {
@@ -75,40 +149,45 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
         }),
         signal: controller.signal,
       });
-    } catch (error: unknown) {
+    } catch {
       if (controller.signal.aborted) {
-        throw new Error(
-          `Cloudflare structured LLM request timed out after ${timeoutMs}ms`,
-        );
+        throw new StructuredCompletionTimeoutError(model, timeoutMs);
       }
-      throw error;
+      throw new StructuredCompletionProviderError(model);
     } finally {
       clearTimeout(timeout);
     }
 
-    const json = (await response.json()) as CloudflareChatCompletionResponse;
-
-    if (!response.ok) {
-      const message =
-        json.error?.message ||
-        json.errors
-          ?.map((error) => error.message)
-          .filter(Boolean)
-          .join(', ') ||
-        `Cloudflare structured LLM request failed with status ${response.status}`;
-
-      this.logger.warn(message);
-      throw new Error(message);
+    let json: CloudflareChatCompletionResponse;
+    try {
+      json = (await response.json()) as CloudflareChatCompletionResponse;
+    } catch {
+      throw new StructuredCompletionProviderError(model, response.status);
     }
 
-    const content = json.choices?.[0]?.message?.content;
+    if (!response.ok) {
+      this.logger.warn(
+        `Cloudflare structured completion failed (model=${model}, status=${response.status})`,
+      );
+      throw new StructuredCompletionProviderError(model, response.status);
+    }
+
+    const choice = json.choices?.[0];
+    if (choice?.finish_reason === 'length') {
+      throw new StructuredCompletionTruncatedError(
+        model,
+        maxTokens,
+        choice.finish_reason,
+      );
+    }
+    const content = choice?.message?.content;
 
     if (!content) {
-      throw new Error('Cloudflare structured LLM returned empty content');
+      throw new StructuredCompletionEmptyContentError();
     }
 
     if (typeof content === 'object') {
-      this.validateSchema(
+      this.validateLocalSchema(
         content,
         input.jsonSchema as unknown as Record<string, unknown>,
       );
@@ -119,9 +198,9 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
     try {
       parsed = this.parseJsonObject(content);
     } catch {
-      throw new Error('Cloudflare structured LLM returned invalid JSON');
+      throw new StructuredCompletionInvalidJsonError();
     }
-    this.validateSchema(
+    this.validateLocalSchema(
       parsed,
       input.jsonSchema as unknown as Record<string, unknown>,
     );
@@ -130,6 +209,17 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
 
   private parseJsonObject(content: string): Record<string, unknown> {
     return JSON.parse(content.trim()) as Record<string, unknown>;
+  }
+
+  private validateLocalSchema(
+    value: unknown,
+    schema: Record<string, unknown>,
+  ): void {
+    try {
+      this.validateSchema(value, schema);
+    } catch {
+      throw new StructuredCompletionSchemaError();
+    }
   }
 
   private gatewayHeaders(): Record<string, string> {

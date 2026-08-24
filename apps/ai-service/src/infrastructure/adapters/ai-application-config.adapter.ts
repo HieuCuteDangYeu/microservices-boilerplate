@@ -42,6 +42,14 @@ const TIMEOUT_ENV_BY_ROLE: Partial<Record<AiModelRole, string>> = {
   RERANKER: 'AI_RAG_NEURAL_RERANK_TIMEOUT_MS',
 };
 
+const VERIFIER_MAX_TOKENS_BY_ROLE = {
+  VERIFIER: { key: 'AI_VERIFIER_MAX_TOKENS', fallback: 650 },
+  VERIFIER_ESCALATION: {
+    key: 'AI_VERIFIER_ESCALATION_MAX_TOKENS',
+    fallback: 1_024,
+  },
+} as const;
+
 @Injectable()
 export class AiApplicationConfigAdapter
   implements IAiApplicationConfig, OnModuleInit
@@ -59,6 +67,8 @@ export class AiApplicationConfigAdapter
       this.model(role);
     }
     this.number('AI_EMBEDDING_DIMENSIONS', 0, 1, 4_096);
+    this.verifierMaxTokens('VERIFIER');
+    this.verifierMaxTokens('VERIFIER_ESCALATION');
     this.required('AI_EMBEDDING_VERSION');
   }
 
@@ -69,6 +79,11 @@ export class AiApplicationConfigAdapter
   timeoutMs(role: AiModelRole): number {
     const key = TIMEOUT_ENV_BY_ROLE[role];
     return key ? Math.round(this.number(key, 8_000, 500, 120_000)) : 8_000;
+  }
+
+  verifierMaxTokens(role: 'VERIFIER' | 'VERIFIER_ESCALATION'): number {
+    const { key, fallback } = VERIFIER_MAX_TOKENS_BY_ROLE[role];
+    return Math.round(this.number(key, fallback, 128, 4_096));
   }
 
   boolean(key: string, fallback: boolean): boolean {

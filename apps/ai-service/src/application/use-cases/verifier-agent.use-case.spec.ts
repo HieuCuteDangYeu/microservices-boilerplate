@@ -4,8 +4,15 @@ import { VerifierAgentUseCase } from './verifier-agent.use-case';
 
 describe('VerifierAgentUseCase', () => {
   const config = {
-    model: jest.fn((role: string) => `@cf/test/${role.toLowerCase()}`),
+    model: jest.fn((role: string) =>
+      role === 'VERIFIER'
+        ? '@cf/openai/gpt-oss-20b'
+        : '@cf/openai/gpt-oss-120b',
+    ),
     timeoutMs: jest.fn(() => 8_000),
+    verifierMaxTokens: jest.fn((role: string) =>
+      role === 'VERIFIER' ? 650 : 1_024,
+    ),
     boolean: jest.fn(() => true),
     number: jest.fn((key: string) =>
       key === 'AI_VERIFIER_MAX_ATTEMPTS' ? 2 : 0.8,
@@ -84,7 +91,8 @@ describe('VerifierAgentUseCase', () => {
     });
     expect(service.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: '@cf/test/verifier',
+        model: '@cf/openai/gpt-oss-20b',
+        maxTokens: 650,
         timeoutMs: 8_000,
         temperature: 0,
       }),
@@ -122,6 +130,136 @@ describe('VerifierAgentUseCase', () => {
       },
     });
     expect(service.generateObject).toHaveBeenCalledTimes(2);
+    expect(service.generateObject.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        model: '@cf/openai/gpt-oss-20b',
+        maxTokens: 650,
+      }),
+    );
+    expect(service.generateObject.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        model: '@cf/openai/gpt-oss-120b',
+        maxTokens: 1_024,
+      }),
+    );
+  });
+
+  it('escalates a low-confidence primary acceptance', async () => {
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockResolvedValueOnce(result({ confidence: 0.79 }))
+        .mockResolvedValueOnce(result()),
+    };
+    const useCase = new VerifierAgentUseCase(service as never, config);
+
+    await expect(
+      useCase.execute(
+        state({ evidenceText: 'The zorb is linked to the quasar.' }),
+      ),
+    ).resolves.toMatchObject({
+      diagnostics: {
+        modelRole: 'VERIFIER_ESCALATION',
+        escalationReason: 'LOW_CONFIDENCE',
+      },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('escalates a revised answer even when the primary accepts it', async () => {
+    const service = { generateObject: jest.fn().mockResolvedValue(result()) };
+    const useCase = new VerifierAgentUseCase(service as never, config);
+
+    await expect(
+      useCase.execute(
+        state({
+          evidenceText: 'The zorb is linked to the quasar.',
+          retryCount: 1,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      diagnostics: {
+        modelRole: 'VERIFIER_ESCALATION',
+        escalationReason: 'REVISED_ANSWER',
+      },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails a purported pass that reports a contradiction', async () => {
+    const service = {
+      generateObject: jest.fn().mockResolvedValue(
+        result({
+          passed: true,
+          contradictions: ['The evidence asserts the opposite relation.'],
+        }),
+      ),
+    };
+    const noEscalationConfig = {
+      ...config,
+      boolean: jest.fn(() => false),
+    } as unknown as IAiApplicationConfig;
+    const useCase = new VerifierAgentUseCase(
+      service as never,
+      noEscalationConfig,
+    );
+
+    await expect(
+      useCase.execute(state({ evidenceText: 'Authorized evidence.' })),
+    ).resolves.toMatchObject({
+      passed: false,
+      issues: ['The evidence asserts the opposite relation.'],
+    });
+  });
+
+  it('preserves a wrong-modality rejection', async () => {
+    const service = {
+      generateObject: jest.fn().mockResolvedValue(
+        result({
+          passed: false,
+          issues: [
+            'The visual claim is supported only by transcript evidence.',
+          ],
+          supportedClaimMappings: [],
+        }),
+      ),
+    };
+    const noEscalationConfig = {
+      ...config,
+      boolean: jest.fn(() => false),
+    } as unknown as IAiApplicationConfig;
+    const useCase = new VerifierAgentUseCase(
+      service as never,
+      noEscalationConfig,
+    );
+
+    await expect(
+      useCase.execute(state({ evidenceText: 'Transcript-only evidence.' })),
+    ).resolves.toMatchObject({
+      passed: false,
+      issues: ['The visual claim is supported only by transcript evidence.'],
+    });
+  });
+
+  it('sends a bounded compact output schema', async () => {
+    const service = { generateObject: jest.fn().mockResolvedValue(result()) };
+    const useCase = new VerifierAgentUseCase(service as never, config);
+
+    await useCase.execute(
+      state({ evidenceText: 'The zorb is linked to the quasar.' }),
+    );
+
+    expect(service.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jsonSchema: expect.objectContaining({
+          properties: expect.objectContaining({
+            issues: expect.objectContaining({ maxItems: 8 }),
+            contradictions: expect.objectContaining({ maxItems: 8 }),
+            supportedClaimMappings: expect.objectContaining({ maxItems: 12 }),
+          }),
+        }),
+      }),
+    );
   });
 
   it('rejects provider mappings to evidence IDs that were not supplied', async () => {

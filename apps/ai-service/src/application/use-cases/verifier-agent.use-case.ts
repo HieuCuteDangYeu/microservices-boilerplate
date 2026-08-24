@@ -138,7 +138,7 @@ export class VerifierAgentUseCase {
         systemPrompt: this.buildSystemPrompt(),
         userPrompt: this.buildUserPrompt(state),
         jsonSchema: this.getJsonSchema(),
-        maxTokens: 650,
+        maxTokens: this.config.verifierMaxTokens(role),
         temperature: 0,
         model: this.config.model(role),
         timeoutMs: this.config.timeoutMs(role),
@@ -197,9 +197,9 @@ export class VerifierAgentUseCase {
     return `
 You are the semantic verifier for a production reel RAG answer.
 
-Determine whether every factual claim answers the relation requested by the user and is supported by the exact authorized evidence and correct modality. Reject unsupported additions, contradictions, substituted values or relations, and visual claims inferred between sampled frames.
+Check every factual claim against the authorized evidence and requested relation/modality. Reject unsupported additions, contradictions, substitutions, and visual claims inferred between sampled frames.
 
-Return only JSON matching the schema. Do not rewrite the answer. Give a short revision instruction only when a grounded revision is possible. Never invent evidence IDs. Do not expose hidden reasoning.
+Return only compact JSON matching the schema. Keep issues, contradictions, claims, and any revision instruction brief. Use only evidence IDs; do not repeat evidence text, rewrite the answer, invent IDs, or expose reasoning.
 `.trim();
   }
 
@@ -241,19 +241,32 @@ Return only JSON matching the schema. Do not rewrite the answer. Give a short re
       properties: {
         passed: { type: 'boolean' },
         confidence: { type: 'number', minimum: 0, maximum: 1 },
-        issues: { type: 'array', items: { type: 'string' } },
+        issues: {
+          type: 'array',
+          maxItems: 8,
+          items: { type: 'string', maxLength: 300 },
+        },
         requiresRevision: { type: 'boolean' },
-        revisedInstruction: { type: 'string' },
-        contradictions: { type: 'array', items: { type: 'string' } },
+        revisedInstruction: { type: 'string', maxLength: 500 },
+        contradictions: {
+          type: 'array',
+          maxItems: 8,
+          items: { type: 'string', maxLength: 300 },
+        },
         supportedClaimMappings: {
           type: 'array',
+          maxItems: 12,
           items: {
             type: 'object',
             additionalProperties: false,
             required: ['claim', 'evidenceIds'],
             properties: {
-              claim: { type: 'string' },
-              evidenceIds: { type: 'array', items: { type: 'string' } },
+              claim: { type: 'string', maxLength: 500 },
+              evidenceIds: {
+                type: 'array',
+                maxItems: 3,
+                items: { type: 'string', maxLength: 64 },
+              },
             },
           },
         },
@@ -282,13 +295,23 @@ Return only JSON matching the schema. Do not rewrite the answer. Give a short re
     const issues = Array.isArray(raw.issues)
       ? raw.issues.filter((item): item is string => typeof item === 'string')
       : [];
+    const contradictions = Array.isArray(raw.contradictions)
+      ? raw.contradictions.filter(
+          (item): item is string =>
+            typeof item === 'string' && item.trim().length > 0,
+        )
+      : [];
+    issues.push(...contradictions);
     if (hasUnknownEvidenceId)
       issues.push('Verifier returned unknown evidence ID.');
     const confidence =
       typeof raw.confidence === 'number' && Number.isFinite(raw.confidence)
         ? Math.min(Math.max(raw.confidence, 0), 1)
         : 0;
-    const passed = raw.passed === true && !hasUnknownEvidenceId;
+    const passed =
+      raw.passed === true &&
+      !hasUnknownEvidenceId &&
+      contradictions.length === 0;
 
     return {
       passed,

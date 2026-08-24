@@ -1,4 +1,12 @@
-import { CloudflareStructuredLlmAdapter } from './cloudflare-structured-llm.adapter';
+import {
+  CloudflareStructuredLlmAdapter,
+  StructuredCompletionEmptyContentError,
+  StructuredCompletionInvalidJsonError,
+  StructuredCompletionProviderError,
+  StructuredCompletionSchemaError,
+  StructuredCompletionTimeoutError,
+  StructuredCompletionTruncatedError,
+} from './cloudflare-structured-llm.adapter';
 
 describe('CloudflareStructuredLlmAdapter', () => {
   afterEach(() => {
@@ -15,7 +23,9 @@ describe('CloudflareStructuredLlmAdapter', () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
-        choices: [{ message: { content: '{"passed":true}' } }],
+        choices: [
+          { finish_reason: 'stop', message: { content: '{"passed":true}' } },
+        ],
       }),
     } as never);
     const adapter = new CloudflareStructuredLlmAdapter(config as never);
@@ -43,7 +53,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
-        choices: [{ message: { content: 'not-json' } }],
+        choices: [{ finish_reason: 'stop', message: { content: 'not-json' } }],
       }),
     } as never);
     const adapter = new CloudflareStructuredLlmAdapter(config as never);
@@ -55,7 +65,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
         model: '@cf/test/structured',
         jsonSchema: { type: 'object' },
       }),
-    ).rejects.toThrow('Cloudflare structured LLM returned invalid JSON');
+    ).rejects.toBeInstanceOf(StructuredCompletionInvalidJsonError);
   });
 
   it('rejects parsed objects with unknown enum values or properties', async () => {
@@ -67,7 +77,10 @@ describe('CloudflareStructuredLlmAdapter', () => {
       ok: true,
       json: jest.fn().mockResolvedValue({
         choices: [
-          { message: { content: '{"decision":"MAYBE","extra":true}' } },
+          {
+            finish_reason: 'stop',
+            message: { content: '{"decision":"MAYBE","extra":true}' },
+          },
         ],
       }),
     } as never);
@@ -87,7 +100,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
           additionalProperties: false,
         },
       }),
-    ).rejects.toThrow('local schema validation');
+    ).rejects.toBeInstanceOf(StructuredCompletionSchemaError);
   });
 
   it.each([
@@ -102,7 +115,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
-        choices: [{ message: { content } }],
+        choices: [{ finish_reason: 'stop', message: { content } }],
       }),
     } as never);
     const adapter = new CloudflareStructuredLlmAdapter(config as never);
@@ -125,6 +138,121 @@ describe('CloudflareStructuredLlmAdapter', () => {
           },
         },
       }),
-    ).rejects.toThrow('local schema validation');
+    ).rejects.toBeInstanceOf(StructuredCompletionSchemaError);
+  });
+
+  it.each([
+    ['partial JSON', '{"passed":'],
+    ['parseable JSON', '{"passed":true}'],
+  ])('rejects length-finished %s before parsing', async (_name, content) => {
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('value'),
+      get: jest.fn().mockReturnValue('false'),
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        choices: [{ finish_reason: 'length', message: { content } }],
+      }),
+    } as never);
+    const adapter = new CloudflareStructuredLlmAdapter(config as never);
+
+    await expect(
+      adapter.generateObject({
+        systemPrompt: 'Return JSON.',
+        userPrompt: 'Set passed.',
+        model: '@cf/openai/gpt-oss-120b',
+        maxTokens: 1_024,
+        jsonSchema: { type: 'object' },
+      }),
+    ).rejects.toMatchObject({
+      name: StructuredCompletionTruncatedError.name,
+      requestedMaxTokens: 1_024,
+      finishReason: 'length',
+    });
+  });
+
+  it('rejects an empty stopped completion with a typed error', async () => {
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('value'),
+      get: jest.fn().mockReturnValue('false'),
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        choices: [{ finish_reason: 'stop', message: { content: '' } }],
+      }),
+    } as never);
+    const adapter = new CloudflareStructuredLlmAdapter(config as never);
+
+    await expect(
+      adapter.generateObject({
+        systemPrompt: 'Return JSON.',
+        userPrompt: 'Set passed.',
+        model: '@cf/test/structured',
+        jsonSchema: { type: 'object' },
+      }),
+    ).rejects.toBeInstanceOf(StructuredCompletionEmptyContentError);
+  });
+
+  it.each([429, 500])(
+    'redacts provider details for HTTP %i failures',
+    async (status) => {
+      const config = {
+        getOrThrow: jest.fn().mockReturnValue('value'),
+        get: jest.fn().mockReturnValue('false'),
+      };
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status,
+        json: jest.fn().mockResolvedValue({
+          errors: [{ message: 'secret provider diagnostic' }],
+        }),
+      } as never);
+      const adapter = new CloudflareStructuredLlmAdapter(config as never);
+
+      const request = adapter.generateObject({
+        systemPrompt: 'Return JSON.',
+        userPrompt: 'Set passed.',
+        model: '@cf/test/structured',
+        jsonSchema: { type: 'object' },
+      });
+      await expect(request).rejects.toBeInstanceOf(
+        StructuredCompletionProviderError,
+      );
+      await expect(request).rejects.not.toThrow('secret provider diagnostic');
+    },
+  );
+
+  it('classifies an aborted request as a typed timeout', async () => {
+    jest.useFakeTimers();
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('value'),
+      get: jest.fn().mockReturnValue('false'),
+    };
+    jest.spyOn(global, 'fetch').mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new Error('aborted')),
+          );
+        }),
+    );
+    const adapter = new CloudflareStructuredLlmAdapter(config as never);
+    const request = adapter.generateObject({
+      systemPrompt: 'Return JSON.',
+      userPrompt: 'Set passed.',
+      model: '@cf/test/structured',
+      timeoutMs: 500,
+      jsonSchema: { type: 'object' },
+    });
+
+    jest.advanceTimersByTime(500);
+    await expect(request).rejects.toBeInstanceOf(
+      StructuredCompletionTimeoutError,
+    );
+    jest.useRealTimers();
   });
 });
