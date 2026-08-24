@@ -34,6 +34,7 @@ import { ChatPromptBuilderAdapter } from '@ai/infrastructure/adapters/chat-promp
 import { CloudflareCitationAttributionAdapter } from '@ai/infrastructure/adapters/cloudflare-citation-attribution.adapter';
 import { CloudflareConversationSummarizerAdapter } from '@ai/infrastructure/adapters/cloudflare-conversation-summarizer.adapter';
 import { CloudflareCrossEncoderRerankerAdapter } from '@ai/infrastructure/adapters/cloudflare-cross-encoder-reranker.adapter';
+import { CloudflareEmbeddingAdapter } from '@ai/infrastructure/adapters/cloudflare-embedding.adapter';
 import { CloudflareLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-llm.adapter';
 import { CloudflareMemoryExtractorAdapter } from '@ai/infrastructure/adapters/cloudflare-memory-extractor.adapter';
 import { CloudflareStructuredLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-structured-llm.adapter';
@@ -44,7 +45,6 @@ import { CloudflareWorkersAiTextClient } from '@ai/infrastructure/adapters/cloud
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { ConversationTokenPublisherAdapter } from '@ai/infrastructure/adapters/conversation-token-publisher.adapter';
 import { DeterministicRetrievalEngineAdapter } from '@ai/infrastructure/adapters/deterministic-retrieval-engine.adapter';
-import { GeminiEmbeddingAdapter } from '@ai/infrastructure/adapters/gemini-embedding.adapter';
 import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
 import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/langgraph-rag-chat-workflow.adapter';
 import { ReelSemanticIndexAdapter } from '@ai/infrastructure/adapters/reel-semantic-index.adapter';
@@ -180,7 +180,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IEmbeddingService',
-      useClass: GeminiEmbeddingAdapter,
+      useClass: CloudflareEmbeddingAdapter,
     },
     {
       provide: 'ITranscriptionService',
@@ -197,9 +197,9 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     {
       provide: 'ILlmService',
       useClass:
-        process.env.AI_CHAT_PROVIDER === 'cloudflare'
-          ? CloudflareLlmAdapter
-          : GeminiLlmAdapter,
+        process.env.AI_CHAT_PROVIDER === 'gemini'
+          ? GeminiLlmAdapter
+          : CloudflareLlmAdapter,
     },
     {
       provide: 'IContentService',

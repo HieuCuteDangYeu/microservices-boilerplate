@@ -54,6 +54,7 @@ const RagChatStateSchema = new StateSchema({
   verification: z.any().optional(),
   citations: z.array(z.any()).default([]),
   citationCoverage: z.any().optional(),
+  groundedRevision: z.any().optional(),
   draftHistory: z.array(z.any()).default([]),
   draftRevision: z.number().default(0),
   citationAttempts: z.array(z.any()).default([]),
@@ -432,18 +433,36 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     return async (
       state: RagChatWorkflowState,
     ): Promise<Partial<RagChatWorkflowState>> => {
-      const groundedAnswer =
-        this.buildGroundedAnswerRevisionUseCase?.execute(state);
-      const answer =
-        groundedAnswer ??
-        (await this.timed('draftAnswerNode', nodeTimings, () =>
-          this.generateDraftAnswerUseCase.execute(state),
-        ));
+      const groundedRevisionUseCase = this.buildGroundedAnswerRevisionUseCase;
+      const groundedRevision = groundedRevisionUseCase
+        ? await groundedRevisionUseCase.executeWithProvenance(state)
+        : undefined;
+      const groundedAnswer = groundedRevision?.answer;
+      const draft = groundedAnswer
+        ? undefined
+        : await this.timed('draftAnswerNode', nodeTimings, () =>
+            this.generateDraftAnswerUseCase.execute(state),
+          );
+      const answer = groundedAnswer ?? draft!.answer;
 
       return {
         answer,
+        answerClaims: groundedRevision
+          ? [
+              {
+                claim: groundedRevision.answer,
+                evidenceIds: groundedRevision.evidenceIds,
+              },
+            ]
+          : draft!.claims,
         citations: [],
         citationCoverage: undefined,
+        groundedRevision: groundedRevision
+          ? {
+              evidenceIds: groundedRevision.evidenceIds,
+              modelRole: groundedRevision.modelRole,
+            }
+          : undefined,
         draftHistory: [
           ...state.draftHistory,
           {
@@ -786,13 +805,12 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     | 'prepareCitationRevisionNode'
     | 'verificationFailureNode' => {
     const coverage = state.citationCoverage;
-    if (
-      !coverage ||
-      coverage.mode !== 'LLM' ||
-      coverage.factualClaimCount === 0
-    ) {
+    if (!coverage || coverage.mode === 'NOT_REQUIRED') {
       return 'finalAnswerNode';
     }
+
+    if (coverage.mode === 'LLM' && coverage.factualClaimCount === 0)
+      return 'finalAnswerNode';
 
     const threshold = this.number(
       'AI_RAG_CITATION_COVERAGE_THRESHOLD',

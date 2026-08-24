@@ -7,6 +7,16 @@ const applicationConfig = (
   config: Record<string, string>,
 ): IIndexingApplicationConfig => ({
   get: <T = string>(key: string) => config[key] as T | undefined,
+  transcriptionIdentity: () => ({
+    provider: 'cloudflare-workers-ai',
+    model: '@cf/openai/whisper-large-v3-turbo',
+    version: 'cf-whisper-v1',
+  }),
+  embeddingIdentity: () => ({
+    model: config['AI_EMBEDDING_MODEL'] || '@cf/baai/bge-m3',
+    dimensions: Number(config['AI_EMBEDDING_DIMENSIONS'] || 1024),
+    version: config['AI_EMBEDDING_VERSION'] || 'cf-bge-m3-v1',
+  }),
 });
 
 const makeBuilder = (config: Record<string, string>) =>
@@ -141,7 +151,7 @@ describe('BuildShortEvidenceChunksUseCase', () => {
       ),
       segment(6, 7, 'thirteen fourteen fifteen.', 'b'),
     ];
-    const config = { ...baseConfig, INDEX_EMBEDDING_DIMENSIONS: '384' };
+    const config = { ...baseConfig, AI_EMBEDDING_DIMENSIONS: '1024' };
     const chunks = makeBuilder(config).execute(source);
     const hash = (value: string) =>
       createHash('sha256').update(value.normalize('NFKC')).digest('hex');
@@ -172,12 +182,12 @@ describe('BuildShortEvidenceChunksUseCase', () => {
       chunkingVersion: '1',
       summaryVersion: '1',
       indexVersion: '1',
-      embeddingProvider: 'test',
-      embeddingModel: 'test',
-      embeddingDimensions: 384,
-      embeddingVersion: '1',
+      embeddingProvider: 'cloudflare-workers-ai',
+      embeddingModel: '@cf/baai/bge-m3',
+      embeddingDimensions: 1024,
+      embeddingVersion: 'cf-bge-m3-v1',
       embeddingInputHash: 'input',
-      embedding: Array(384).fill(0.1),
+      embedding: Array(1024).fill(0.1),
       tokenCount: 1,
       ...(kind === 'CHUNK'
         ? {

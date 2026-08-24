@@ -19,7 +19,7 @@ export class RetrievalAgentPolicyAdapter implements IRetrievalAgentPolicy {
   }
 
   get model(): string | undefined {
-    return this.config.get<string>('CLOUDFLARE_TOOL_MODEL');
+    return this.config.get<string>('AI_RETRIEVAL_TOOL_MODEL');
   }
 
   get maxSteps(): number {

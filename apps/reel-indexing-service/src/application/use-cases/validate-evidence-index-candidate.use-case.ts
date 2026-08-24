@@ -48,12 +48,10 @@ export class ValidateEvidenceIndexCandidateUseCase {
       20,
       4_000,
     );
-    const expectedDimensions = this.positiveInt(
-      'INDEX_EMBEDDING_DIMENSIONS',
-      this.positiveInt('GEMINI_EMBEDDING_DIMENSIONS', 384, 1, 10_000),
-      1,
-      10_000,
-    );
+    const expectedEmbedding = this.config.embeddingIdentity();
+    const expectedProvider =
+      this.config.get<string>('INDEX_EMBEDDING_PROVIDER') ||
+      'cloudflare-workers-ai';
     const sourceEvidence = this.normalize(
       (input.transcriptSegments ?? []).map((segment) => segment.text).join(' '),
     );
@@ -82,8 +80,11 @@ export class ValidateEvidenceIndexCandidateUseCase {
         );
       }
       if (
-        document.embeddingDimensions !== expectedDimensions ||
-        document.embedding.length !== expectedDimensions ||
+        document.embeddingProvider !== expectedProvider ||
+        document.embeddingModel !== expectedEmbedding.model ||
+        document.embeddingDimensions !== expectedEmbedding.dimensions ||
+        document.embeddingVersion !== expectedEmbedding.version ||
+        document.embedding.length !== expectedEmbedding.dimensions ||
         document.embedding.some((value) => !Number.isFinite(value))
       ) {
         throw new Error(`Document ${document.id} has an invalid embedding`);

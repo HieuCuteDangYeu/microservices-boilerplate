@@ -52,10 +52,7 @@ export class CloudflareMemoryExtractorAdapter implements IMemoryExtractorService
   }
 
   private getMemoryModel(): string {
-    return (
-      this.configService.get<string>('CLOUDFLARE_MEMORY_MODEL') ||
-      '@cf/meta/llama-3.1-8b-instruct-fast'
-    );
+    return this.configService.getOrThrow<string>('AI_MEMORY_EXTRACTION_MODEL');
   }
 
   private getMemoryEndpoint(): CloudflareChatEndpoint {

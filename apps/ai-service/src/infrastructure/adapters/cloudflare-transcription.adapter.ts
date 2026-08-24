@@ -36,6 +36,8 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
   private readonly endpoint: string;
   private readonly apiToken: string;
   private readonly model: string;
+  private readonly version: string;
+  private readonly timeoutMs: number;
   private readonly language?: string;
 
   constructor(private readonly configService: ConfigService) {
@@ -45,12 +47,15 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
     this.apiToken = this.configService.getOrThrow<string>(
       'CLOUDFLARE_API_TOKEN',
     );
-    this.model =
-      this.configService.get<string>('CLOUDFLARE_AI_TRANSCRIPTION_MODEL') ||
-      '@cf/openai/whisper-large-v3-turbo';
+    this.model = this.configService.getOrThrow<string>(
+      'AI_TRANSCRIPTION_MODEL',
+    );
+    this.version = this.configService.getOrThrow<string>(
+      'AI_TRANSCRIPTION_VERSION',
+    );
+    this.timeoutMs = this.positiveInt('AI_TRANSCRIPTION_TIMEOUT_MS', 120_000);
     this.language =
-      this.configService.get<string>('CLOUDFLARE_AI_TRANSCRIPTION_LANGUAGE') ||
-      undefined;
+      this.configService.get<string>('AI_TRANSCRIPTION_LANGUAGE') || undefined;
     this.endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${this.model}`;
   }
 
@@ -58,64 +63,75 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
     audioBuffer: Buffer,
     options?: TranscriptionOptions,
   ): Promise<TranscriptionResult> {
-    const response = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        audio: audioBuffer.toString('base64'),
-        task: 'transcribe',
-        ...(this.language ? { language: this.language } : {}),
-        // Reels often include silence, music, and fast cuts. These settings
-        // reduce hallucinated carry-over and help focus on spoken audio.
-        vad_filter: true,
-        condition_on_previous_text: false,
-        hallucination_silence_threshold: 2,
-        ...(options?.initialPrompt
-          ? { initial_prompt: options.initialPrompt }
-          : {}),
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    timeout.unref();
 
-    const rawBody = await response.text();
-    const payload = this.parseResponse(rawBody);
+    try {
+      const response = await fetch(this.endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+          'cf-aig-skip-cache': 'true',
+          ...this.gatewayHeaders(),
+        },
+        body: JSON.stringify({
+          audio: audioBuffer.toString('base64'),
+          task: 'transcribe',
+          ...(this.language ? { language: this.language } : {}),
+          // Reels often include silence, music, and fast cuts. These settings
+          // reduce hallucinated carry-over and help focus on spoken audio.
+          vad_filter: true,
+          condition_on_previous_text: false,
+          hallucination_silence_threshold: 2,
+          ...(options?.initialPrompt
+            ? { initial_prompt: options.initialPrompt }
+            : {}),
+        }),
+      });
 
-    if (!response.ok) {
-      throw new Error(
-        `Cloudflare Workers AI request failed with status ${response.status}: ${this.extractErrorMessage(payload, rawBody)}`,
-      );
+      const rawBody = await response.text();
+      const payload = this.parseResponse(rawBody);
+
+      if (!response.ok) {
+        throw new Error(
+          `Cloudflare Workers AI request failed with status ${response.status}: ${this.extractErrorMessage(payload, rawBody)}`,
+        );
+      }
+
+      if (!payload.success || !payload.result) {
+        throw new Error(
+          `Cloudflare Workers AI transcription failed: ${this.extractErrorMessage(payload, rawBody)}`,
+        );
+      }
+
+      const text =
+        payload.result.text?.trim() ||
+        payload.result.transcription_info?.text?.trim();
+
+      const vtt = payload.result.vtt?.trim() || undefined;
+      const segments = this.normalizeSegments(payload.result.segments);
+      const wordCount =
+        payload.result.word_count ??
+        payload.result.transcription_info?.word_count ??
+        undefined;
+
+      return {
+        // A successful empty transcript is valid for silence, music, and other
+        // clips without speech. The indexing pipeline can still index metadata.
+        text: text ?? '',
+        vtt,
+        segments: segments.length > 0 ? segments : undefined,
+        wordCount,
+        provider: 'cloudflare-workers-ai',
+        model: this.model,
+        version: this.version,
+      };
+    } finally {
+      clearTimeout(timeout);
     }
-
-    if (!payload.success || !payload.result) {
-      throw new Error(
-        `Cloudflare Workers AI transcription failed: ${this.extractErrorMessage(payload, rawBody)}`,
-      );
-    }
-
-    const text =
-      payload.result.text?.trim() ||
-      payload.result.transcription_info?.text?.trim();
-
-    const vtt = payload.result.vtt?.trim() || undefined;
-    const segments = this.normalizeSegments(payload.result.segments);
-    const wordCount =
-      payload.result.word_count ??
-      payload.result.transcription_info?.word_count ??
-      undefined;
-
-    return {
-      // A successful empty transcript is valid for silence, music, and other
-      // clips without speech. The indexing pipeline can still index metadata.
-      text: text ?? '',
-      vtt,
-      segments: segments.length > 0 ? segments : undefined,
-      wordCount,
-      provider: 'cloudflare-workers-ai',
-      model: this.model,
-      version: '1',
-    };
   }
 
   private parseResponse(
@@ -128,6 +144,21 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
     } catch {
       return {};
     }
+  }
+
+  private gatewayHeaders(): Record<string, string> {
+    const enabled =
+      this.configService
+        .get<string>('CLOUDFLARE_AI_GATEWAY_ENABLED')
+        ?.trim()
+        .toLowerCase() !== 'false';
+    return enabled
+      ? {
+          'cf-aig-gateway-id': this.configService.getOrThrow<string>(
+            'CLOUDFLARE_AI_GATEWAY_ID',
+          ),
+        }
+      : {};
   }
 
   private extractErrorMessage(
@@ -185,5 +216,12 @@ export class CloudflareTranscriptionAdapter implements ITranscriptionService {
         } satisfies TranscriptSegment,
       ];
     });
+  }
+
+  private positiveInt(key: string, max: number): number {
+    const value = Number(this.configService.getOrThrow<string>(key));
+    if (!Number.isInteger(value) || value < 1 || value > max)
+      throw new Error(`Invalid ${key}`);
+    return value;
   }
 }

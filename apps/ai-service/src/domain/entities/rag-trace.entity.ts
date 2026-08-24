@@ -10,7 +10,12 @@ export interface RagWorkflowTraceMetrics {
   supportedClaimCount?: number;
   diagnostics?: {
     contextSufficiency?: unknown;
+    route?: unknown;
+    retrievalPlan?: unknown;
+    retrievalCounts?: { retrieved: number; reranked: number };
     draftHistory?: unknown[];
+    groundedRevision?: unknown;
+    answerClaims?: unknown[];
     verification?: unknown;
     citationAttempts?: unknown[];
     finalFailureSource?: string;

@@ -6,9 +6,17 @@ describe('CloudflareCitationAttributionAdapter', () => {
   const createConfig = (values: Record<string, string> = {}) =>
     ({
       get: jest.fn((key: string) => values[key]),
+      getOrThrow: jest.fn((key: string) => {
+        if (key === 'AI_CITATION_ATTRIBUTION_MODEL') {
+          return values[key] ?? '@cf/test/citation';
+        }
+        const value = values[key];
+        if (!value) throw new Error(`Missing ${key}`);
+        return value;
+      }),
     }) as unknown as ConfigService;
 
-  it('keeps only supplied high-confidence evidence IDs and computes coverage', async () => {
+  it('rejects claim mappings containing unknown evidence IDs', async () => {
     const structuredLlmService: IStructuredLlmService = {
       generateObject: jest.fn().mockResolvedValue({
         claims: [
@@ -54,12 +62,12 @@ describe('CloudflareCitationAttributionAdapter', () => {
         ],
       }),
     ).resolves.toEqual({
-      selections: [{ evidenceId: 'e0', confidence: 0.92 }],
+      selections: [],
       claims: [
         {
           claim: 'The screen shows a module-not-found error.',
-          supported: true,
-          evidenceIds: ['e0'],
+          supported: false,
+          evidenceIds: [],
           confidence: 0.92,
         },
         {
@@ -70,13 +78,18 @@ describe('CloudflareCitationAttributionAdapter', () => {
         },
       ],
       factualClaimCount: 2,
-      supportedClaimCount: 1,
-      coverage: 0.5,
+      supportedClaimCount: 0,
+      coverage: 0,
+      diagnostics: {
+        modelRole: 'CITATION_ATTRIBUTION',
+        model: '@cf/test/citation',
+        providerStatus: 'SUCCESS',
+      },
     });
 
     expect(structuredLlmService.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: '@cf/meta/llama-3.1-8b-instruct',
+        model: '@cf/test/citation',
         temperature: 0,
         timeoutMs: 4_000,
       }),
@@ -112,6 +125,11 @@ describe('CloudflareCitationAttributionAdapter', () => {
       factualClaimCount: 0,
       supportedClaimCount: 0,
       coverage: 1,
+      diagnostics: {
+        modelRole: 'CITATION_ATTRIBUTION',
+        model: '@cf/test/citation',
+        providerStatus: 'SUCCESS',
+      },
     });
   });
 });

@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 
 if (process.env.CLOUDFLARE_STRUCTURED_SMOKE !== 'true') {
-  console.error('Set CLOUDFLARE_STRUCTURED_SMOKE=true to run this provider smoke test.');
+  console.error(
+    'Set CLOUDFLARE_STRUCTURED_SMOKE=true to run this provider smoke test.',
+  );
   process.exit(1);
 }
 
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
 const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-const model = '@cf/meta/llama-3.1-8b-instruct-fast';
+const model = process.env.AI_CONTEXT_SUFFICIENCY_MODEL;
 
-if (!accountId || !apiToken) {
-  console.error('CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be set.');
+if (!accountId || !apiToken || !model) {
+  console.error(
+    'Cloudflare credentials and AI_CONTEXT_SUFFICIENCY_MODEL must be set.',
+  );
   process.exit(1);
 }
 
@@ -70,6 +74,10 @@ async function main() {
       headers: {
         Authorization: `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
+        'cf-aig-skip-cache': 'true',
+        ...(process.env.CLOUDFLARE_AI_GATEWAY_ENABLED !== 'false'
+          ? { 'cf-aig-gateway-id': process.env.CLOUDFLARE_AI_GATEWAY_ID }
+          : {}),
       },
       body: JSON.stringify({
         model,
@@ -81,11 +89,19 @@ async function main() {
           {
             role: 'user',
             content:
-              'Assess the claim "Olivier is named" against evidence e0: "Olivier is named." Return one supported claim with evidenceIds ["e0"].',
+              'Assess the synthetic claim "The zorb orbits the quasar" against evidence e0: "The zorb orbits the quasar." Return one supported claim with evidenceIds ["e0"].',
           },
         ],
-        max_tokens: 200,
+        max_tokens: Number(
+          process.env.CLOUDFLARE_STRUCTURED_SMOKE_MAX_TOKENS || 600,
+        ),
         temperature: 0,
+        ...(process.env.CLOUDFLARE_STRUCTURED_REASONING_EFFORT
+          ? {
+              reasoning_effort:
+                process.env.CLOUDFLARE_STRUCTURED_REASONING_EFFORT,
+            }
+          : {}),
         response_format: { type: 'json_schema', json_schema: schema },
       }),
     },
@@ -93,8 +109,21 @@ async function main() {
   const payload = await response.json();
   if (!response.ok) throw new Error(providerError(response.status, payload));
   const content = payload?.choices?.[0]?.message?.content;
+  if (content && typeof content === 'object') {
+    if (!valid(content))
+      throw new Error('Structured provider returned schema-incompatible JSON.');
+    console.log('MODEL_ACTIVE=YES');
+    console.log(`MODEL=${model}`);
+    console.log(`HTTP=${response.status}`);
+    console.log('STRUCTURED_OUTPUT=PASS');
+    console.log('JSON_SCHEMA=PASS');
+    return;
+  }
   if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('Structured provider returned no content.');
+    const choice = payload?.choices?.[0];
+    throw new Error(
+      `Structured provider returned no content (finish_reason=${choice?.finish_reason ?? 'missing'} message_keys=${Object.keys(choice?.message ?? {}).join(',') || 'none'}).`,
+    );
   }
   let parsed;
   try {
@@ -102,9 +131,11 @@ async function main() {
   } catch {
     throw new Error('Structured provider returned invalid JSON.');
   }
-  if (!valid(parsed)) throw new Error('Structured provider returned schema-incompatible JSON.');
+  if (!valid(parsed))
+    throw new Error('Structured provider returned schema-incompatible JSON.');
 
   console.log('MODEL_ACTIVE=YES');
+  console.log(`MODEL=${model}`);
   console.log(`HTTP=${response.status}`);
   console.log('STRUCTURED_OUTPUT=PASS');
   console.log('JSON_SCHEMA=PASS');

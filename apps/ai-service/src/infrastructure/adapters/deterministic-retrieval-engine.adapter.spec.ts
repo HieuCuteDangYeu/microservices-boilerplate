@@ -105,8 +105,8 @@ const reelDocument: SemanticReelDocument = {
   indexVersion: 'v1',
   embeddingProvider: 'test',
   embeddingModel: 'test',
-  embeddingDimensions: 384,
-  embeddingVersion: 'v1',
+  embeddingDimensions: 1024,
+  embeddingVersion: 'cf-bge-m3-v1',
   chunkingVersion: 'v1',
   summaryVersion: 'v1',
   createdAt: new Date(0).toISOString(),
@@ -116,11 +116,11 @@ const reelDocument: SemanticReelDocument = {
 const buildAdapter = (configValues: Record<string, string>) => {
   const embeddingService: IEmbeddingService = {
     generateVector: jest.fn().mockResolvedValue({
-      values: Array.from({ length: 384 }, () => 0.01),
-      model: 'test',
-      dimensions: 384,
-      provider: 'test',
-      version: 'v1',
+      values: Array.from({ length: 1024 }, () => 0.01),
+      model: '@cf/baai/bge-m3',
+      dimensions: 1024,
+      provider: 'cloudflare-workers-ai',
+      version: 'cf-bge-m3-v1',
     }),
     countTokens: jest.fn(),
   };

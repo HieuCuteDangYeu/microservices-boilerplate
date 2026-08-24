@@ -105,7 +105,10 @@ const latency = cases
   .filter(Number.isFinite)
   .sort((a, b) => a - b);
 const report = {
-  runId: `existing-reels-rag-benchmark-${Date.now()}`,
+  // Test invocations run in separate processes and can share a millisecond.
+  // Keep the timestamped report convention while preventing one invocation
+  // from overwriting another before its caller can read it.
+  runId: `existing-reels-rag-benchmark-${Date.now()}-${process.pid}`,
   generatedAt: new Date().toISOString(),
   productionSnapshot: {
     checkoutSha: '29d291c00c1582673251bfeaa11ac121b0b0ec5d',

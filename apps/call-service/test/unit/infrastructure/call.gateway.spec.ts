@@ -388,6 +388,7 @@ describe('CallGateway reconnect recovery', () => {
       userId: 'user-b',
       producerId: 'producer-1',
       kind: 'audio',
+      paused: false,
     });
     expect(leaveCallUseCase.execute).not.toHaveBeenCalled();
     expect(stateRepository.removeParticipant).not.toHaveBeenCalled();
@@ -459,6 +460,7 @@ function createGateway(overrides?: {
     (overrides?.leaveCallUseCase ?? { execute: jest.fn() }) as never,
     (overrides?.rejectCallUseCase ?? { execute: jest.fn() }) as never,
     (overrides?.answerCallUseCase ?? { execute: jest.fn() }) as never,
+    {} as never,
     {} as never,
     {} as never,
     (overrides?.mediaEngine ?? {

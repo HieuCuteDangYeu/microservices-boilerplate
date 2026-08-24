@@ -13,6 +13,8 @@ export class RewriteRetrievalQueryUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
+    @Inject('IAiApplicationConfig')
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async execute(state: RagChatWorkflowState): Promise<string> {
@@ -43,7 +45,8 @@ export class RewriteRetrievalQueryUseCase {
           },
           maxTokens: 120,
           temperature: 0,
-          timeoutMs: 3_000,
+          model: this.config.model('RETRIEVAL_PLANNER'),
+          timeoutMs: this.config.timeoutMs('RETRIEVAL_PLANNER'),
         });
 
       if (typeof result.query === 'string' && result.query.trim()) {
@@ -57,3 +60,4 @@ export class RewriteRetrievalQueryUseCase {
     return state.userMessage.trim();
   }
 }
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';

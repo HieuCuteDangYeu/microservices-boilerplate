@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
 import { ILlmService } from '../../domain/interfaces/llm.service.interface';
 import type { CloudflareChatEndpoint } from './cloudflare-workers-ai-text.client';
 import { CloudflareWorkersAiTextClient } from './cloudflare-workers-ai-text.client';
@@ -18,6 +19,7 @@ export class CloudflareLlmAdapter implements ILlmService {
     systemInstruction: string,
     userId: string,
     onToken: (token: string) => void,
+    sessionAffinityKey?: string,
   ): Promise<string> {
     const model = this.getModel();
     const endpoint = this.getEndpoint();
@@ -49,6 +51,10 @@ export class CloudflareLlmAdapter implements ILlmService {
         timeoutMs,
         maxTokens,
         temperature,
+        sessionAffinity: createHash('sha256')
+          .update(`velora-rag:${sessionAffinityKey || userId}`)
+          .digest('hex')
+          .slice(0, 32),
         onToken: (token: string) => {
           emittedStreamToken = true;
           onToken(token);
@@ -110,10 +116,7 @@ export class CloudflareLlmAdapter implements ILlmService {
   }
 
   private getModel(): string {
-    return (
-      this.configService.get<string>('CLOUDFLARE_CHAT_MODEL') ||
-      '@cf/meta/llama-3.1-8b-instruct-fast'
-    );
+    return this.configService.getOrThrow<string>('AI_ANSWER_MODEL');
   }
 
   private getEndpoint(): CloudflareChatEndpoint {

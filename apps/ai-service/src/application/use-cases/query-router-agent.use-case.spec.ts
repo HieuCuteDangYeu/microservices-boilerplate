@@ -1,7 +1,13 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import { QueryRouterAgentUseCase } from './query-router-agent.use-case';
 
 describe('QueryRouterAgentUseCase', () => {
-  const normalRouterResponse = {
+  const config = {
+    model: jest.fn(() => '@cf/test/router'),
+    timeoutMs: jest.fn(() => 7_000),
+  } as unknown as IAiApplicationConfig;
+
+  const response = (overrides: Record<string, unknown> = {}) => ({
     intent: 'NORMAL_CHAT',
     needsRetrieval: false,
     needsUserMemory: false,
@@ -9,52 +15,51 @@ describe('QueryRouterAgentUseCase', () => {
     needsVerification: false,
     reelQuestionType: 'NONE',
     requiredEvidence: ['NONE'],
-    recommendationAction: { type: 'NONE' },
-  };
-
-  it('forces transcript retrieval for an explicit shared media question', async () => {
-    const structuredLlmService = {
-      generateObject: jest.fn().mockResolvedValue(normalRouterResponse),
-    };
-    const useCase = new QueryRouterAgentUseCase(structuredLlmService as never);
-
-    await expect(
-      useCase.execute({
-        message:
-          'What does the shared long-form canary say about timestamp citations?',
-        hasSharedReelContext: true,
-      }),
-    ).resolves.toMatchObject({
-      intent: 'REEL_VIDEO_QUESTION',
-      reelQuestionType: 'TRANSCRIPT_CONTENT',
-      needsRetrieval: true,
-      requiredEvidence: ['TRANSCRIPT'],
-      recommendationAction: { type: 'NONE' },
-    });
+    recommendationAction: {
+      type: 'NONE',
+      query: '',
+      minRelevantItems: 2,
+      allowPersonalizedFallback: false,
+      suggestedQueries: [],
+      reason: 'No discovery request.',
+    },
+    reason: 'Semantic classification.',
+    ...overrides,
   });
 
   it.each([
-    ['What order number is visible?', 'VISUAL_CONTENT', ['VISUAL']],
-    ['What discount is visible?', 'VISUAL_CONTENT', ['VISUAL']],
-    ['What does it say on screen?', 'VISUAL_CONTENT', ['VISUAL']],
     [
-      'What project name does the speaker say?',
+      'Which luminiferous covenant does the speaker attribute to the zorb?',
       'TRANSCRIPT_CONTENT',
       ['TRANSCRIPT'],
     ],
     [
-      'What is this reel about?',
+      'Quel glyphe est perceptible sur le mécanisme partagé ?',
+      'VISUAL_CONTENT',
+      ['VISUAL'],
+    ],
+    [
+      'Tóm tắt ý nghĩa tổng thể của đoạn media vừa chia sẻ.',
       'GENERAL_REEL_SUMMARY',
       ['TRANSCRIPT', 'METADATA'],
     ],
   ])(
-    'routes a bare shared-reel question with the required evidence: %s',
+    'uses semantic output for novel wording: %s',
     async (message, reelQuestionType, requiredEvidence) => {
       const structuredLlmService = {
-        generateObject: jest.fn().mockResolvedValue(normalRouterResponse),
+        generateObject: jest.fn().mockResolvedValue(
+          response({
+            intent: 'REEL_VIDEO_QUESTION',
+            needsRetrieval: true,
+            needsVerification: true,
+            reelQuestionType,
+            requiredEvidence,
+          }),
+        ),
       };
       const useCase = new QueryRouterAgentUseCase(
         structuredLlmService as never,
+        config,
       );
 
       await expect(
@@ -65,195 +70,104 @@ describe('QueryRouterAgentUseCase', () => {
         requiredEvidence,
         needsRetrieval: true,
       });
-    },
-  );
-
-  it('strips erroneous conversation memory from the exact IN1001-2 route shape', async () => {
-    const structuredLlmService = {
-      generateObject: jest.fn().mockResolvedValue({
-        ...normalRouterResponse,
-        intent: 'REEL_VIDEO_QUESTION',
-        reelQuestionType: 'TRANSCRIPT_CONTENT',
-        requiredEvidence: ['TRANSCRIPT', 'CONVERSATION_MEMORY'],
-      }),
-    };
-    const useCase = new QueryRouterAgentUseCase(structuredLlmService as never);
-
-    await expect(
-      useCase.execute({
-        message:
-          'Where was the video shot detector project carried out, and under whose supervision?',
-        hasSharedReelContext: true,
-      }),
-    ).resolves.toMatchObject({
-      intent: 'REEL_VIDEO_QUESTION',
-      reelQuestionType: 'TRANSCRIPT_CONTENT',
-      requiredEvidence: ['TRANSCRIPT'],
-    });
-  });
-
-  it.each([
-    'Who is the video shot detector being presented to?',
-    'Where was the video shot detector project carried out, and under whose supervision?',
-    'What safety measure do they say protects data if a building has a fire?',
-    'Why do they say CDs are not enough for backing up data?',
-    'In the marble example, what does someone tell the algorithm about two marbles?',
-    'What example label is used for a marble that is put into a bag?',
-    'How many frequency bands is the speaker currently using?',
-    'How low does the speaker say the number of bands can go while still being okay?',
-    'Which person is mentioned in the discussion?',
-  ])(
-    'routes standalone factual shared-reel questions to transcript retrieval: %s',
-    async (message) => {
-      const structuredLlmService = {
-        generateObject: jest.fn().mockResolvedValue(normalRouterResponse),
-      };
-      const useCase = new QueryRouterAgentUseCase(
-        structuredLlmService as never,
-      );
-
-      await expect(
-        useCase.execute({
-          message,
-          hasSharedReelContext: true,
-          sharedReelCount: 4,
+      expect(structuredLlmService.generateObject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: '@cf/test/router',
+          timeoutMs: 7_000,
+          temperature: 0,
         }),
-      ).resolves.toMatchObject({
-        intent: 'REEL_VIDEO_QUESTION',
-        reelQuestionType: 'TRANSCRIPT_CONTENT',
-        requiredEvidence: ['TRANSCRIPT'],
-        needsRetrieval: true,
-      });
+      );
     },
   );
 
-  it('does not convert a bare visual question without shared reel access', async () => {
+  it('enforces canonical evidence invariants after semantic classification', async () => {
     const structuredLlmService = {
-      generateObject: jest.fn().mockResolvedValue(normalRouterResponse),
-    };
-    const useCase = new QueryRouterAgentUseCase(structuredLlmService as never);
-
-    await expect(
-      useCase.execute({
-        message: 'What order number is visible?',
-        hasSharedReelContext: false,
-      }),
-    ).resolves.toMatchObject({
-      intent: 'NORMAL_CHAT',
-      reelQuestionType: 'NONE',
-      needsRetrieval: false,
-    });
-  });
-
-  it.each([
-    ['TRANSCRIPT_CONTENT', ['TRANSCRIPT']],
-    ['VISUAL_CONTENT', ['VISUAL']],
-    ['GENERAL_REEL_SUMMARY', ['TRANSCRIPT', 'METADATA']],
-    ['REEL_METADATA', ['METADATA']],
-  ])(
-    'uses only the canonical evidence modalities for typed reel routes: %s',
-    async (reelQuestionType, requiredEvidence) => {
-      const structuredLlmService = {
-        generateObject: jest.fn().mockResolvedValue({
-          ...normalRouterResponse,
+      generateObject: jest.fn().mockResolvedValue(
+        response({
           intent: 'REEL_VIDEO_QUESTION',
-          reelQuestionType,
-          requiredEvidence: [
-            'TRANSCRIPT',
-            'VISUAL',
-            'METADATA',
-            'CONVERSATION_MEMORY',
-            'USER_MEMORY',
-          ],
+          reelQuestionType: 'VISUAL_CONTENT',
+          requiredEvidence: ['TRANSCRIPT', 'VISUAL', 'CONVERSATION_MEMORY'],
+          recommendationAction: {
+            type: 'RECOMMEND_REELS',
+            query: 'unrelated',
+            minRelevantItems: 8,
+            allowPersonalizedFallback: true,
+            suggestedQueries: [],
+            reason: 'Incorrect provider action.',
+          },
         }),
-      };
-      const useCase = new QueryRouterAgentUseCase(
-        structuredLlmService as never,
-      );
+      ),
+    };
+    const useCase = new QueryRouterAgentUseCase(
+      structuredLlmService as never,
+      config,
+    );
 
-      await expect(
-        useCase.execute({
-          message: 'What is this shared reel about?',
-          hasSharedReelContext: false,
-        }),
-      ).resolves.toMatchObject({
-        intent: 'REEL_VIDEO_QUESTION',
-        reelQuestionType,
-        requiredEvidence,
-      });
-    },
-  );
+    await expect(
+      useCase.execute({ message: 'Inspect the shared medium.' }),
+    ).resolves.toMatchObject({
+      requiredEvidence: ['VISUAL'],
+      recommendationAction: { type: 'NONE' },
+    });
+  });
 
   it.each([
     ['CONVERSATION_MEMORY_QUESTION', ['CONVERSATION_MEMORY']],
     ['USER_MEMORY_QUESTION', ['USER_MEMORY']],
-  ])(
-    'preserves canonical memory evidence for %s',
-    async (intent, requiredEvidence) => {
-      const structuredLlmService = {
-        generateObject: jest.fn().mockResolvedValue({
-          ...normalRouterResponse,
-          intent,
-          requiredEvidence: [
-            'TRANSCRIPT',
-            'CONVERSATION_MEMORY',
-            'USER_MEMORY',
-          ],
-        }),
-      };
-      const useCase = new QueryRouterAgentUseCase(
-        structuredLlmService as never,
-      );
-
-      await expect(
-        useCase.execute({ message: 'What did we discuss?' }),
-      ).resolves.toMatchObject({
-        intent,
-        requiredEvidence,
-      });
-    },
-  );
-
-  it('keeps ordinary chat as normal chat even when reel context exists', async () => {
+  ])('enforces canonical evidence for %s', async (intent, requiredEvidence) => {
     const structuredLlmService = {
-      generateObject: jest.fn().mockResolvedValue(normalRouterResponse),
+      generateObject: jest.fn().mockResolvedValue(
+        response({
+          intent,
+          requiredEvidence: ['TRANSCRIPT', 'USER_MEMORY'],
+        }),
+      ),
     };
-    const useCase = new QueryRouterAgentUseCase(structuredLlmService as never);
+    const useCase = new QueryRouterAgentUseCase(
+      structuredLlmService as never,
+      config,
+    );
 
     await expect(
-      useCase.execute({
-        message: 'Can you explain dependency injection?',
-        hasSharedReelContext: true,
-      }),
-    ).resolves.toMatchObject({
-      intent: 'NORMAL_CHAT',
-      needsRetrieval: false,
-    });
+      useCase.execute({ message: 'Recall context.' }),
+    ).resolves.toMatchObject({ intent, requiredEvidence });
   });
 
-  it.each([
-    'hello',
-    'write me a TypeScript debounce function',
-    'what is the capital of Japan?',
-    'help me debug my Dockerfile',
-    'remember that I prefer dark mode',
-    'recommend me some fitness reels',
-  ])('keeps unrelated chat normal with shared reels: %s', async (message) => {
+  it('keeps unrelated chat normal even when reel context exists', async () => {
     const structuredLlmService = {
-      generateObject: jest.fn().mockResolvedValue(normalRouterResponse),
+      generateObject: jest.fn().mockResolvedValue(response()),
     };
-    const useCase = new QueryRouterAgentUseCase(structuredLlmService as never);
+    const useCase = new QueryRouterAgentUseCase(
+      structuredLlmService as never,
+      config,
+    );
 
     await expect(
       useCase.execute({
-        message,
+        message: 'Explain dependency injection.',
         hasSharedReelContext: true,
-        sharedReelCount: 4,
       }),
     ).resolves.toMatchObject({
       intent: 'NORMAL_CHAT',
       needsRetrieval: false,
       reelQuestionType: 'NONE',
+    });
+  });
+
+  it('fails safely to normal chat when semantic routing is unavailable', async () => {
+    const useCase = new QueryRouterAgentUseCase(
+      {
+        generateObject: jest.fn().mockRejectedValue(new Error('provider down')),
+      } as never,
+      config,
+    );
+
+    await expect(
+      useCase.execute({ message: 'Novel shared-media question.' }),
+    ).resolves.toMatchObject({
+      intent: 'NORMAL_CHAT',
+      needsRetrieval: false,
+      needsVerification: false,
     });
   });
 });

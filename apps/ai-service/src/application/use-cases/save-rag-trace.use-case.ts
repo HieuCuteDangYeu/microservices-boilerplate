@@ -50,6 +50,12 @@ export class SaveRagTraceUseCase {
           supportedClaimCount:
             input.state.citationCoverage?.supportedClaimCount,
           diagnostics: {
+            route: input.state.route?.diagnostics,
+            retrievalPlan: input.state.retrievalPlan?.diagnostics,
+            retrievalCounts: {
+              retrieved: input.state.retrievedChunks.length,
+              reranked: input.state.rerankedChunks.length,
+            },
             contextSufficiency: input.state.contextSufficiency
               ? {
                   providerStatus:
@@ -72,6 +78,8 @@ export class SaveRagTraceUseCase {
                 }
               : undefined,
             draftHistory: input.state.draftHistory,
+            groundedRevision: input.state.groundedRevision,
+            answerClaims: input.state.answerClaims?.slice(0, 12),
             verification: input.state.verification?.diagnostics,
             citationAttempts: input.state.citationAttempts,
             finalFailureSource: input.state.finalFailureSource,

@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 
 if (process.env.CLOUDFLARE_TOOL_SMOKE !== 'true') {
-  console.error('Set CLOUDFLARE_TOOL_SMOKE=true to run this provider smoke test.');
+  console.error(
+    'Set CLOUDFLARE_TOOL_SMOKE=true to run this provider smoke test.',
+  );
   process.exit(1);
 }
 
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
 const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-const model = process.env.CLOUDFLARE_TOOL_MODEL || '@cf/openai/gpt-oss-20b';
+const model = process.env.AI_RETRIEVAL_TOOL_MODEL;
 
-if (!accountId || !apiToken) {
-  console.error('CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be set.');
+if (!accountId || !apiToken || !model) {
+  console.error(
+    'Cloudflare credentials and AI_RETRIEVAL_TOOL_MODEL must be set.',
+  );
   process.exit(1);
 }
 
@@ -44,6 +48,10 @@ async function complete(messages, toolChoice) {
     headers: {
       Authorization: `Bearer ${apiToken}`,
       'Content-Type': 'application/json',
+      'cf-aig-skip-cache': 'true',
+      ...(process.env.CLOUDFLARE_AI_GATEWAY_ENABLED !== 'false'
+        ? { 'cf-aig-gateway-id': process.env.CLOUDFLARE_AI_GATEWAY_ID }
+        : {}),
     },
     body: JSON.stringify({
       model,
@@ -59,7 +67,8 @@ async function complete(messages, toolChoice) {
   const payload = await response.json();
   if (!response.ok) throw new Error(providerError(response.status, payload));
   const message = payload?.choices?.[0]?.message;
-  if (!message) throw new Error('Provider response contained no assistant message.');
+  if (!message)
+    throw new Error('Provider response contained no assistant message.');
   return { message, status: response.status };
 }
 
@@ -70,7 +79,8 @@ function logSecondRoundShape(messages) {
     JSON.stringify({
       round: 2,
       messageRoles: messages.map((message) => message.role),
-      assistantContent: assistant?.content === null ? 'null' : typeof assistant?.content,
+      assistantContent:
+        assistant?.content === null ? 'null' : typeof assistant?.content,
       assistantToolCallCount: assistant?.tool_calls?.length ?? 0,
       toolCallIdPresent: Boolean(toolResult?.tool_call_id),
       toolResultNamePresent: Boolean(toolResult?.name),
@@ -88,13 +98,19 @@ function logSecondRoundShape(messages) {
 
 async function main() {
   const messages = [
-    { role: 'system', content: 'Use the provided function exactly once, then answer with its result.' },
+    {
+      role: 'system',
+      content:
+        'Use the provided function exactly once, then answer with its result.',
+    },
     { role: 'user', content: 'What is the fixture fact?' },
   ];
   const first = await complete(messages, 'required');
   const call = first.message.tool_calls?.[0];
   if (!call?.id || !call.function?.name) {
-    throw new Error('ROUND_1_FAIL: provider did not return a usable tool call.');
+    throw new Error(
+      'ROUND_1_FAIL: provider did not return a usable tool call.',
+    );
   }
   console.log(`ROUND_1_PASS HTTP_${first.status}`);
 
@@ -107,12 +123,17 @@ async function main() {
     role: 'tool',
     tool_call_id: call.id,
     name: call.function.name,
-    content: '{"fact":"Olivier"}',
+    content: '{"fact":"synthetic-zorb"}',
   });
   logSecondRoundShape(messages);
   const second = await complete(messages, 'auto');
-  if (typeof second.message.content !== 'string' || !second.message.content.trim()) {
-    throw new Error('ROUND_2_FAIL: provider did not return final assistant content.');
+  if (
+    typeof second.message.content !== 'string' ||
+    !second.message.content.trim()
+  ) {
+    throw new Error(
+      'ROUND_2_FAIL: provider did not return final assistant content.',
+    );
   }
   console.log(`ROUND_2_PASS HTTP_${second.status}`);
   console.log('FINAL_RESPONSE_RECEIVED');

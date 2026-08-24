@@ -125,23 +125,19 @@ describe('BuildRagCitationsUseCase', () => {
     ]);
   });
 
-  it('falls back to grounded rerank order when attribution provider fails', async () => {
+  it('fails citation coverage closed when attribution provider fails', async () => {
     const attributionService: ICitationAttributionService = {
       attribute: jest.fn().mockRejectedValue(new Error('provider unavailable')),
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
     const assessment = await useCase.execute(buildState());
-    expect(assessment.citations).toEqual([
-      expect.objectContaining({
-        reelId: 'r1',
-        evidenceType: 'VISUAL',
-        quote: 'Visible text: Cannot find module @nestjs/config',
-      }),
-    ]);
+    expect(assessment.citations).toEqual([]);
     expect(assessment.coverage).toMatchObject({
       mode: 'FALLBACK',
-      diagnostics: { decisionSource: 'FALLBACK', selectedEvidenceIds: ['e0'] },
+      coverage: 0,
+      supportedClaimCount: 0,
+      diagnostics: { decisionSource: 'FALLBACK', selectedEvidenceIds: [] },
     });
   });
 
@@ -167,7 +163,7 @@ describe('BuildRagCitationsUseCase', () => {
       'We can go down till like 12 bands and it is still okay.',
     ],
   ])(
-    'repairs a false-negative citation attribution for a compact transcript fact',
+    'does not override a semantic citation rejection for a compact fact',
     async (question, answer, evidenceText) => {
       const attributionService: ICitationAttributionService = {
         attribute: jest.fn().mockResolvedValue({
@@ -190,22 +186,22 @@ describe('BuildRagCitationsUseCase', () => {
       };
 
       await expect(useCase.execute(state)).resolves.toMatchObject({
-        citations: [expect.objectContaining({ evidenceType: 'TRANSCRIPT' })],
+        citations: [],
         coverage: {
-          mode: 'DETERMINISTIC',
-          coverage: 1,
+          mode: 'LLM',
+          coverage: 0,
           factualClaimCount: 1,
-          supportedClaimCount: 1,
+          supportedClaimCount: 0,
           diagnostics: {
-            decisionSource: 'DETERMINISTIC',
-            deterministicSupportingEvidenceIds: ['e0'],
+            decisionSource: 'LLM',
+            deterministicSupportingEvidenceIds: [],
           },
         },
       });
     },
   );
 
-  it('repairs a partial LLM citation result for a directly supported label answer', async () => {
+  it('preserves partial semantic coverage without fabricating support', async () => {
     const attributionService: ICitationAttributionService = {
       attribute: jest.fn().mockResolvedValue({
         selections: [{ evidenceId: 'e0', confidence: 0.9 }],
@@ -248,12 +244,12 @@ describe('BuildRagCitationsUseCase', () => {
     await expect(useCase.execute(state)).resolves.toMatchObject({
       citations: [expect.objectContaining({ reelId: 'in1005' })],
       coverage: {
-        mode: 'DETERMINISTIC',
-        coverage: 1,
-        factualClaimCount: 1,
+        mode: 'LLM',
+        coverage: 0.5,
+        factualClaimCount: 2,
         supportedClaimCount: 1,
         diagnostics: {
-          deterministicSupportingEvidenceIds: ['e0'],
+          deterministicSupportingEvidenceIds: [],
         },
       },
     });

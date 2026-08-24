@@ -3,11 +3,13 @@ import {
   type AdjacentChunkRequest,
   type SemanticIndexDeleteResult,
   type SemanticIndexReindexResult,
+  type SemanticIndexReindexRequest,
   type SemanticIndexSearchRequest,
   type SemanticIndexSearchResult,
   type SemanticReelDocument,
 } from '@common/processing/interfaces/semantic-index.interface';
 import type { IIndexingContentService } from '@indexing/domain/interfaces/content-service.interface';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
 import type { ISemanticIndexRepository } from '@indexing/domain/interfaces/semantic-index.repository.interface';
 import { Controller, Inject } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
@@ -19,6 +21,8 @@ export class SemanticIndexController {
     private readonly semanticIndex: ISemanticIndexRepository,
     @Inject('IIndexingContentService')
     private readonly content: IIndexingContentService,
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
   ) {}
 
   @MessagePattern(SEMANTIC_INDEX_PATTERNS.SEARCH_REELS)
@@ -78,9 +82,22 @@ export class SemanticIndexController {
 
   @MessagePattern(SEMANTIC_INDEX_PATTERNS.REINDEX_REEL)
   async reindexReel(
-    @Payload() input: { reelId?: string },
+    @Payload() input: SemanticIndexReindexRequest,
   ): Promise<SemanticIndexReindexResult> {
-    return await this.content.reindexReel(this.requiredReelId(input?.reelId));
+    const actual = this.config.embeddingIdentity();
+    const expected = input?.expectedEmbeddingIdentity;
+    if (
+      !expected ||
+      expected.model !== actual.model ||
+      expected.version !== actual.version ||
+      expected.dimensions !== actual.dimensions
+    ) {
+      throw new Error('Reindex embedding identity does not match this worker');
+    }
+    return {
+      ...(await this.content.reindexReel(this.requiredReelId(input?.reelId))),
+      embeddingIdentity: actual,
+    };
   }
 
   private requiredReelId(reelId: string | undefined): string {

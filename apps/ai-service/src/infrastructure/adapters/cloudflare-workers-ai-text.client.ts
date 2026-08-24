@@ -96,6 +96,7 @@ type ChatRequestInput = {
   endpoint?: CloudflareChatEndpoint;
   timeoutMs?: number;
   onToken?: (token: string) => void;
+  sessionAffinity?: string;
 };
 
 @Injectable()
@@ -114,8 +115,7 @@ export class CloudflareWorkersAiTextClient {
   }): Promise<string> {
     const model =
       input.model ||
-      this.configService.get<string>('CLOUDFLARE_MEMORY_MODEL') ||
-      '@cf/meta/llama-3.1-8b-instruct-fast';
+      this.configService.getOrThrow<string>('AI_MEMORY_EXTRACTION_MODEL');
 
     return await this.generateChatText({
       model,
@@ -173,7 +173,7 @@ export class CloudflareWorkersAiTextClient {
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`,
           {
             method: 'POST',
-            headers: this.buildHeaders(apiToken),
+            headers: this.buildHeaders(apiToken, input.sessionAffinity),
             signal,
             body: JSON.stringify({
               model: input.model,
@@ -231,7 +231,7 @@ export class CloudflareWorkersAiTextClient {
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`,
           {
             method: 'POST',
-            headers: this.buildHeaders(apiToken),
+            headers: this.buildHeaders(apiToken, input.sessionAffinity),
             signal,
             body: JSON.stringify({
               model: input.model,
@@ -268,7 +268,7 @@ export class CloudflareWorkersAiTextClient {
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${input.model}`,
           {
             method: 'POST',
-            headers: this.buildHeaders(apiToken),
+            headers: this.buildHeaders(apiToken, input.sessionAffinity),
             signal,
             body: JSON.stringify({
               messages: input.messages,
@@ -326,7 +326,7 @@ export class CloudflareWorkersAiTextClient {
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${input.model}`,
           {
             method: 'POST',
-            headers: this.buildHeaders(apiToken),
+            headers: this.buildHeaders(apiToken, input.sessionAffinity),
             signal,
             body: JSON.stringify({
               messages: input.messages,
@@ -656,11 +656,27 @@ export class CloudflareWorkersAiTextClient {
     return typeof value === 'string' ? value.trim() : '';
   }
 
-  private buildHeaders(apiToken: string): Record<string, string> {
-    return {
+  private buildHeaders(
+    apiToken: string,
+    sessionAffinity?: string,
+  ): Record<string, string> {
+    const headers: Record<string, string> = {
       Authorization: `Bearer ${apiToken}`,
       'Content-Type': 'application/json',
+      'cf-aig-skip-cache': 'true',
     };
+    if (
+      this.configService
+        .get<string>('CLOUDFLARE_AI_GATEWAY_ENABLED')
+        ?.trim()
+        .toLowerCase() !== 'false'
+    ) {
+      headers['cf-aig-gateway-id'] = this.configService.getOrThrow<string>(
+        'CLOUDFLARE_AI_GATEWAY_ID',
+      );
+    }
+    if (sessionAffinity) headers['x-session-affinity'] = sessionAffinity;
+    return headers;
   }
 
   private getReasoningEffort(): string {

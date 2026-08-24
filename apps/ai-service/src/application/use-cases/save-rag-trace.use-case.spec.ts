@@ -27,6 +27,25 @@ describe('SaveRagTraceUseCase', () => {
       ],
       nextDraftSource: 'INITIAL',
       finalFailureSource: 'NO_CONTEXT',
+      route: {
+        intent: 'REEL_VIDEO_QUESTION',
+        needsRetrieval: true,
+        diagnostics: {
+          modelRole: 'ROUTER',
+          model: '@cf/test/router',
+          providerStatus: 'SUCCESS',
+          decisionSource: 'LLM',
+        },
+      },
+      retrievalPlan: {
+        diagnostics: {
+          modelRole: 'RETRIEVAL_PLANNER',
+          model: '@cf/test/planner',
+          providerStatus: 'SUCCESS',
+          decisionSource: 'LLM',
+        },
+      },
+      answerClaims: [{ claim: 'answer', evidenceIds: ['e0'] }],
       contextSufficiency: {
         sufficient: true,
         confidence: 1,
@@ -36,7 +55,9 @@ describe('SaveRagTraceUseCase', () => {
         recommendedAction: 'ANSWER',
         diagnostics: {
           providerStatus: 'NOT_CALLED',
-          decisionSource: 'DETERMINISTIC_QUANTITY',
+          decisionSource: 'LLM',
+          modelRole: 'CONTEXT_SUFFICIENCY',
+          model: '@cf/test/sufficiency',
         },
       },
       verification: {
@@ -46,12 +67,15 @@ describe('SaveRagTraceUseCase', () => {
         requiresRevision: false,
         diagnostics: {
           providerStatus: 'ERROR',
-          decisionSource: 'DETERMINISTIC_DIRECT_SUPPORT',
+          decisionSource: 'EXACT_PROVENANCE',
           finalPassed: true,
           confidence: 1,
           issues: [],
           requiresRevision: false,
-          directSupport: { supported: true, supportingEvidenceIndexes: [0] },
+          exactProvenance: {
+            supported: true,
+            supportingEvidenceIndexes: [0],
+          },
         },
       },
     } as unknown as RagChatWorkflowState;
@@ -71,6 +95,10 @@ describe('SaveRagTraceUseCase', () => {
             draftHistory: state.draftHistory,
             finalFailureSource: 'NO_CONTEXT',
             citationAttempts: state.citationAttempts,
+            route: state.route?.diagnostics,
+            retrievalPlan: state.retrievalPlan?.diagnostics,
+            retrievalCounts: { retrieved: 0, reranked: 0 },
+            answerClaims: state.answerClaims,
           }),
         }),
       }),

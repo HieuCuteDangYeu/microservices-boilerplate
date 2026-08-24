@@ -1,3 +1,4 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type {
   IndexQualityIssueCategory,
   IndexQualityIssueSeverity,
@@ -20,6 +21,8 @@ export class ReviewIndexQualityUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlm: IStructuredLlmService,
+    @Inject('IAiApplicationConfig')
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async execute(
@@ -66,8 +69,9 @@ export class ReviewIndexQualityUseCase {
         },
       },
       maxTokens: 700,
-      temperature: 0.05,
-      timeoutMs: 8_000,
+      temperature: 0,
+      model: this.config.model('INDEX_QUALITY'),
+      timeoutMs: this.config.timeoutMs('INDEX_QUALITY'),
     });
 
     return {

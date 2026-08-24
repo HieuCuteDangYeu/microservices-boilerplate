@@ -8,7 +8,7 @@ import type {
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { assessDirectTranscriptFactSupport } from './direct-transcript-fact-support';
+import { assessExactEvidenceProvenance } from './exact-evidence-provenance';
 
 interface RawVerificationResult {
   passed?: unknown;
@@ -16,6 +16,8 @@ interface RawVerificationResult {
   issues?: unknown;
   requiresRevision?: unknown;
   revisedInstruction?: unknown;
+  contradictions?: unknown;
+  supportedClaimMappings?: unknown;
 }
 
 @Injectable()
@@ -26,7 +28,7 @@ export class VerifierAgentUseCase {
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
     @Inject('IAiApplicationConfig')
-    private readonly config?: IAiApplicationConfig,
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async execute(state: RagChatWorkflowState): Promise<RagVerificationResult> {
@@ -43,107 +45,67 @@ export class VerifierAgentUseCase {
           confidence: 1,
           issues: [],
           requiresRevision: false,
-          directSupport: { supported: false, supportingEvidenceIndexes: [] },
+          escalated: false,
+          exactProvenance: this.exactProvenance(state),
         },
       };
     }
 
     try {
-      const raw =
-        await this.structuredLlmService.generateObject<RawVerificationResult>({
-          systemPrompt: this.buildSystemPrompt(),
-          userPrompt: this.buildUserPrompt(state),
-          jsonSchema: this.getJsonSchema(),
-          maxTokens: 450,
-          temperature: 0,
-          model:
-            this.config?.get<string>('CLOUDFLARE_VERIFIER_MODEL') ||
-            '@cf/meta/llama-3.1-8b-instruct-fast',
-          timeoutMs: this.timeout('AI_RAG_VERIFIER_TIMEOUT_MS'),
+      const primary = await this.verifyWithRole(state, 'VERIFIER');
+      const escalationReason = this.escalationReason(primary, state);
+      const maxAttempts = Math.round(
+        this.config.number('AI_VERIFIER_MAX_ATTEMPTS', 2, 1, 2),
+      );
+
+      if (
+        escalationReason &&
+        maxAttempts >= 2 &&
+        this.config.boolean('AI_VERIFIER_ESCALATION_ENABLED', true)
+      ) {
+        const escalated = await this.verifyWithRole(
+          state,
+          'VERIFIER_ESCALATION',
+        );
+        return this.withDiagnostics(escalated, {
+          role: 'VERIFIER_ESCALATION',
+          source: 'LLM_ESCALATION',
+          escalated: true,
+          escalationReason,
+          state,
         });
-
-      const verification = this.normalize(raw);
-      const directSupport = assessDirectTranscriptFactSupport({
-        question: state.userMessage,
-        answer: state.answer ?? '',
-        candidates: state.rerankedChunks.map((chunk) => ({
-          evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
-          evidenceText:
-            chunk.evidenceText?.trim() ||
-            (chunk.evidenceType === 'METADATA' ? chunk.chunkText.trim() : ''),
-        })),
-      });
-
-      if (!verification.passed && directSupport.supported) {
-        return {
-          passed: true,
-          confidence: 1,
-          issues: [
-            ...verification.issues,
-            'A compact factual answer is directly supported by transcript evidence.',
-          ],
-          requiresRevision: false,
-          diagnostics: {
-            providerStatus: 'SUCCESS',
-            decisionSource: 'DETERMINISTIC_DIRECT_SUPPORT',
-            providerPassed: false,
-            finalPassed: true,
-            confidence: 1,
-            issues: [...verification.issues],
-            requiresRevision: false,
-            directSupport,
-          },
-        };
       }
 
-      return {
-        ...verification,
-        diagnostics: {
-          providerStatus: 'SUCCESS',
-          decisionSource: 'LLM',
-          providerPassed: verification.passed,
-          finalPassed: verification.passed,
-          confidence: verification.confidence,
-          issues: verification.issues,
-          requiresRevision: verification.requiresRevision,
-          revisedInstruction: verification.revisedInstruction,
-          directSupport,
-        },
-      };
+      return this.withDiagnostics(primary, {
+        role: 'VERIFIER',
+        source: 'LLM_PRIMARY',
+        escalated: false,
+        state,
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `[VerifierAgent] provider failed; required verification is fail-closed: ${message}`,
+        `[VerifierAgent] semantic verification failed: ${message}`,
       );
 
-      const directSupport = assessDirectTranscriptFactSupport({
-        question: state.userMessage,
-        answer: state.answer ?? '',
-        candidates: state.rerankedChunks.map((chunk) => ({
-          evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
-          evidenceText:
-            chunk.evidenceText?.trim() ||
-            (chunk.evidenceType === 'METADATA' ? chunk.chunkText.trim() : ''),
-        })),
-      });
-      if (directSupport.supported) {
+      const exactProvenance = this.exactProvenance(state);
+      if (exactProvenance.supported) {
         return {
           passed: true,
           confidence: 1,
           issues: [
-            'Verifier provider was unavailable; a compact factual answer is directly supported by transcript evidence.',
+            'Semantic verifier unavailable; answer accepted only as an exact source span.',
           ],
           requiresRevision: false,
           diagnostics: {
             providerStatus: 'ERROR',
-            decisionSource: 'DETERMINISTIC_DIRECT_SUPPORT',
+            decisionSource: 'EXACT_PROVENANCE',
             finalPassed: true,
             confidence: 1,
-            issues: [
-              'Verifier provider was unavailable; a compact factual answer is directly supported by transcript evidence.',
-            ],
+            issues: [],
             requiresRevision: false,
-            directSupport,
+            escalated: false,
+            exactProvenance,
           },
         };
       }
@@ -151,82 +113,116 @@ export class VerifierAgentUseCase {
       return {
         passed: false,
         confidence: 0,
-        issues: ['Required answer verification was unavailable.'],
+        issues: ['Required semantic answer verification was unavailable.'],
         requiresRevision: false,
         diagnostics: {
           providerStatus: 'ERROR',
           decisionSource: 'FAIL_CLOSED',
           finalPassed: false,
           confidence: 0,
-          issues: ['Required answer verification was unavailable.'],
+          issues: ['Required semantic answer verification was unavailable.'],
           requiresRevision: false,
-          directSupport,
+          escalated: false,
+          exactProvenance,
         },
       };
     }
   }
 
+  private async verifyWithRole(
+    state: RagChatWorkflowState,
+    role: 'VERIFIER' | 'VERIFIER_ESCALATION',
+  ): Promise<RagVerificationResult> {
+    const raw =
+      await this.structuredLlmService.generateObject<RawVerificationResult>({
+        systemPrompt: this.buildSystemPrompt(),
+        userPrompt: this.buildUserPrompt(state),
+        jsonSchema: this.getJsonSchema(),
+        maxTokens: 650,
+        temperature: 0,
+        model: this.config.model(role),
+        timeoutMs: this.config.timeoutMs(role),
+      });
+    return this.normalize(raw, state);
+  }
+
+  private escalationReason(
+    result: RagVerificationResult,
+    state: RagChatWorkflowState,
+  ): string | undefined {
+    const threshold = this.config.number(
+      'AI_VERIFIER_ESCALATION_CONFIDENCE_THRESHOLD',
+      0.8,
+      0,
+      1,
+    );
+    if (!result.passed) return 'PRIMARY_REJECTED';
+    if (result.confidence < threshold) return 'LOW_CONFIDENCE';
+    if (state.retryCount > 0 || state.citationRetryCount > 0)
+      return 'REVISED_ANSWER';
+    return undefined;
+  }
+
+  private withDiagnostics(
+    result: RagVerificationResult,
+    input: {
+      role: 'VERIFIER' | 'VERIFIER_ESCALATION';
+      source: 'LLM_PRIMARY' | 'LLM_ESCALATION';
+      escalated: boolean;
+      escalationReason?: string;
+      state: RagChatWorkflowState;
+    },
+  ): RagVerificationResult {
+    return {
+      ...result,
+      diagnostics: {
+        providerStatus: 'SUCCESS',
+        decisionSource: input.source,
+        modelRole: input.role,
+        model: this.config.model(input.role),
+        escalated: input.escalated,
+        escalationReason: input.escalationReason,
+        providerPassed: result.passed,
+        finalPassed: result.passed,
+        confidence: result.confidence,
+        issues: result.issues,
+        requiresRevision: result.requiresRevision,
+        revisedInstruction: result.revisedInstruction,
+        exactProvenance: this.exactProvenance(input.state),
+      },
+    };
+  }
+
   private buildSystemPrompt(): string {
     return `
-You are a verifier agent for a production RAG chatbot answer.
+You are the semantic verifier for a production reel RAG answer.
 
-Check:
-- Whether every factual answer claim is grounded in the supplied evidence or selected memory context.
-- Whether reel/video claims use the correct evidence modality.
-- Whether visual claims are limited to sampled-frame evidence at the supplied timestamps.
-- Whether transcript claims are actually stated by transcript evidence.
-- Whether metadata claims come from metadata evidence.
-- Whether memory recall is supported by recent history, conversation summary, or user memory.
-- Whether the answer adds unsupported causes, identities, quantities, chronology, or certainty.
-- Whether the answer responds to the exact relation or slot requested by the user; a fact can be present in evidence but still be the wrong answer.
-- Whether supplied evidence contradicts the answer or supports a materially different value for the requested relation.
+Determine whether every factual claim answers the relation requested by the user and is supported by the exact authorized evidence and correct modality. Reject unsupported additions, contradictions, substituted values or relations, and visual claims inferred between sampled frames.
 
-Rules:
-1. Return only structured JSON matching the schema.
-2. Do not rewrite the answer directly.
-3. If revision is needed, provide a short concrete instruction for the answer agent.
-4. Do not require revision for harmless style differences.
-5. Retrieval text and search-enrichment fields are not evidence. Judge reel claims only from evidenceText supplied below.
-6. If a required factual claim is unsupported, passed must be false.
-7. A direct claim that a fact is visible is supported when grounded visual evidence contains that fact. The answer does not need to repeat the evidence timestamp unless the user asks when it appears or the answer makes a timing claim.
-8. Do not pass an answer that substitutes a nearby count, property, or topic for the requested person, location, cause, safety measure, or other relation.
+Return only JSON matching the schema. Do not rewrite the answer. Give a short revision instruction only when a grounded revision is possible. Never invent evidence IDs. Do not expose hidden reasoning.
 `.trim();
   }
 
   private buildUserPrompt(state: RagChatWorkflowState): string {
-    return `
-Intent:
-${state.route?.intent ?? 'UNKNOWN'}
-
-Required evidence:
-${state.route?.requiredEvidence.join(', ') || 'NONE'}
-
-User message:
-${state.userMessage}
-
-Answer:
-${state.answer || ''}
-
-Conversation summary:
-${state.conversationMemory?.summary || '(empty)'}
-
-User memories:
-${JSON.stringify(state.userMemories?.memories ?? [])}
-
-Grounded reel evidence:
-${JSON.stringify(
-  state.rerankedChunks.map((chunk, index) => ({
-    evidenceId: `e${index}`,
-    evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
-    title: chunk.title,
-    startTime: chunk.startTime,
-    endTime: chunk.endTime,
-    evidenceText:
-      chunk.evidenceText?.trim() ||
-      (chunk.evidenceType === 'METADATA' ? chunk.chunkText.trim() : undefined),
-  })),
-)}
-`.trim();
+    return JSON.stringify({
+      question: state.userMessage,
+      requiredEvidence: state.route?.requiredEvidence ?? [],
+      answer: state.answer ?? '',
+      proposedClaims: state.answerClaims ?? [],
+      evidence: (state.rerankedChunks ?? []).map((chunk, index) => ({
+        evidenceId: `e${index}`,
+        reelId: chunk.reelId,
+        evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
+        title: chunk.title,
+        startTime: chunk.startTime,
+        endTime: chunk.endTime,
+        evidenceText:
+          chunk.evidenceText?.trim() ||
+          (chunk.evidenceType === 'METADATA'
+            ? chunk.chunkText.trim()
+            : undefined),
+      })),
+    });
   }
 
   private getJsonSchema(): StructuredLlmJsonSchema {
@@ -239,49 +235,84 @@ ${JSON.stringify(
         'issues',
         'requiresRevision',
         'revisedInstruction',
+        'contradictions',
+        'supportedClaimMappings',
       ],
       properties: {
         passed: { type: 'boolean' },
-        confidence: { type: 'number' },
-        issues: {
-          type: 'array',
-          items: { type: 'string' },
-        },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
+        issues: { type: 'array', items: { type: 'string' } },
         requiresRevision: { type: 'boolean' },
         revisedInstruction: { type: 'string' },
+        contradictions: { type: 'array', items: { type: 'string' } },
+        supportedClaimMappings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['claim', 'evidenceIds'],
+            properties: {
+              claim: { type: 'string' },
+              evidenceIds: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
       },
     };
   }
 
-  private normalize(raw: RawVerificationResult): RagVerificationResult {
+  private normalize(
+    raw: RawVerificationResult,
+    state: RagChatWorkflowState,
+  ): RagVerificationResult {
+    const allowedIds = new Set(
+      (state.rerankedChunks ?? []).map((_chunk, index) => `e${index}`),
+    );
+    const rawMappings = Array.isArray(raw.supportedClaimMappings)
+      ? raw.supportedClaimMappings
+      : [];
+    const hasUnknownEvidenceId = rawMappings.some((mapping) => {
+      if (!mapping || typeof mapping !== 'object') return true;
+      const ids = (mapping as Record<string, unknown>)['evidenceIds'];
+      return (
+        !Array.isArray(ids) ||
+        ids.some((id) => typeof id !== 'string' || !allowedIds.has(id))
+      );
+    });
     const issues = Array.isArray(raw.issues)
       ? raw.issues.filter((item): item is string => typeof item === 'string')
       : [];
-
+    if (hasUnknownEvidenceId)
+      issues.push('Verifier returned unknown evidence ID.');
     const confidence =
       typeof raw.confidence === 'number' && Number.isFinite(raw.confidence)
         ? Math.min(Math.max(raw.confidence, 0), 1)
-        : 0.5;
+        : 0;
+    const passed = raw.passed === true && !hasUnknownEvidenceId;
 
     return {
-      passed: typeof raw.passed === 'boolean' ? raw.passed : false,
+      passed,
       confidence,
       issues,
       requiresRevision:
         typeof raw.requiresRevision === 'boolean'
           ? raw.requiresRevision
-          : !raw.passed,
+          : !passed,
       revisedInstruction:
-        typeof raw.revisedInstruction === 'string'
+        typeof raw.revisedInstruction === 'string' &&
+        raw.revisedInstruction.trim()
           ? raw.revisedInstruction.trim()
           : undefined,
     };
   }
 
-  private timeout(key: string): number {
-    const configured = Number(this.config?.get<string>(key) ?? '8000');
-    return Number.isFinite(configured)
-      ? Math.min(30_000, Math.max(500, Math.round(configured)))
-      : 8_000;
+  private exactProvenance(state: RagChatWorkflowState) {
+    return assessExactEvidenceProvenance({
+      answer: state.answer ?? '',
+      candidates: (state.rerankedChunks ?? []).map((chunk) => ({
+        evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
+        evidenceText: chunk.evidenceText?.trim() || '',
+      })),
+    });
   }
 }

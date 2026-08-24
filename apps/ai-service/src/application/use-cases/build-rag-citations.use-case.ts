@@ -8,7 +8,6 @@ import type {
   RagCitationCoverageResult,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { assessDirectTranscriptFactSupport } from './direct-transcript-fact-support';
 
 interface GroundedCitationCandidate {
   attribution: CitationAttributionCandidate;
@@ -52,6 +51,7 @@ export class BuildRagCitationsUseCase {
       const attribution = await this.citationAttributionService.attribute({
         question: state.userMessage,
         answer,
+        proposedClaims: state.answerClaims,
         candidates: candidates.map((candidate) => candidate.attribution),
         maxCitations: this.maxCitations,
       });
@@ -63,6 +63,7 @@ export class BuildRagCitationsUseCase {
         ]),
       );
       const citations: RagCitation[] = [];
+      const selectedEvidenceIds: string[] = [];
       const seen = new Set<string>();
 
       for (const selection of attribution.selections) {
@@ -71,6 +72,7 @@ export class BuildRagCitationsUseCase {
 
         seen.add(selection.evidenceId);
         citations.push(candidate.citation);
+        selectedEvidenceIds.push(selection.evidenceId);
 
         if (citations.length >= this.maxCitations) break;
       }
@@ -85,75 +87,40 @@ export class BuildRagCitationsUseCase {
           .map((claim) => claim.claim)
           .slice(0, 6),
       };
-      const directSupport = assessDirectTranscriptFactSupport({
-        question: state.userMessage,
-        answer,
-        candidates: candidates.map((candidate) => candidate.attribution),
-      });
-      if (coverage.coverage < 1 && directSupport.supported) {
-        const directCitations = directSupport.supportingEvidenceIndexes
-          .slice(0, this.maxCitations)
-          .map((index) => candidates[index]?.citation)
-          .filter((citation): citation is RagCitation => Boolean(citation));
-        if (directCitations.length > 0) {
-          return {
-            citations: directCitations,
-            coverage: {
-              mode: 'DETERMINISTIC',
-              coverage: 1,
-              factualClaimCount: 1,
-              supportedClaimCount: 1,
-              unsupportedClaims: [],
-              diagnostics: {
-                decisionSource: 'DETERMINISTIC',
-                selectedEvidenceIds: directSupport.supportingEvidenceIndexes
-                  .slice(0, this.maxCitations)
-                  .map((index) => `e${index}`),
-                deterministicSupportingEvidenceIds:
-                  directSupport.supportingEvidenceIndexes
-                    .slice(0, this.maxCitations)
-                    .map((index) => `e${index}`),
-              },
-            },
-          };
-        }
-      }
-
       return {
         citations,
         coverage: {
           ...coverage,
           diagnostics: {
             decisionSource: 'LLM',
-            selectedEvidenceIds: citations.map(
-              (_citation, index) => `e${index}`,
-            ),
+            selectedEvidenceIds,
             deterministicSupportingEvidenceIds: [],
+            modelRole: attribution.diagnostics?.modelRole,
+            model: attribution.diagnostics?.model,
+            providerStatus: 'SUCCESS',
           },
         },
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `[CitationAttribution] provider failed; using grounded deterministic fallback: ${message}`,
+        `[CitationAttribution] provider failed; citation coverage is incomplete: ${message}`,
       );
 
       return {
-        citations: candidates
-          .slice(0, this.maxCitations)
-          .map((candidate) => candidate.citation),
+        citations: [],
         coverage: {
           mode: 'FALLBACK',
-          coverage: 1,
-          factualClaimCount: 0,
+          coverage: 0,
+          factualClaimCount: 1,
           supportedClaimCount: 0,
-          unsupportedClaims: [],
+          unsupportedClaims: [answer.slice(0, 500)],
           diagnostics: {
             decisionSource: 'FALLBACK',
-            selectedEvidenceIds: candidates
-              .slice(0, this.maxCitations)
-              .map((candidate) => candidate.attribution.evidenceId),
+            selectedEvidenceIds: [],
             deterministicSupportingEvidenceIds: [],
+            modelRole: 'CITATION_ATTRIBUTION',
+            providerStatus: 'ERROR',
           },
         },
       };
@@ -173,6 +140,8 @@ export class BuildRagCitationsUseCase {
           decisionSource: 'NOT_REQUIRED',
           selectedEvidenceIds: [],
           deterministicSupportingEvidenceIds: [],
+          modelRole: 'CITATION_ATTRIBUTION',
+          providerStatus: 'NOT_CALLED',
         },
       },
     };

@@ -2,8 +2,8 @@ import type { TranscriptSegment } from '@common/ai/interfaces/transcription-resu
 import { BuildTranscriptSectionsUseCase } from '@indexing/application/use-cases/build-transcript-sections.use-case';
 import type { TranscriptSection } from '@indexing/domain/entities/index-checkpoint.entity';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 interface BoundaryCandidate {
   index: number;
@@ -31,7 +31,8 @@ export class BuildAdaptiveTranscriptSectionsUseCase {
   );
 
   constructor(
-    private readonly config: ConfigService,
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
     private readonly legacy: BuildTranscriptSectionsUseCase,
     @Inject('IIndexingAiService') private readonly ai: IIndexingAiService,
   ) {}

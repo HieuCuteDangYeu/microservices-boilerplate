@@ -22,7 +22,13 @@ describe('ReviewIndexQualityUseCase', () => {
         ],
       }),
     };
-    const useCase = new ReviewIndexQualityUseCase(structuredLlm as never);
+    const useCase = new ReviewIndexQualityUseCase(
+      structuredLlm as never,
+      {
+        model: jest.fn(() => '@cf/test/index-quality'),
+        timeoutMs: jest.fn(() => 8_000),
+      } as never,
+    );
 
     await expect(
       useCase.execute({

@@ -61,7 +61,7 @@ export class QueryRouterAgentUseCase {
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
     @Inject('IAiApplicationConfig')
-    private readonly config?: IAiApplicationConfig,
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async execute(input: {
@@ -71,9 +71,16 @@ export class QueryRouterAgentUseCase {
     sharedReelCount?: number;
   }): Promise<RagChatRouteDecision> {
     if (!input.message.trim()) {
-      return this.createNormalChatRoute(
-        'Empty or whitespace message treated as normal chat.',
-      );
+      return {
+        ...this.createNormalChatRoute(
+          'Empty or whitespace message treated as normal chat.',
+        ),
+        diagnostics: {
+          modelRole: 'ROUTER',
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'STRUCTURAL',
+        },
+      };
     }
 
     try {
@@ -84,21 +91,32 @@ export class QueryRouterAgentUseCase {
           jsonSchema: this.getJsonSchema(),
           maxTokens: 650,
           temperature: 0,
-          model:
-            this.config?.get<string>('CLOUDFLARE_ROUTER_MODEL') ||
-            '@cf/meta/llama-3.1-8b-instruct-fast',
-          timeoutMs: this.timeout('AI_RAG_ROUTER_TIMEOUT_MS'),
+          model: this.config.model('ROUTER'),
+          timeoutMs: this.config.timeoutMs('ROUTER'),
         });
 
-      return this.normalize(result, input);
+      return {
+        ...this.normalize(result),
+        diagnostics: {
+          modelRole: 'ROUTER',
+          model: this.config.model('ROUTER'),
+          providerStatus: 'SUCCESS',
+          decisionSource: 'LLM',
+        },
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 
       this.logger.warn(`[QueryRouterAgent] fallback NORMAL_CHAT: ${message}`);
 
-      return this.createNormalChatRoute(
-        'Fallback route because router failed.',
-      );
+      return {
+        ...this.createNormalChatRoute('Fallback route because router failed.'),
+        diagnostics: {
+          modelRole: 'ROUTER',
+          providerStatus: 'ERROR',
+          decisionSource: 'FAIL_SAFE',
+        },
+      };
     }
   }
 
@@ -277,23 +295,12 @@ Classify the current user message.
     };
   }
 
-  private normalize(
-    raw: RawRouteDecision,
-    input: {
-      message: string;
-      hasSharedReelContext?: boolean;
-    },
-  ): RagChatRouteDecision {
-    const sharedReelQuestionType = this.sharedReelQuestionType(
-      input.message,
-      input.hasSharedReelContext === true,
+  private normalize(raw: RawRouteDecision): RagChatRouteDecision {
+    const intent = this.normalizeIntent(raw.intent);
+    const reelQuestionType = this.normalizeReelQuestionType(
+      raw.reelQuestionType,
+      intent,
     );
-    const intent = sharedReelQuestionType
-      ? 'REEL_VIDEO_QUESTION'
-      : this.normalizeIntent(raw.intent);
-    const reelQuestionType =
-      sharedReelQuestionType ??
-      this.normalizeReelQuestionType(raw.reelQuestionType, intent);
 
     const requiredEvidence = this.normalizeRequiredEvidence(
       raw.requiredEvidence,
@@ -342,79 +349,6 @@ Classify the current user message.
     }
 
     return 'NORMAL_CHAT';
-  }
-
-  private sharedReelQuestionType(
-    message: string,
-    hasSharedReelContext: boolean,
-  ): RagReelQuestionType | undefined {
-    if (!hasSharedReelContext) {
-      return undefined;
-    }
-
-    const normalized = message.toLowerCase();
-
-    if (
-      /\b(screen|visible|shown|see|look|written|text|order number|discount)\b/.test(
-        normalized,
-      )
-    ) {
-      return 'VISUAL_CONTENT';
-    }
-
-    if (
-      /\b(say|says|mention|mentions|speaker|spoken|transcript|quote|chunk|timestamp|citation|project name)\b/.test(
-        normalized,
-      )
-    ) {
-      return 'TRANSCRIPT_CONTENT';
-    }
-
-    if (
-      /\b(title|description|caption|tag|hashtag|author|uploaded)\b/.test(
-        normalized,
-      )
-    ) {
-      return 'REEL_METADATA';
-    }
-
-    if (
-      /\bwhat is (this|that) (reel|video|clip|media) about\b/.test(normalized)
-    ) {
-      return 'GENERAL_REEL_SUMMARY';
-    }
-
-    if (this.isStandaloneSharedReelFactQuestion(normalized)) {
-      return 'TRANSCRIPT_CONTENT';
-    }
-
-    if (
-      /\b(about|summary|summarize|main point|meaning|topic)\b/.test(normalized)
-    ) {
-      return 'GENERAL_REEL_SUMMARY';
-    }
-
-    const mentionsSharedMedia =
-      /\b(shared|this|that)\b/.test(normalized) &&
-      /\b(reel|video|clip|media|canary)\b/.test(normalized);
-
-    if (!mentionsSharedMedia) {
-      return undefined;
-    }
-
-    return 'AMBIGUOUS_REEL_REFERENCE';
-  }
-
-  private isStandaloneSharedReelFactQuestion(message: string): boolean {
-    if (
-      /\b(typescript|javascript|python|dockerfile|docker|capital of|remember|preference|recommend|recommendation|hello|hi)\b/.test(
-        message,
-      )
-    ) {
-      return false;
-    }
-
-    return /\b(who|what|which|when|where|why|how many)\b/.test(message);
   }
 
   private normalizeReelQuestionType(
@@ -758,12 +692,5 @@ Classify the current user message.
       },
       reason,
     };
-  }
-
-  private timeout(key: string): number {
-    const configured = Number(this.config?.get<string>(key) ?? '8000');
-    return Number.isFinite(configured)
-      ? Math.min(30_000, Math.max(500, Math.round(configured)))
-      : 8_000;
   }
 }

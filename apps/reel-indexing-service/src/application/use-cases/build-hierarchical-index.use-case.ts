@@ -16,8 +16,8 @@ import type { EvidenceChunk } from '@indexing/domain/entities/evidence-chunk.ent
 import type { TranscriptSection } from '@indexing/domain/entities/index-checkpoint.entity';
 import type { IIndexingAiService } from '@indexing/domain/interfaces/ai-service.interface';
 import type { IIndexCheckpointRepository } from '@indexing/domain/interfaces/index-checkpoint.repository.interface';
+import type { IIndexingApplicationConfig } from '@indexing/domain/interfaces/indexing-application-config.interface';
 import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 
 type DraftInput = Omit<
@@ -28,7 +28,8 @@ type DraftInput = Omit<
 @Injectable()
 export class BuildHierarchicalIndexUseCase {
   constructor(
-    private readonly config: ConfigService,
+    @Inject('IIndexingApplicationConfig')
+    private readonly config: IIndexingApplicationConfig,
     private readonly shortChunks: BuildShortEvidenceChunksUseCase,
     private readonly longChunks: BuildLongEvidenceChunksUseCase,
     @Inject('IIndexingAiService') private readonly ai: IIndexingAiService,
@@ -414,6 +415,7 @@ export class BuildHierarchicalIndexUseCase {
     draft: DraftInput,
     job: ReelIndexJob,
   ): ReelEvidenceDocumentDraft {
+    const embeddingIdentity = this.config.embeddingIdentity();
     const base = {
       ...draft,
       retrievalHash: this.hash(draft.retrievalText),
@@ -423,22 +425,11 @@ export class BuildHierarchicalIndexUseCase {
       stableItemId: draft.id,
       documentKind: draft.kind,
       embeddingProvider:
-        this.config.get<string>('INDEX_EMBEDDING_PROVIDER') || 'google',
-      embeddingModel: (
-        this.config.get<string>('INDEX_EMBEDDING_MODEL') ||
-        this.config.get<string>('GEMINI_EMBEDDING_MODEL') ||
-        'gemini-embedding-001'
-      ).replace(/^models\//, ''),
-      embeddingDimensions: this.positiveInt(
-        'INDEX_EMBEDDING_DIMENSIONS',
-        this.positiveInt('GEMINI_EMBEDDING_DIMENSIONS', 384, 1, 10_000),
-        1,
-        10_000,
-      ),
-      embeddingVersion:
-        this.config.get<string>('INDEX_EMBEDDING_VERSION') ||
-        this.config.get<string>('GEMINI_EMBEDDING_VERSION') ||
-        '1',
+        this.config.get<string>('INDEX_EMBEDDING_PROVIDER') ||
+        'cloudflare-workers-ai',
+      embeddingModel: embeddingIdentity.model.replace(/^models\//, ''),
+      embeddingDimensions: embeddingIdentity.dimensions,
+      embeddingVersion: embeddingIdentity.version,
       indexVersion: job.indexVersion,
       chunkingVersion:
         this.config.get<string>('INDEX_CHUNKING_VERSION') || 'reel-chunk-v3',
@@ -489,14 +480,9 @@ export class BuildHierarchicalIndexUseCase {
 
   private reelRetrievalText(metadata: ExtractedReelMetadata): string {
     return [
-      'Document type: Reel',
-      metadata.title ? `Title: ${metadata.title.trim()}` : undefined,
-      metadata.tags.length
-        ? `Trusted tags: ${metadata.tags.join(', ')}`
-        : undefined,
-      metadata.description
-        ? `Derived summary: ${metadata.description.trim()}`
-        : undefined,
+      metadata.title?.trim(),
+      metadata.description?.trim(),
+      metadata.tags.length ? metadata.tags.join(' ') : undefined,
     ]
       .filter((value): value is string => Boolean(value))
       .join('\n')
@@ -512,14 +498,9 @@ export class BuildHierarchicalIndexUseCase {
     evidenceText: string;
   }): string {
     return [
-      `Document type: ${input.kind}`,
-      input.metadata.title ? `Reel title: ${input.metadata.title}` : undefined,
-      input.metadata.tags.length
-        ? `Trusted tags: ${input.metadata.tags.join(', ')}`
-        : undefined,
-      `${input.kind} ordinal: ${input.ordinal}`,
-      `Time range: ${input.startTime.toFixed(3)}-${input.endTime.toFixed(3)} seconds`,
-      `Exact evidence: ${input.evidenceText}`,
+      input.metadata.title,
+      input.metadata.tags.length ? input.metadata.tags.join(' ') : undefined,
+      input.evidenceText,
     ]
       .filter((value): value is string => Boolean(value))
       .join('\n');
@@ -527,17 +508,13 @@ export class BuildHierarchicalIndexUseCase {
 
   private visualEvidenceText(scene: VisualSceneEvidence): string {
     return [
-      scene.caption.trim()
-        ? `Visual description: ${this.normalizeEvidence(scene.caption)}`
-        : undefined,
-      scene.ocrText?.trim()
-        ? `Visible text: ${this.normalizeEvidence(scene.ocrText)}`
-        : undefined,
+      scene.caption.trim() ? this.normalizeEvidence(scene.caption) : undefined,
+      scene.ocrText?.trim() ? this.normalizeEvidence(scene.ocrText) : undefined,
       scene.objects.length
-        ? `Visible objects: ${scene.objects
+        ? scene.objects
             .map((value) => this.normalizeEvidence(value))
             .filter(Boolean)
-            .join(', ')}`
+            .join(' ')
         : undefined,
     ]
       .filter((value): value is string => Boolean(value))
@@ -552,14 +529,9 @@ export class BuildHierarchicalIndexUseCase {
     evidenceText: string;
   }): string {
     return [
-      'Document type: Visual scene',
-      input.metadata.title ? `Reel title: ${input.metadata.title}` : undefined,
-      input.metadata.tags.length
-        ? `Trusted tags: ${input.metadata.tags.join(', ')}`
-        : undefined,
-      `Visual scene ordinal: ${input.ordinal}`,
-      `Frame timestamp: ${input.timestamp.toFixed(3)} seconds`,
-      `Grounded visual evidence: ${input.evidenceText}`,
+      input.metadata.title,
+      input.metadata.tags.length ? input.metadata.tags.join(' ') : undefined,
+      input.evidenceText,
     ]
       .filter((value): value is string => Boolean(value))
       .join('\n');

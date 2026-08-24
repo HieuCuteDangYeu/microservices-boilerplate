@@ -28,12 +28,18 @@ export interface CitationAttributionResult {
   factualClaimCount: number;
   supportedClaimCount: number;
   coverage: number;
+  diagnostics?: {
+    modelRole: 'CITATION_ATTRIBUTION';
+    model: string;
+    providerStatus: 'SUCCESS';
+  };
 }
 
 export interface ICitationAttributionService {
   attribute(input: {
     question: string;
     answer: string;
+    proposedClaims?: Array<{ claim: string; evidenceIds: string[] }>;
     candidates: CitationAttributionCandidate[];
     maxCitations: number;
   }): Promise<CitationAttributionResult>;

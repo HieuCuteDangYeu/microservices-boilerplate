@@ -34,7 +34,13 @@ function summarize(trace) {
     .execFileSync(
       'node',
       [script, '--definitions-report', definitions, '--trace-file', traces],
-      { cwd: root, encoding: 'utf8' },
+      {
+        cwd: root,
+        encoding: 'utf8',
+        // The parent runs under Node's test harness. Do not accidentally run
+        // the summarizer itself as a nested test process.
+        env: { ...process.env, NODE_OPTIONS: '' },
+      },
     )
     .trim();
   const report = JSON.parse(fs.readFileSync(output, 'utf8'));

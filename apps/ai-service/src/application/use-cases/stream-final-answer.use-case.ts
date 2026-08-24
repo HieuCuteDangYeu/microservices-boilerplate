@@ -48,6 +48,7 @@ export class StreamFinalAnswerUseCase {
           token,
         });
       },
+      state.conversationId,
     );
 
     this.logger.debug(`[FinalAnswer] generated answer length=${answer.length}`);

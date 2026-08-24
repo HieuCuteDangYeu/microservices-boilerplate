@@ -82,15 +82,15 @@ export class CloudflareCrossEncoderRerankerAdapter implements IRerankerService {
     const apiToken = this.configService.getOrThrow<string>(
       'CLOUDFLARE_API_TOKEN',
     );
-    const model =
-      this.configService.get<string>('AI_RAG_NEURAL_RERANK_MODEL')?.trim() ||
-      '@cf/baai/bge-reranker-base';
+    const model = this.configService.getOrThrow<string>('AI_RERANKER_MODEL');
     const timeoutMs = Math.round(
       this.number('AI_RAG_NEURAL_RERANK_TIMEOUT_MS', 5_000, 500, 30_000),
     );
-    const maxContextChars = Math.round(
-      this.number('AI_RAG_NEURAL_RERANK_MAX_CONTEXT_CHARS', 5_000, 500, 12_000),
+    const maxInputTokens = Math.round(
+      this.number('AI_RERANKER_MAX_INPUT_TOKENS', 512, 64, 512),
     );
+    const query = this.truncateTokens(queryText.trim(), 128);
+    const maxContextTokens = Math.max(32, maxInputTokens - 128);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref();
@@ -103,11 +103,16 @@ export class CloudflareCrossEncoderRerankerAdapter implements IRerankerService {
           headers: {
             Authorization: `Bearer ${apiToken}`,
             'Content-Type': 'application/json',
+            'cf-aig-skip-cache': 'true',
+            ...this.gatewayHeaders(),
           },
           body: JSON.stringify({
-            query: queryText.trim(),
+            query,
             contexts: candidates.map((candidate) => ({
-              text: this.buildContext(candidate).slice(0, maxContextChars),
+              text: this.truncateTokens(
+                this.buildContext(candidate),
+                maxContextTokens,
+              ),
             })),
             top_k: candidates.length,
           }),
@@ -253,14 +258,30 @@ export class CloudflareCrossEncoderRerankerAdapter implements IRerankerService {
 
   private buildContext(candidate: ReelContextSearchResult): string {
     return [
-      candidate.title ? `Title: ${candidate.title}` : '',
-      candidate.description ? `Description: ${candidate.description}` : '',
-      candidate.tags.length ? `Tags: ${candidate.tags.join(', ')}` : '',
-      candidate.evidenceType ? `Evidence type: ${candidate.evidenceType}` : '',
-      `Content: ${candidate.retrievalText?.trim() || candidate.chunkText.trim()}`,
+      candidate.title,
+      candidate.description,
+      candidate.tags.length ? candidate.tags.join(' ') : '',
+      candidate.evidenceText?.trim() ||
+        candidate.retrievalText?.trim() ||
+        candidate.chunkText.trim(),
     ]
       .filter(Boolean)
       .join('\n');
+  }
+
+  private truncateTokens(value: string, maxTokens: number): string {
+    const tokens = value.normalize('NFKC').match(/[\p{L}\p{N}]+|[^\s]/gu) ?? [];
+    return tokens.slice(0, maxTokens).join(' ');
+  }
+
+  private gatewayHeaders(): Record<string, string> {
+    return this.boolean('CLOUDFLARE_AI_GATEWAY_ENABLED', true)
+      ? {
+          'cf-aig-gateway-id': this.configService.getOrThrow<string>(
+            'CLOUDFLARE_AI_GATEWAY_ID',
+          ),
+        }
+      : {};
   }
 
   private sigmoid(value: number): number {

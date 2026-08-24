@@ -14,6 +14,16 @@ describe('AnalyzeVisualFrameManifestUseCase', () => {
     };
     const config: IIndexingApplicationConfig = {
       get: <T = string>(key: string) => configValues[key] as T | undefined,
+      transcriptionIdentity: () => ({
+        provider: 'cloudflare-workers-ai',
+        model: 'transcription-model',
+        version: 'v1',
+      }),
+      embeddingIdentity: () => ({
+        model: '@cf/baai/bge-m3',
+        dimensions: 1024,
+        version: 'cf-bge-m3-v1',
+      }),
     };
     const storage = {
       artifactExists: jest.fn().mockResolvedValue(true),

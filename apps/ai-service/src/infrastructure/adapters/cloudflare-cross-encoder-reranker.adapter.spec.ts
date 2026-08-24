@@ -40,6 +40,8 @@ describe('CloudflareCrossEncoderRerankerAdapter', () => {
     CLOUDFLARE_ACCOUNT_ID: 'account-id',
     CLOUDFLARE_API_TOKEN: 'token',
     AI_RAG_NEURAL_RERANK_ENABLED: 'true',
+    AI_RERANKER_MODEL: '@cf/test/reranker',
+    CLOUDFLARE_AI_GATEWAY_ENABLED: 'false',
   };
 
   const createConfig = () =>

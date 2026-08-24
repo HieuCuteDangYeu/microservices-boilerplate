@@ -361,14 +361,22 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     const vector = normalized.queryEmbedding
       ? `[${normalized.queryEmbedding.join(',')}]`
       : null;
+    const vectorColumn = Prisma.raw('t."embedding"');
+    const embeddingIdentity = normalized.embeddingDimensions
+      ? Prisma.sql`AND t."embeddingDimensions" = ${normalized.embeddingDimensions}
+          AND t."embeddingModel" = ${normalized.queryEmbeddingModel}
+          AND t."embeddingVersion" = ${normalized.queryEmbeddingVersion}`
+      : Prisma.empty;
     const query = Prisma.sql`
       WITH vector_candidates AS (
         SELECT t."rowId",
-          row_number() OVER (ORDER BY t."embedding" <=> ${vector}::vector) AS rank,
-          t."embedding" <=> ${vector}::vector AS distance
+          row_number() OVER (ORDER BY ${vectorColumn} <=> ${vector}::vector) AS rank,
+          ${vectorColumn} <=> ${vector}::vector AS distance
         FROM ${table} t
-        WHERE t."isActive" = true AND ${vector}::vector IS NOT NULL ${where}
-        ORDER BY t."embedding" <=> ${vector}::vector
+        WHERE t."isActive" = true AND ${vector}::vector IS NOT NULL
+          ${embeddingIdentity}
+          ${where}
+        ORDER BY ${vectorColumn} <=> ${vector}::vector
         LIMIT ${normalized.candidateLimit}
       ), keyword_candidates AS (
         SELECT t."rowId",
@@ -380,6 +388,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
         WHERE t."isActive" = true
           AND ${normalized.queryText} <> ''
           AND t."searchVector" @@ websearch_to_tsquery('simple', ${normalized.queryText})
+          ${embeddingIdentity}
           ${where}
         ORDER BY ts_rank_cd(t."searchVector", websearch_to_tsquery('simple', ${normalized.queryText})) DESC,
           t."rowId"
@@ -395,6 +404,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
         WHERE t."isActive" = true
           AND cardinality(${normalized.queryTags}::text[]) > 0
           AND t."tags" && ${normalized.queryTags}::text[]
+          ${embeddingIdentity}
           ${where}
         ORDER BY cardinality(ARRAY(
           SELECT unnest(t."tags") INTERSECT SELECT unnest(${normalized.queryTags}::text[])
@@ -433,6 +443,9 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
   private normalizeSearch(input: SemanticIndexSearchRequest): {
     queryText: string;
     queryEmbedding?: number[];
+    queryEmbeddingModel?: string;
+    queryEmbeddingVersion?: string;
+    embeddingDimensions?: number;
     queryTags: string[];
     filters: SemanticIndexSearchFilters;
     excludedIds: string[];
@@ -443,12 +456,23 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     const queryText = input.queryText?.trim() ?? '';
     const queryTags = this.cleanStrings(input.queryTags);
     if (input.queryEmbedding) {
+      const expected = this.configuredEmbeddingIdentity();
+      const queryEmbeddingModel = input.queryEmbeddingModel?.trim();
+      const queryEmbeddingVersion = input.queryEmbeddingVersion?.trim();
       if (
         input.queryEmbedding.length !== SEMANTIC_INDEX_EMBEDDING_DIMENSIONS ||
         input.queryEmbedding.some((value) => !Number.isFinite(value))
       ) {
         throw new Error(
-          `queryEmbedding must contain ${SEMANTIC_INDEX_EMBEDDING_DIMENSIONS} finite values`,
+          'queryEmbedding has an unsupported dimension or non-finite value',
+        );
+      }
+      if (
+        queryEmbeddingModel !== expected.model ||
+        queryEmbeddingVersion !== expected.version
+      ) {
+        throw new Error(
+          'queryEmbedding model/version does not match the configured semantic index',
         );
       }
     }
@@ -459,6 +483,9 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     return {
       queryText,
       queryEmbedding: input.queryEmbedding,
+      queryEmbeddingModel: input.queryEmbeddingModel?.trim() || undefined,
+      queryEmbeddingVersion: input.queryEmbeddingVersion?.trim() || undefined,
+      embeddingDimensions: input.queryEmbedding?.length,
       queryTags,
       filters: input.filters ?? {},
       excludedIds: this.cleanStrings(input.excludedIds),
@@ -544,8 +571,9 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     const description =
       input.metadata.description ?? input.job.description ?? null;
     const tags = this.cleanStrings(input.metadata.tags);
-    const rows = documents.map(
-      (document) => Prisma.sql`(
+    const rows = documents.map((document) => {
+      const vector = `[${document.embedding.join(',')}]`;
+      return Prisma.sql`(
       ${randomUUID()}, ${document.id}, ${document.reelId}, ${input.job.indexAttemptId}, false, false,
       ${input.job.userId}, ${document.parentId ?? null}, ${document.ordinal}, ${title}, ${description},
       ${document.evidenceText ?? null}, ${document.retrievalText}, ${document.derivedSummary ?? null},
@@ -555,12 +583,12 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
       ${document.transcriptVersion ?? null}, ${document.sectioningVersion}, ${document.tokenCount},
       ${tags}::text[], ${document.startTime ?? null}, ${document.endTime ?? null},
       ${input.job.sourceDurationMs}, ${input.job.sourceOrientation}, ${input.job.sourceLengthClass},
-      ${`[${document.embedding.join(',')}]`}::vector, ${document.embeddingProvider},
+      ${vector}::vector, ${document.embeddingProvider},
       ${document.embeddingModel}, ${document.embeddingDimensions}, ${document.embeddingVersion},
       ${document.embeddingInputHash}, ${document.indexVersion}, ${document.chunkingVersion},
       ${document.summaryVersion}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-    )`,
-    );
+    )`;
+    });
     return Prisma.sql`
       INSERT INTO ${Prisma.raw(`"${table}"`)} (
         "rowId", "id", "reelId", "indexAttemptId", "isActive", "isLegacyImport", "userId", "parentId", "ordinal",
@@ -578,13 +606,17 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
   private validateDocument(
     document: SemanticIndexCandidate['documents'][number],
   ): void {
+    const expected = this.configuredEmbeddingIdentity();
     if (
-      document.embeddingDimensions !== SEMANTIC_INDEX_EMBEDDING_DIMENSIONS ||
-      document.embedding.length !== SEMANTIC_INDEX_EMBEDDING_DIMENSIONS ||
+      document.embeddingProvider !== expected.provider ||
+      document.embeddingModel !== expected.model ||
+      document.embeddingDimensions !== expected.dimensions ||
+      document.embeddingVersion !== expected.version ||
+      document.embedding.length !== document.embeddingDimensions ||
       document.embedding.some((value) => !Number.isFinite(value))
     ) {
       throw new Error(
-        `Document ${document.id} must use a ${SEMANTIC_INDEX_EMBEDDING_DIMENSIONS}-dimension embedding`,
+        `Document ${document.id} has an incompatible embedding identity or dimension`,
       );
     }
     if (
@@ -594,6 +626,30 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
     ) {
       throw new Error(`Document ${document.id} has invalid retrieval evidence`);
     }
+  }
+
+  private configuredEmbeddingIdentity(): {
+    provider: string;
+    model: string;
+    dimensions: number;
+    version: string;
+  } {
+    const provider =
+      this.config.get<string>('INDEX_EMBEDDING_PROVIDER')?.trim() ||
+      'cloudflare-workers-ai';
+    const model = this.config.get<string>('AI_EMBEDDING_MODEL')?.trim();
+    const dimensions = Number(
+      this.config.get<string>('AI_EMBEDDING_DIMENSIONS'),
+    );
+    const version = this.config.get<string>('AI_EMBEDDING_VERSION')?.trim();
+    if (
+      !model ||
+      dimensions !== SEMANTIC_INDEX_EMBEDDING_DIMENSIONS ||
+      !version
+    ) {
+      throw new Error('Invalid reel semantic embedding configuration');
+    }
+    return { provider, model, dimensions, version };
   }
 
   private toSearchResult(row: SearchRow): SemanticIndexSearchResult {

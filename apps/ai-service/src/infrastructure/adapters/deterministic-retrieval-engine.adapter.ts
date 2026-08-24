@@ -42,6 +42,8 @@ interface RetrievalExecutionInput {
   mode: Exclude<RagRetrievalMode, 'NONE'>;
   queryText: string;
   queryEmbedding: number[];
+  queryEmbeddingModel: string;
+  queryEmbeddingVersion?: string;
   accessibleReelIds: string[];
   limit: number;
   includeTranscript: boolean;
@@ -120,6 +122,8 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
           mode: input.plan.mode,
           queryText,
           queryEmbedding: queryEmbedding.values,
+          queryEmbeddingModel: queryEmbedding.model,
+          queryEmbeddingVersion: queryEmbedding.version,
           accessibleReelIds,
           limit: input.plan.searchLimit,
           includeTranscript,
@@ -311,14 +315,24 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
     input: RetrievalExecutionInput,
   ): Pick<
     SemanticIndexSearchRequest,
-    'queryText' | 'queryEmbedding' | 'queryTags'
+    | 'queryText'
+    | 'queryEmbedding'
+    | 'queryEmbeddingModel'
+    | 'queryEmbeddingVersion'
+    | 'queryTags'
   > {
     if (input.mode === 'REEL_VECTOR') {
-      return { queryEmbedding: input.queryEmbedding };
+      return {
+        queryEmbedding: input.queryEmbedding,
+        queryEmbeddingModel: input.queryEmbeddingModel,
+        queryEmbeddingVersion: input.queryEmbeddingVersion,
+      };
     }
     return {
       queryText: input.queryText,
       queryEmbedding: input.queryEmbedding,
+      queryEmbeddingModel: input.queryEmbeddingModel,
+      queryEmbeddingVersion: input.queryEmbeddingVersion,
       queryTags: this.extractExplicitQueryTags(input.queryText),
     };
   }
@@ -498,6 +512,11 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
         rerankLimit: 0,
         shouldRerank: false,
         reason: 'Router decided retrieval is not needed.',
+        diagnostics: {
+          modelRole: 'RETRIEVAL_PLANNER',
+          providerStatus: 'NOT_CALLED',
+          decisionSource: 'NOT_REQUIRED',
+        },
       };
     }
     try {
@@ -507,21 +526,40 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
           userPrompt: this.buildUserPrompt(input.message, input.route),
           jsonSchema: this.getJsonSchema(),
           maxTokens: 450,
-          temperature: 0.1,
-          timeoutMs: 4_000,
+          temperature: 0,
+          model: this.config.getOrThrow<string>('AI_RETRIEVAL_PLANNER_MODEL'),
+          timeoutMs: Number(
+            this.config.get<string>('AI_RETRIEVAL_PLANNER_TIMEOUT_MS') ??
+              '8000',
+          ),
         });
-      return this.normalize(raw, input.message);
+      return {
+        ...this.normalize(raw, input.message),
+        diagnostics: {
+          modelRole: 'RETRIEVAL_PLANNER',
+          model: this.config.getOrThrow<string>('AI_RETRIEVAL_PLANNER_MODEL'),
+          providerStatus: 'SUCCESS',
+          decisionSource: 'LLM',
+        },
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`[RetrievalEngine] fallback default plan: ${message}`);
+      this.logger.warn(
+        `[RetrievalEngine] semantic planner failed closed: ${message}`,
+      );
       return {
-        mode: 'REEL_HYBRID',
+        mode: 'NONE',
         query: input.message,
-        queries: [input.message],
-        searchLimit: 8,
-        rerankLimit: 5,
-        shouldRerank: true,
-        reason: 'Fallback retrieval plan.',
+        queries: [],
+        searchLimit: 0,
+        rerankLimit: 0,
+        shouldRerank: false,
+        reason: 'Structured semantic retrieval planner unavailable.',
+        diagnostics: {
+          modelRole: 'RETRIEVAL_PLANNER',
+          providerStatus: 'ERROR',
+          decisionSource: 'FAIL_CLOSED',
+        },
       };
     }
   }

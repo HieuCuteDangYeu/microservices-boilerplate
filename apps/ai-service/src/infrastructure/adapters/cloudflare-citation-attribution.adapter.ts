@@ -31,6 +31,7 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
   async attribute(input: {
     question: string;
     answer: string;
+    proposedClaims?: Array<{ claim: string; evidenceIds: string[] }>;
     candidates: CitationAttributionCandidate[];
     maxCitations: number;
   }): Promise<CitationAttributionResult> {
@@ -38,9 +39,9 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
       return this.emptyResult();
     }
 
-    const model =
-      this.configService.get<string>('CLOUDFLARE_CITATION_MODEL')?.trim() ||
-      '@cf/meta/llama-3.1-8b-instruct';
+    const model = this.configService.getOrThrow<string>(
+      'AI_CITATION_ATTRIBUTION_MODEL',
+    );
     const minConfidence = this.number(
       'AI_RAG_CITATION_MIN_CONFIDENCE',
       0.65,
@@ -107,20 +108,20 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
       if (!claim) continue;
 
       const confidence = this.clampConfidence(raw.confidence);
-      const evidenceIds = Array.isArray(raw.evidenceIds)
-        ? [
-            ...new Set(
-              raw.evidenceIds
-                .filter((value): value is string => typeof value === 'string')
-                .map((value) => value.trim())
-                .filter((value) => allowedIds.has(value)),
-            ),
-          ].slice(0, 3)
+      const rawEvidenceIds = Array.isArray(raw.evidenceIds)
+        ? raw.evidenceIds
+            .filter((value): value is string => typeof value === 'string')
+            .map((value) => value.trim())
         : [];
+      const hasUnknownEvidenceId = rawEvidenceIds.some(
+        (value) => !allowedIds.has(value),
+      );
+      const evidenceIds = [...new Set(rawEvidenceIds)].slice(0, 3);
       const supported =
         raw.supported === true &&
         confidence >= minConfidence &&
-        evidenceIds.length > 0;
+        evidenceIds.length > 0 &&
+        !hasUnknownEvidenceId;
 
       claims.push({
         claim,
@@ -156,6 +157,11 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
       supportedClaimCount,
       coverage:
         factualClaimCount === 0 ? 1 : supportedClaimCount / factualClaimCount,
+      diagnostics: {
+        modelRole: 'CITATION_ATTRIBUTION',
+        model,
+        providerStatus: 'SUCCESS',
+      },
     };
   }
 
@@ -190,6 +196,7 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
   private userPrompt(input: {
     question: string;
     answer: string;
+    proposedClaims?: Array<{ claim: string; evidenceIds: string[] }>;
     candidates: CitationAttributionCandidate[];
     maxCitations: number;
   }): string {
@@ -216,6 +223,7 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
     return [
       `QUESTION:\n${input.question.trim()}`,
       `FINAL ANSWER:\n${input.answer.trim()}`,
+      `ANSWER MODEL PROPOSED CLAIM MAPPINGS (untrusted; verify independently):\n${JSON.stringify(input.proposedClaims ?? [])}`,
       `MAX FINAL CITATIONS: ${input.maxCitations}`,
       `CANDIDATE EVIDENCE:\n${evidence}`,
     ].join('\n\n');

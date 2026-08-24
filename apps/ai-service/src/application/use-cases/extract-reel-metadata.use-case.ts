@@ -22,6 +22,8 @@ export class ExtractReelMetadataUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
+    @Inject('IAiApplicationConfig')
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async execute(
@@ -68,6 +70,8 @@ export class ExtractReelMetadataUseCase {
         },
         maxTokens: 500,
         temperature: 0.1,
+        model: this.config.model('METADATA_EXTRACTION'),
+        timeoutMs: this.config.timeoutMs('METADATA_EXTRACTION'),
       });
 
     const metadata = this.normalizeOutput(raw, normalizedInput.maxTags);
@@ -214,3 +218,4 @@ export class ExtractReelMetadataUseCase {
     return Math.min(12, Math.max(3, Math.round(numericValue)));
   }
 }
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';

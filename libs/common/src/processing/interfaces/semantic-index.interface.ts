@@ -15,7 +15,7 @@ export const SEMANTIC_INDEX_PATTERNS = {
 } as const;
 
 export const REEL_INDEX_QUERY_QUEUE = 'reel_index_query';
-export const SEMANTIC_INDEX_EMBEDDING_DIMENSIONS = 384;
+export const SEMANTIC_INDEX_EMBEDDING_DIMENSIONS = 1024;
 
 export type SemanticIndexEvidenceType = 'TRANSCRIPT' | 'VISUAL' | 'METADATA';
 
@@ -30,6 +30,8 @@ export interface SemanticIndexSearchFilters {
 export interface SemanticIndexSearchRequest {
   queryText?: string;
   queryEmbedding?: number[];
+  queryEmbeddingModel?: string;
+  queryEmbeddingVersion?: string;
   queryTags?: string[];
   filters?: SemanticIndexSearchFilters;
   excludedIds?: string[];
@@ -101,4 +103,18 @@ export interface SemanticIndexDeleteResult {
 export interface SemanticIndexReindexResult {
   queued: boolean;
   indexAttemptId?: string;
+  embeddingIdentity?: {
+    model: string;
+    dimensions: number;
+    version: string;
+  };
+}
+
+export interface SemanticIndexReindexRequest {
+  reelId?: string;
+  expectedEmbeddingIdentity?: {
+    model: string;
+    dimensions: number;
+    version: string;
+  };
 }

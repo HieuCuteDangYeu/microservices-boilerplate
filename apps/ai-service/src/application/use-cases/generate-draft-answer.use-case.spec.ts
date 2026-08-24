@@ -1,0 +1,105 @@
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
+import type { RagChatWorkflowState } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+import { GenerateDraftAnswerUseCase } from './generate-draft-answer.use-case';
+
+describe('GenerateDraftAnswerUseCase', () => {
+  const config = {
+    model: jest.fn(() => '@cf/test/answer'),
+    timeoutMs: jest.fn(() => 10_000),
+  } as unknown as IAiApplicationConfig;
+  const promptBuilder = { build: jest.fn(() => 'Grounding instructions.') };
+  const state = {
+    userMessage: 'What relation is asserted?',
+    route: { intent: 'REEL_VIDEO_QUESTION' },
+    rerankedChunks: [
+      {
+        evidenceType: 'TRANSCRIPT',
+        evidenceText: 'The zorb is coupled to the quasar.',
+        chunkText: 'The zorb is coupled to the quasar.',
+        tags: [],
+      },
+    ],
+  } as RagChatWorkflowState;
+
+  it('returns answer claims mapped to authorized evidence IDs', async () => {
+    const service = {
+      generateObject: jest.fn().mockResolvedValue({
+        answer: 'The zorb is coupled to the quasar.',
+        claims: [
+          {
+            claim: 'The zorb is coupled to the quasar.',
+            evidenceIds: ['e0'],
+          },
+        ],
+      }),
+    };
+    const useCase = new GenerateDraftAnswerUseCase(
+      service as never,
+      promptBuilder,
+      config,
+    );
+
+    await expect(useCase.execute(state)).resolves.toEqual({
+      answer: 'The zorb is coupled to the quasar.',
+      claims: [
+        {
+          claim: 'The zorb is coupled to the quasar.',
+          evidenceIds: ['e0'],
+        },
+      ],
+      modelRole: 'ANSWER',
+    });
+    expect(service.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: '@cf/test/answer',
+        timeoutMs: 10_000,
+        temperature: 0,
+        userPrompt: expect.stringContaining('"evidenceId":"e0"'),
+      }),
+    );
+  });
+
+  it.each([
+    [
+      'unknown evidence ID',
+      {
+        answer: 'Unsupported.',
+        claims: [{ claim: 'Unsupported.', evidenceIds: ['e8'] }],
+      },
+      /unknown evidence ID/,
+    ],
+    [
+      'missing claim mapping',
+      { answer: 'Unmapped.', claims: [] },
+      /no grounded claim mappings/,
+    ],
+    ['empty answer', { answer: '', claims: [] }, /empty answer/],
+  ])('rejects %s', async (_name, response, error) => {
+    const useCase = new GenerateDraftAnswerUseCase(
+      { generateObject: jest.fn().mockResolvedValue(response) } as never,
+      promptBuilder,
+      config,
+    );
+    await expect(useCase.execute(state)).rejects.toThrow(error);
+  });
+
+  it('allows normal chat to contain no reel claim mappings', async () => {
+    const useCase = new GenerateDraftAnswerUseCase(
+      {
+        generateObject: jest.fn().mockResolvedValue({
+          answer: 'Hello!',
+          claims: [],
+        }),
+      } as never,
+      promptBuilder,
+      config,
+    );
+    await expect(
+      useCase.execute({
+        ...state,
+        route: { intent: 'NORMAL_CHAT' },
+        rerankedChunks: [],
+      } as RagChatWorkflowState),
+    ).resolves.toMatchObject({ answer: 'Hello!', claims: [] });
+  });
+});

@@ -62,18 +62,12 @@ export class TranscribeAudioManifestUseCase {
   private transcriptionIdentity(
     artifacts: TranscriptionAudioManifest['artifacts'],
   ): string {
+    const identity = this.config.transcriptionIdentity();
     return createHash('sha256')
       .update(
         JSON.stringify({
           artifactChecksums: artifacts.map((artifact) => artifact.checksum),
-          provider:
-            this.config.get<string>('INDEX_TRANSCRIPTION_PROVIDER') ||
-            'cloudflare-workers-ai',
-          model:
-            this.config.get<string>('INDEX_TRANSCRIPTION_MODEL') ||
-            '@cf/openai/whisper-large-v3-turbo',
-          version:
-            this.config.get<string>('INDEX_TRANSCRIPTION_VERSION') || '1',
+          ...identity,
         }),
       )
       .digest('hex');

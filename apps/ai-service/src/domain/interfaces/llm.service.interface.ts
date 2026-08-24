@@ -4,5 +4,6 @@ export interface ILlmService {
     context: string,
     userId: string,
     onToken: (token: string) => void,
+    sessionAffinityKey?: string,
   ): Promise<string>;
 }

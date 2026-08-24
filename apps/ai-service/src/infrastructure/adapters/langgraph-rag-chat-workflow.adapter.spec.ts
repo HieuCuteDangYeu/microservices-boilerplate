@@ -210,7 +210,13 @@ describe('LangGraphRagChatWorkflowAdapter diagnostic nodes', () => {
       undefined as never,
       undefined as never,
       undefined as never,
-      { execute: jest.fn().mockResolvedValue(answer) } as never,
+      {
+        execute: jest.fn().mockResolvedValue({
+          answer,
+          claims: [],
+          modelRole: 'ANSWER',
+        }),
+      } as never,
       undefined as never,
       { execute: jest.fn().mockResolvedValue('final') } as never,
       { execute: jest.fn().mockReturnValue('no context') } as never,
@@ -246,7 +252,11 @@ describe('LangGraphRagChatWorkflowAdapter diagnostic nodes', () => {
 
   it('uses a bounded grounded verifier revision before calling the draft LLM', async () => {
     const groundedRevision = {
-      execute: jest.fn().mockReturnValue('One CD is not even one GB.'),
+      executeWithProvenance: jest.fn().mockResolvedValue({
+        answer: 'One CD is not even one GB.',
+        evidenceIds: ['e0'],
+        modelRole: 'ANSWER_REVISION',
+      }),
     };
     const workflow = new LangGraphRagChatWorkflowAdapter(
       undefined as never,
@@ -285,7 +295,7 @@ describe('LangGraphRagChatWorkflowAdapter diagnostic nodes', () => {
         expect.objectContaining({ source: 'GROUNDED_VERIFIER_REVISION' }),
       ],
     });
-    expect(groundedRevision.execute).toHaveBeenCalledTimes(1);
+    expect(groundedRevision.executeWithProvenance).toHaveBeenCalledTimes(1);
   });
 
   it('bounds graph-generated draft history at configured revision capacity', async () => {

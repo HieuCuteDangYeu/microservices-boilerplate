@@ -15,6 +15,7 @@ interface RawContextSufficiencyResult {
   confidence?: unknown;
   availableEvidence?: unknown;
   missingEvidence?: unknown;
+  supportedEvidenceIds?: unknown;
   reason?: unknown;
   userFacingReason?: unknown;
   recommendedAction?: unknown;
@@ -37,6 +38,8 @@ export class CheckContextSufficiencyUseCase {
   constructor(
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
+    @Inject('IAiApplicationConfig')
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async execute(
@@ -53,6 +56,7 @@ export class CheckContextSufficiencyUseCase {
         diagnostics: {
           providerStatus: 'NOT_CALLED',
           decisionSource: 'UNKNOWN',
+          modelRole: 'CONTEXT_SUFFICIENCY',
         },
       };
     }
@@ -70,6 +74,7 @@ export class CheckContextSufficiencyUseCase {
         diagnostics: {
           providerStatus: 'NOT_CALLED',
           decisionSource: 'DETERMINISTIC_NO_CONTEXT',
+          modelRole: 'CONTEXT_SUFFICIENCY',
         },
       };
     }
@@ -93,56 +98,7 @@ export class CheckContextSufficiencyUseCase {
         diagnostics: {
           providerStatus: 'NOT_CALLED',
           decisionSource: 'DETERMINISTIC_REQUIRED_MODALITY',
-        },
-      };
-    }
-
-    const missingMentionTerms = this.missingExplicitMentionTerms(state);
-    if (missingMentionTerms.length > 0) {
-      return {
-        sufficient: false,
-        confidence: 1,
-        availableEvidence,
-        missingEvidence: ['TRANSCRIPT'],
-        reason: `Retrieved transcript does not mention: ${missingMentionTerms.join(', ')}.`,
-        userFacingReason:
-          'I do not have relevant shared reel transcript context to answer that reliably.',
-        recommendedAction: 'REFUSE_NO_CONTEXT',
-        diagnostics: {
-          providerStatus: 'NOT_CALLED',
-          decisionSource: 'DETERMINISTIC_EXPLICIT_MENTION',
-        },
-      };
-    }
-
-    if (this.hasExplicitQuantitySupport(state)) {
-      return {
-        sufficient: true,
-        confidence: 1,
-        availableEvidence,
-        missingEvidence: [],
-        reason:
-          'Retrieved transcript explicitly supplies the quantity requested by the user.',
-        recommendedAction: 'ANSWER',
-        diagnostics: {
-          providerStatus: 'NOT_CALLED',
-          decisionSource: 'DETERMINISTIC_QUANTITY',
-        },
-      };
-    }
-
-    if (this.hasDirectTranscriptFactSupport(state)) {
-      return {
-        sufficient: true,
-        confidence: 1,
-        availableEvidence,
-        missingEvidence: [],
-        reason:
-          'A retrieved transcript directly shares the question entities and a factual relation marker.',
-        recommendedAction: 'ANSWER',
-        diagnostics: {
-          providerStatus: 'NOT_CALLED',
-          decisionSource: 'DETERMINISTIC_DIRECT_FACT',
+          modelRole: 'CONTEXT_SUFFICIENCY',
         },
       };
     }
@@ -155,30 +111,40 @@ export class CheckContextSufficiencyUseCase {
             userPrompt: this.buildUserPrompt(state),
             jsonSchema: this.getJsonSchema(),
             maxTokens: 400,
-            temperature: 0.1,
+            temperature: 0,
+            model: this.config.model('CONTEXT_SUFFICIENCY'),
+            timeoutMs: this.config.timeoutMs('CONTEXT_SUFFICIENCY'),
           },
         );
 
       return {
         ...this.normalize(raw, state),
-        diagnostics: { providerStatus: 'SUCCESS', decisionSource: 'LLM' },
+        diagnostics: {
+          providerStatus: 'SUCCESS',
+          decisionSource: 'LLM',
+          modelRole: 'CONTEXT_SUFFICIENCY',
+          model: this.config.model('CONTEXT_SUFFICIENCY'),
+        },
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `[ContextSufficiency] fallback answer allowed: ${message}`,
+        `[ContextSufficiency] semantic check failed closed: ${message}`,
       );
       return {
-        sufficient: true,
-        confidence: 0.5,
+        sufficient: false,
+        confidence: 0,
         availableEvidence,
-        missingEvidence: [],
-        reason:
-          'Context sufficiency checker failed after required evidence was verified.',
-        recommendedAction: 'ANSWER',
+        missingEvidence: this.getRequiredEvidence(state),
+        supportedEvidenceIds: [],
+        reason: 'Required semantic context sufficiency check was unavailable.',
+        userFacingReason:
+          'I could not verify that the shared reel evidence answers this question reliably.',
+        recommendedAction: 'REFUSE_NO_CONTEXT',
         diagnostics: {
           providerStatus: 'ERROR',
-          decisionSource: 'PROVIDER_FALLBACK',
+          decisionSource: 'FAIL_CLOSED',
+          modelRole: 'CONTEXT_SUFFICIENCY',
         },
       };
     }
@@ -235,7 +201,8 @@ ${JSON.stringify(this.getAvailableEvidence(state))}
 
 Retrieved reel evidence:
 ${JSON.stringify(
-  state.rerankedChunks.map((chunk) => ({
+  state.rerankedChunks.map((chunk, index) => ({
+    evidenceId: `e${index}`,
     evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
     title: chunk.title,
     description: chunk.description,
@@ -258,6 +225,7 @@ ${JSON.stringify(
         'confidence',
         'availableEvidence',
         'missingEvidence',
+        'supportedEvidenceIds',
         'reason',
         'userFacingReason',
         'recommendedAction',
@@ -294,6 +262,10 @@ ${JSON.stringify(
               'USER_MEMORY',
             ],
           },
+        },
+        supportedEvidenceIds: {
+          type: 'array',
+          items: { type: 'string' },
         },
         reason: { type: 'string' },
         userFacingReason: { type: 'string' },
@@ -332,6 +304,19 @@ ${JSON.stringify(
       raw.missingEvidence,
       [],
     );
+    const allowedEvidenceIds = new Set(
+      state.rerankedChunks.map((_chunk, index) => `e${index}`),
+    );
+    const supportedEvidenceIds = Array.isArray(raw.supportedEvidenceIds)
+      ? [
+          ...new Set(
+            raw.supportedEvidenceIds.filter(
+              (value): value is string =>
+                typeof value === 'string' && allowedEvidenceIds.has(value),
+            ),
+          ),
+        ]
+      : [];
     return {
       sufficient,
       confidence:
@@ -340,6 +325,7 @@ ${JSON.stringify(
           : 0.5,
       availableEvidence,
       missingEvidence,
+      supportedEvidenceIds,
       reason:
         typeof raw.reason === 'string' && raw.reason.trim()
           ? raw.reason.trim()
@@ -385,111 +371,6 @@ ${JSON.stringify(
       evidence.push('METADATA');
     }
     return this.dedupeEvidence(evidence);
-  }
-
-  private missingExplicitMentionTerms(state: RagChatWorkflowState): string[] {
-    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') return [];
-    if (!state.route.requiredEvidence.includes('TRANSCRIPT')) return [];
-
-    const match = state.userMessage.match(
-      /\b(?:does|did|do)\b[\s\S]*?\bmention\b\s+(.+?)[?.!]*$/i,
-    );
-    if (!match?.[1]) return [];
-
-    const terms = match[1]
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((term) => term.length >= 3)
-      .filter((term) => !['the', 'and', 'that', 'this'].includes(term));
-    const evidence = state.rerankedChunks
-      .filter((chunk) => (chunk.evidenceType ?? 'TRANSCRIPT') === 'TRANSCRIPT')
-      .map((chunk) => (chunk.evidenceText ?? chunk.chunkText).toLowerCase())
-      .join(' ');
-    return terms.filter((term) => !evidence.includes(term));
-  }
-
-  private hasExplicitQuantitySupport(state: RagChatWorkflowState): boolean {
-    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') return false;
-    if (!state.route.requiredEvidence.includes('TRANSCRIPT')) return false;
-    if (!/\b(how many|what number|how low)\b/i.test(state.userMessage))
-      return false;
-
-    const terms = state.userMessage
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((term) => term.length >= 3)
-      .filter(
-        (term) =>
-          ![
-            'how',
-            'many',
-            'what',
-            'number',
-            'low',
-            'does',
-            'speaker',
-            'they',
-            'say',
-            'using',
-          ].includes(term),
-      );
-    const evidence = state.rerankedChunks
-      .filter((chunk) => (chunk.evidenceType ?? 'TRANSCRIPT') === 'TRANSCRIPT')
-      .map((chunk) => (chunk.evidenceText ?? chunk.chunkText).toLowerCase())
-      .join(' ');
-
-    return (
-      /\b\d+(?:\.\d+)?\b/.test(evidence) &&
-      terms.some((term) => evidence.includes(term))
-    );
-  }
-
-  private hasDirectTranscriptFactSupport(state: RagChatWorkflowState): boolean {
-    if (state.route?.intent !== 'REEL_VIDEO_QUESTION') return false;
-    if (!state.route.requiredEvidence.includes('TRANSCRIPT')) return false;
-    if (!/\b(what|which|why|where|who|how)\b/i.test(state.userMessage))
-      return false;
-
-    const questionTerms = state.userMessage
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((term) => term.length >= 4)
-      .filter(
-        (term) =>
-          ![
-            'what',
-            'which',
-            'where',
-            'when',
-            'does',
-            'they',
-            'someone',
-            'example',
-            'shared',
-            'video',
-            'reel',
-            'about',
-            'with',
-            'that',
-            'this',
-          ].includes(term),
-      );
-
-    if (questionTerms.length === 0) return false;
-
-    return state.rerankedChunks.some((chunk) => {
-      if ((chunk.evidenceType ?? 'TRANSCRIPT') !== 'TRANSCRIPT') return false;
-      const evidence = (chunk.evidenceText ?? chunk.chunkText).toLowerCase();
-      const sharedTerms = questionTerms.filter((term) =>
-        evidence.includes(term),
-      );
-      return (
-        sharedTerms.length >= Math.min(2, questionTerms.length) &&
-        /\b(assigned|called|named|label(?:led)?|same|common|because|belongs?|causes?|means?|can|could)\b/i.test(
-          evidence,
-        )
-      );
-    });
   }
 
   private hasEvidenceText(chunk: ReelContextSearchResult): boolean {
@@ -543,3 +424,4 @@ ${JSON.stringify(
       : deduped;
   }
 }
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';

@@ -63,6 +63,12 @@ export interface RagChatRouteDecision {
   recommendationAction: RagRecommendationAction;
 
   reason: string;
+  diagnostics?: {
+    modelRole: 'ROUTER';
+    model?: string;
+    providerStatus: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
+    decisionSource: 'LLM' | 'FAIL_SAFE' | 'STRUCTURAL';
+  };
 }
 
 export type RagRetrievalMode = 'NONE' | 'REEL_VECTOR' | 'REEL_HYBRID';
@@ -76,6 +82,12 @@ export interface RagRetrievalPlan {
   rerankLimit: number;
   shouldRerank: boolean;
   reason: string;
+  diagnostics?: {
+    modelRole: 'RETRIEVAL_PLANNER';
+    model?: string;
+    providerStatus: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
+    decisionSource: 'LLM' | 'FAIL_CLOSED' | 'NOT_REQUIRED';
+  };
 }
 
 export interface RagMemorySelection {
@@ -99,16 +111,24 @@ export interface RagVerificationDiagnostics {
   providerStatus: 'NOT_CALLED' | 'SUCCESS' | 'ERROR';
   decisionSource:
     | 'NOT_REQUIRED'
-    | 'LLM'
-    | 'DETERMINISTIC_DIRECT_SUPPORT'
+    | 'LLM_PRIMARY'
+    | 'LLM_ESCALATION'
+    | 'EXACT_PROVENANCE'
     | 'FAIL_CLOSED';
+  modelRole?: 'VERIFIER' | 'VERIFIER_ESCALATION';
+  model?: string;
+  escalated?: boolean;
+  escalationReason?: string;
   providerPassed?: boolean;
   finalPassed: boolean;
   confidence: number;
   issues: string[];
   requiresRevision: boolean;
   revisedInstruction?: string;
-  directSupport: { supported: boolean; supportingEvidenceIndexes: number[] };
+  exactProvenance: {
+    supported: boolean;
+    supportingEvidenceIndexes: number[];
+  };
 }
 
 export interface RagContextSufficiencyResult {
@@ -117,6 +137,7 @@ export interface RagContextSufficiencyResult {
 
   availableEvidence: RagRequiredEvidence[];
   missingEvidence: RagRequiredEvidence[];
+  supportedEvidenceIds?: string[];
 
   reason: string;
   userFacingReason?: string;
@@ -130,12 +151,11 @@ export interface RagContextSufficiencyDiagnostics {
   decisionSource:
     | 'DETERMINISTIC_NO_CONTEXT'
     | 'DETERMINISTIC_REQUIRED_MODALITY'
-    | 'DETERMINISTIC_EXPLICIT_MENTION'
-    | 'DETERMINISTIC_QUANTITY'
-    | 'DETERMINISTIC_DIRECT_FACT'
     | 'LLM'
-    | 'PROVIDER_FALLBACK'
+    | 'FAIL_CLOSED'
     | 'UNKNOWN';
+  modelRole?: 'CONTEXT_SUFFICIENCY';
+  model?: string;
 }
 
 export interface RagCitationCoverageResult {
@@ -151,6 +171,9 @@ export interface RagCitationDiagnostics {
   decisionSource: 'NOT_REQUIRED' | 'LLM' | 'DETERMINISTIC' | 'FALLBACK';
   selectedEvidenceIds: string[];
   deterministicSupportingEvidenceIds: string[];
+  modelRole?: 'CITATION_ATTRIBUTION';
+  model?: string;
+  providerStatus?: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
 }
 
 export interface RagDraftHistoryEntry {
@@ -161,6 +184,11 @@ export interface RagDraftHistoryEntry {
     | 'GROUNDED_VERIFIER_REVISION'
     | 'CITATION_REVISION';
   answer: string;
+}
+
+export interface RagAnswerClaim {
+  claim: string;
+  evidenceIds: string[];
 }
 
 export type RagCitation = AiRagCitation;
@@ -207,9 +235,14 @@ export interface RagChatWorkflowState {
   memoryReady?: boolean;
 
   answer?: string;
+  answerClaims?: RagAnswerClaim[];
   verification?: RagVerificationResult;
   citations?: RagCitation[];
   citationCoverage?: RagCitationCoverageResult;
+  groundedRevision?: {
+    evidenceIds: string[];
+    modelRole: 'ANSWER_REVISION';
+  };
   draftHistory: RagDraftHistoryEntry[];
   draftRevision: number;
   citationAttempts: Array<{

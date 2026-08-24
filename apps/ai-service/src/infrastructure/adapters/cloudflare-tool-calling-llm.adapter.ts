@@ -45,9 +45,7 @@ export class CloudflareToolCallingLlmAdapter implements IToolCallingLlmService {
     const accountId = this.config.getOrThrow<string>('CLOUDFLARE_ACCOUNT_ID');
     const apiToken = this.config.getOrThrow<string>('CLOUDFLARE_API_TOKEN');
     const model =
-      input.model ||
-      this.config.get<string>('CLOUDFLARE_TOOL_MODEL') ||
-      '@cf/openai/gpt-oss-20b';
+      input.model || this.config.getOrThrow<string>('AI_RETRIEVAL_TOOL_MODEL');
     const timeoutMs = this.resolveTimeout(input.timeoutMs);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -62,6 +60,8 @@ export class CloudflareToolCallingLlmAdapter implements IToolCallingLlmService {
           headers: {
             Authorization: `Bearer ${apiToken}`,
             'Content-Type': 'application/json',
+            'cf-aig-skip-cache': 'true',
+            ...this.gatewayHeaders(),
           },
           body: JSON.stringify({
             model,
@@ -203,5 +203,20 @@ export class CloudflareToolCallingLlmAdapter implements IToolCallingLlmService {
     return Number.isFinite(requested)
       ? Math.min(30_000, Math.max(1_000, Math.round(requested)))
       : 10_000;
+  }
+
+  private gatewayHeaders(): Record<string, string> {
+    const enabled =
+      this.config
+        .get<string>('CLOUDFLARE_AI_GATEWAY_ENABLED')
+        ?.trim()
+        .toLowerCase() !== 'false';
+    return enabled
+      ? {
+          'cf-aig-gateway-id': this.config.getOrThrow<string>(
+            'CLOUDFLARE_AI_GATEWAY_ID',
+          ),
+        }
+      : {};
   }
 }

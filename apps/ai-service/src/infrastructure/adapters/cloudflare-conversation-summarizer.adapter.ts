@@ -129,9 +129,8 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
   }
 
   private getMemoryModel(): string {
-    return (
-      this.configService.get<string>('CLOUDFLARE_MEMORY_MODEL') ||
-      '@cf/meta/llama-3.1-8b-instruct-fast'
+    return this.configService.getOrThrow<string>(
+      'AI_CONVERSATION_SUMMARY_MODEL',
     );
   }
 
