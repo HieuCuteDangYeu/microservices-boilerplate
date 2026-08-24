@@ -114,6 +114,16 @@ const reelDocument: SemanticReelDocument = {
 };
 
 const buildAdapter = (configValues: Record<string, string>) => {
+  const generateObject = jest.fn().mockResolvedValue({
+    mode: 'REEL_HYBRID',
+    query: 'What project name is spoken?',
+    rewrittenQuery: '',
+    queries: ['What project name is spoken?'],
+    searchLimit: 8,
+    rerankLimit: 5,
+    shouldRerank: true,
+    reason: 'Retrieve spoken project-name evidence.',
+  });
   const embeddingService: IEmbeddingService = {
     generateVector: jest.fn().mockResolvedValue({
       values: Array.from({ length: 1024 }, () => 0.01),
@@ -150,14 +160,14 @@ const buildAdapter = (configValues: Record<string, string>) => {
     };
 
   const adapter = new DeterministicRetrievalEngineAdapter(
-    {} as IStructuredLlmService,
+    { generateObject } as IStructuredLlmService,
     embeddingService,
     contentService,
     semanticIndexService,
     {} as IRerankerService,
     hierarchyObservationRepository,
     new ConfigService(configValues),
-    { maxCompletionTokens: jest.fn(() => 256) } as never,
+    { maxCompletionTokens: jest.fn(() => 512) } as never,
   );
 
   return {
@@ -165,10 +175,50 @@ const buildAdapter = (configValues: Record<string, string>) => {
     hierarchyObservationRepository,
     searchChunks,
     searchVisualScenes,
+    generateObject,
   };
 };
 
 describe('DeterministicRetrievalEngineAdapter', () => {
+  it('uses an explicit bounded contract for semantic retrieval planning', async () => {
+    const { adapter, generateObject } = buildAdapter({
+      AI_RETRIEVAL_PLANNER_MODEL: '@cf/openai/gpt-oss-20b',
+      AI_RETRIEVAL_PLANNER_TIMEOUT_MS: '8000',
+    });
+
+    await expect(
+      adapter.plan({
+        message: 'What project name is spoken?',
+        route: transcriptRoute,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        mode: 'REEL_HYBRID',
+        queries: ['What project name is spoken?'],
+      }),
+    );
+
+    const request = generateObject.mock.calls[0]?.[0];
+    expect(request).toEqual(
+      expect.objectContaining({
+        model: '@cf/openai/gpt-oss-20b',
+        modelRole: 'RETRIEVAL_PLANNER',
+        maxTokens: 512,
+        timeoutMs: 8_000,
+      }),
+    );
+    expect(request.systemPrompt).toContain('Return exactly these eight fields');
+    expect(request.jsonSchema.properties).toEqual(
+      expect.objectContaining({
+        query: expect.objectContaining({ maxLength: 500 }),
+        queries: expect.objectContaining({ minItems: 1, maxItems: 3 }),
+        searchLimit: expect.objectContaining({ minimum: 1, maximum: 20 }),
+        rerankLimit: expect.objectContaining({ minimum: 1, maximum: 10 }),
+        reason: expect.objectContaining({ maxLength: 240 }),
+      }),
+    );
+  });
+
   it('serves direct retrieval and forces shadow when production hierarchy is requested without approval', async () => {
     const { adapter, hierarchyObservationRepository, searchChunks } =
       buildAdapter({

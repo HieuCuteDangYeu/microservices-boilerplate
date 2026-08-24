@@ -587,6 +587,8 @@ Rules:
 9. REEL_VECTOR means semantic vector search only. Use it when lexical wording is likely noisy or paraphrased.
 10. REEL_HYBRID means semantic vector + full-text search, with explicit #hashtags also eligible for tag matching. Prefer it for normal factual reel questions.
 11. The execution layer selects transcript and/or sampled visual-scene evidence from the router's required-evidence decision. Do not try to change that evidence policy.
+12. Return exactly these eight fields: mode, query, rewrittenQuery, queries, searchLimit, rerankLimit, shouldRerank, reason.
+13. mode must be NONE, REEL_VECTOR, or REEL_HYBRID. query and rewrittenQuery are strings; use an empty rewrittenQuery when no rewrite is needed. queries is an array of one to three query strings. searchLimit is an integer from 1 to 20, rerankLimit is an integer from 1 to 10, shouldRerank is a boolean, and reason is a concise string.
 `.trim();
   }
 
@@ -622,13 +624,18 @@ ${route.requiredEvidence.join(', ')}
           type: 'string',
           enum: ['NONE', 'REEL_VECTOR', 'REEL_HYBRID'],
         },
-        query: { type: 'string' },
-        rewrittenQuery: { type: 'string' },
-        queries: { type: 'array', items: { type: 'string' } },
-        searchLimit: { type: 'number' },
-        rerankLimit: { type: 'number' },
+        query: { type: 'string', maxLength: 500 },
+        rewrittenQuery: { type: 'string', maxLength: 500 },
+        queries: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 3,
+          items: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+        searchLimit: { type: 'number', minimum: 1, maximum: 20 },
+        rerankLimit: { type: 'number', minimum: 1, maximum: 10 },
         shouldRerank: { type: 'boolean' },
-        reason: { type: 'string' },
+        reason: { type: 'string', minLength: 1, maxLength: 240 },
       },
     };
   }
