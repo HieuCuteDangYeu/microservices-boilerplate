@@ -73,6 +73,17 @@ const NUMBER_WORDS: Record<string, string> = {
   twenty: '20',
 };
 
+const UNIT_ALIASES: Record<string, string> = {
+  gb: 'gigabyte',
+  gbs: 'gigabyte',
+  kb: 'kilobyte',
+  kbs: 'kilobyte',
+  mb: 'megabyte',
+  mbs: 'megabyte',
+  tb: 'terabyte',
+  tbs: 'terabyte',
+};
+
 /**
  * A deliberately narrow guard for compact transcript facts. It does not judge
  * open-ended summaries or infer a fact from topical overlap.
@@ -96,6 +107,7 @@ export function assessDirectTranscriptFactSupport(input: {
   const quantityQuestion = /\b(how many|what number|how low)\b/i.test(
     input.question,
   );
+  const explanationQuestion = /\b(why|reason|because)\b/i.test(input.question);
   const whoQuestion = /\bwho\b/i.test(input.question);
   const labelQuestion = /\blabel\b/i.test(input.question);
 
@@ -131,11 +143,16 @@ export function assessDirectTranscriptFactSupport(input: {
         /\b(assigned|called|named|label(?:led)?|same|common|because|belongs?|causes?|means?|can|could)\b/.test(
           evidence,
         );
+      const hasExplanationRelation =
+        explanationQuestion &&
+        sharedQuestionTerms.length >= 2 &&
+        /\b(because|since|therefore|so)\b/.test(evidence);
 
       return hasQuantitySupport ||
         hasWhoRelation ||
         hasLabelRelation ||
-        hasDirectRelation
+        hasDirectRelation ||
+        hasExplanationRelation
         ? [index]
         : [];
     },
@@ -149,8 +166,27 @@ export function assessDirectTranscriptFactSupport(input: {
 
 function contentTokens(value: string): string[] {
   return (value.toLowerCase().match(/\d+(?:\.\d+)?|[a-z]+/g) ?? [])
-    .map((token: string): string => NUMBER_WORDS[token] ?? token)
+    .map((token: string): string => normalizeContentToken(token))
     .filter((token: string) => token.length > 0 && !STOP_WORDS.has(token));
+}
+
+function normalizeContentToken(token: string): string {
+  const numeric = NUMBER_WORDS[token];
+  if (numeric) return numeric;
+
+  const unit = UNIT_ALIASES[token];
+  if (unit) return unit;
+
+  if (
+    token.endsWith('s') &&
+    token !== 'is' &&
+    token !== 'was' &&
+    token !== 'this'
+  ) {
+    return token.slice(0, -1);
+  }
+
+  return token;
 }
 
 function unsupported(): DirectTranscriptFactSupport {

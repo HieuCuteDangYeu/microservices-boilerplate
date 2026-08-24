@@ -51,6 +51,16 @@ describe('assessDirectTranscriptFactSupport', () => {
     ).toBe(true);
   });
 
+  it('supports a directly stated explanatory capacity fact', () => {
+    expect(
+      assess(
+        'Why do they say CDs are not enough for backing up data?',
+        'One CD is not even one gigabyte.',
+        'CDs are not enough because one CD is not even one GB.',
+      ).supported,
+    ).toBe(true);
+  });
+
   it.each([
     [
       'How should backups be protected from fire?',
@@ -90,6 +100,39 @@ describe('assessDirectTranscriptFactSupport', () => {
         'Three backups in the university.',
         evidenceText,
       ).supported,
+    ).toBe(false);
+  });
+
+  it.each([
+    ['They use CDs for backups.', 'Because they use CDs.'],
+    ['They have three CDs.', 'Because they have three CDs.'],
+    [
+      'A CD is not even one GB.',
+      'Because CDs fail in fires and are under one gigabyte.',
+    ],
+    ['A CD is not even one GB.', 'Because each CD stores ten gigabytes.'],
+  ])(
+    'rejects an unsupported explanatory why-answer',
+    (evidenceText, answer) => {
+      expect(
+        assess('Why are CDs not enough for backup?', answer, evidenceText)
+          .supported,
+      ).toBe(false);
+    },
+  );
+
+  it('rejects an explanatory answer from the wrong modality', () => {
+    expect(
+      assessDirectTranscriptFactSupport({
+        question: 'Why are CDs not enough for backup?',
+        answer: 'One CD is not even one gigabyte.',
+        candidates: [
+          {
+            evidenceType: 'VISUAL',
+            evidenceText: 'A CD is not even one GB.',
+          },
+        ],
+      }).supported,
     ).toBe(false);
   });
 });

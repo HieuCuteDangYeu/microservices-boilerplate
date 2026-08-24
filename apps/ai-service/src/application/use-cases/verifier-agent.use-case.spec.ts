@@ -247,6 +247,36 @@ describe('VerifierAgentUseCase', () => {
     },
   );
 
+  it('keeps a directly supported explanatory transcript fact when the LLM rejects it', async () => {
+    const structuredLlmService: IStructuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue({
+        passed: false,
+        confidence: 1,
+        issues: ['Incorrectly conservative provider judgment.'],
+        requiresRevision: true,
+        revisedInstruction: 'Rewrite it.',
+      }),
+    };
+    const useCase = new VerifierAgentUseCase(structuredLlmService);
+
+    await expect(
+      useCase.execute(
+        transcriptState({
+          question: 'Why do they say CDs are not enough for backing up data?',
+          answer: 'One CD is not even one gigabyte.',
+          evidenceText: 'CDs are not enough because one CD is not even one GB.',
+        }),
+      ),
+    ).resolves.toMatchObject({
+      passed: true,
+      requiresRevision: false,
+      diagnostics: {
+        decisionSource: 'DETERMINISTIC_DIRECT_SUPPORT',
+        directSupport: { supported: true },
+      },
+    });
+  });
+
   it('does not override an LLM rejection for topic-only transcript overlap', async () => {
     const structuredLlmService: IStructuredLlmService = {
       generateObject: jest.fn().mockResolvedValue({
