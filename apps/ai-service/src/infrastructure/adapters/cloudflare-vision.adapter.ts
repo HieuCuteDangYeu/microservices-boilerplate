@@ -58,14 +58,14 @@ export class CloudflareVisionAdapter implements IVisionService {
             {
               role: 'system',
               content:
-                'Analyze only the supplied single frame. Do not infer speech, identity, intent, hidden text, or events outside this sampled timestamp. Return only JSON matching the schema.',
+                'Analyze only the supplied single frame. Do not infer speech, identity, intent, hidden text, or events outside this sampled timestamp. Return only a JSON object with exactly these keys: caption (a non-empty factual string), ocrText (a string, empty when no text is clearly readable), and objects (an array of short strings).',
             },
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Describe visible content factually, transcribe only clearly readable text, and list important visible objects or UI elements. Preserve visible numbers and code exactly; omit uncertain text.',
+                  text: 'Set caption to a factual description of visible content, ocrText to only clearly readable text, and objects to important visible objects or UI elements. Preserve visible numbers and code exactly; omit uncertain text.',
                 },
                 {
                   type: 'image_url',
