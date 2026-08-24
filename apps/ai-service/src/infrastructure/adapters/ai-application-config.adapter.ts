@@ -50,7 +50,7 @@ const MAX_COMPLETION_TOKENS_BY_ROLE: Record<
   ROUTER: { key: 'AI_ROUTER_MAX_TOKENS', fallback: 2_048 },
   RETRIEVAL_PLANNER: {
     key: 'AI_RETRIEVAL_PLANNER_MAX_TOKENS',
-    fallback: 256,
+    fallback: 512,
   },
   RETRIEVAL_TOOL: { key: 'AI_RETRIEVAL_TOOL_MAX_TOKENS', fallback: 500 },
   CONTEXT_SUFFICIENCY: {

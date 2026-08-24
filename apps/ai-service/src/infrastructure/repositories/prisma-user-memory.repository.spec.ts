@@ -18,6 +18,45 @@ const rawMemory = {
 };
 
 describe('PrismaUserMemoryRepository', () => {
+  it('uses a legacy-compatible projection for ordinary memory reads', async () => {
+    const {
+      embeddingDimensions,
+      embeddingVersion,
+      semanticScore,
+      ...legacyRow
+    } = rawMemory;
+    const prisma = {
+      userMemory: {
+        findMany: jest.fn().mockResolvedValue([legacyRow]),
+      },
+    };
+    const repository = new PrismaUserMemoryRepository(prisma as never);
+
+    await expect(repository.findByUserId('user-1', 10)).resolves.toEqual([
+      expect.objectContaining({
+        id: 'memory-1',
+        content: rawMemory.content,
+        embeddingDimensions: undefined,
+        embeddingVersion: undefined,
+      }),
+    ]);
+
+    const select = prisma.userMemory.findMany.mock.calls[0]?.[0]?.select;
+    expect(select).toEqual(
+      expect.objectContaining({
+        id: true,
+        userId: true,
+        normalizedContent: true,
+        embeddingModel: true,
+      }),
+    );
+    expect(select).not.toHaveProperty('embeddingDimensions');
+    expect(select).not.toHaveProperty('embeddingVersion');
+    expect(embeddingDimensions).toBe(1024);
+    expect(embeddingVersion).toBe('cf-bge-m3-v1');
+    expect(semanticScore).toBe(0.92);
+  });
+
   it('reads the live vector dimension from PostgreSQL metadata', async () => {
     const prisma = {
       $queryRaw: jest

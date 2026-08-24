@@ -10,10 +10,37 @@ import type { UserMemoryType } from '@common/ai/interfaces/user-memory.interface
 import { Injectable } from '@nestjs/common';
 import type { UserMemory as PrismaUserMemory } from '@prisma/ai-client';
 
-type PrismaUserMemoryWithEmbeddingIdentity = PrismaUserMemory & {
+type PrismaUserMemoryWithEmbeddingIdentity = Pick<
+  PrismaUserMemory,
+  | 'id'
+  | 'userId'
+  | 'type'
+  | 'content'
+  | 'normalizedContent'
+  | 'confidence'
+  | 'sourceConversationId'
+  | 'embeddingModel'
+  | 'lastUsedAt'
+  | 'createdAt'
+  | 'updatedAt'
+> & {
   embeddingDimensions?: number | null;
   embeddingVersion?: string | null;
 };
+
+const LEGACY_COMPATIBLE_USER_MEMORY_SELECT = {
+  id: true,
+  userId: true,
+  type: true,
+  content: true,
+  normalizedContent: true,
+  confidence: true,
+  sourceConversationId: true,
+  embeddingModel: true,
+  lastUsedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 interface UserMemoryRawRecord {
   id: string;
@@ -55,6 +82,7 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
 
   async findByUserId(userId: string, limit: number): Promise<UserMemory[]> {
     const memories = await this.prisma.userMemory.findMany({
+      select: LEGACY_COMPATIBLE_USER_MEMORY_SELECT,
       where: {
         userId,
         confidence: {
@@ -93,8 +121,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
           um.confidence,
           um."sourceConversationId",
           um."embeddingModel",
-          um."embeddingDimensions",
-          um."embeddingVersion",
+          (to_jsonb(um)->>'embeddingDimensions')::int AS "embeddingDimensions",
+          to_jsonb(um)->>'embeddingVersion' AS "embeddingVersion",
           um."lastUsedAt",
           um."createdAt",
           um."updatedAt",
@@ -168,15 +196,15 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
         confidence,
         "sourceConversationId",
         "embeddingModel",
-        "embeddingDimensions",
-        "embeddingVersion",
+        (to_jsonb(um)->>'embeddingDimensions')::int AS "embeddingDimensions",
+        to_jsonb(um)->>'embeddingVersion' AS "embeddingVersion",
         NULL::float AS "semanticScore",
         "lastUsedAt",
         "createdAt",
         "updatedAt"
-      FROM "UserMemory"
-      WHERE embedding IS NULL
-      ORDER BY "updatedAt" DESC
+      FROM "UserMemory" um
+      WHERE um.embedding IS NULL
+      ORDER BY um."updatedAt" DESC
       LIMIT ${normalizedLimit};
     `;
 
@@ -192,6 +220,7 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       }
       const memory = await this.prisma.$transaction(async (tx) => {
         const saved = await tx.userMemory.upsert({
+          select: LEGACY_COMPATIBLE_USER_MEMORY_SELECT,
           where: {
             userId_type_normalizedContent: {
               userId: input.userId,
@@ -250,6 +279,7 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
     }
     const saved = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.userMemory.findUnique({
+        select: LEGACY_COMPATIBLE_USER_MEMORY_SELECT,
         where: { id: memoryId },
       });
 
@@ -260,6 +290,7 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       }
 
       const updated = await tx.userMemory.update({
+        select: LEGACY_COMPATIBLE_USER_MEMORY_SELECT,
         where: { id: memoryId },
         data: {
           type: input.type,
