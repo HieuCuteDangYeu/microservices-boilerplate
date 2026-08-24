@@ -119,6 +119,56 @@ describe('CheckContextSufficiencyUseCase', () => {
     },
   );
 
+  it('does not reject the IN1001-2 supporting transcript for absent conversation memory', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue({
+        sufficient: true,
+        confidence: 1,
+        availableEvidence: ['TRANSCRIPT'],
+        missingEvidence: [],
+        reason: 'The transcript directly states the internship and supervisor.',
+        userFacingReason: '',
+        recommendedAction: 'ANSWER',
+      }),
+    };
+    const useCase = new CheckContextSufficiencyUseCase(
+      structuredLlmService as never,
+    );
+
+    await expect(
+      useCase.execute({
+        userMessage:
+          'Where was the video shot detector project carried out, and under whose supervision?',
+        route: {
+          intent: 'REEL_VIDEO_QUESTION',
+          needsRetrieval: true,
+          requiredEvidence: ['TRANSCRIPT'],
+        },
+        rerankedChunks: [
+          {
+            evidenceType: 'TRANSCRIPT',
+            evidenceText:
+              'It was my project during my internship at IDIAP under the supervision of Jean-Marc.',
+            chunkText:
+              'It was my project during my internship at IDIAP under the supervision of Jean-Marc.',
+            tags: [],
+          },
+        ],
+      } as RagChatWorkflowState),
+    ).resolves.toMatchObject({
+      sufficient: true,
+      recommendedAction: 'ANSWER',
+      missingEvidence: [],
+    });
+    expect(structuredLlmService.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userPrompt: expect.stringContaining(
+          '"requiredEvidence":["TRANSCRIPT"]',
+        ),
+      }),
+    );
+  });
+
   it.each([
     [
       'What relation makes the two items belong to the same cluster?',

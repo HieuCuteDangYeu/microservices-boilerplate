@@ -68,6 +68,30 @@ describe('QueryRouterAgentUseCase', () => {
     },
   );
 
+  it('strips erroneous conversation memory from the exact IN1001-2 route shape', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue({
+        ...normalRouterResponse,
+        intent: 'REEL_VIDEO_QUESTION',
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['TRANSCRIPT', 'CONVERSATION_MEMORY'],
+      }),
+    };
+    const useCase = new QueryRouterAgentUseCase(structuredLlmService as never);
+
+    await expect(
+      useCase.execute({
+        message:
+          'Where was the video shot detector project carried out, and under whose supervision?',
+        hasSharedReelContext: true,
+      }),
+    ).resolves.toMatchObject({
+      intent: 'REEL_VIDEO_QUESTION',
+      reelQuestionType: 'TRANSCRIPT_CONTENT',
+      requiredEvidence: ['TRANSCRIPT'],
+    });
+  });
+
   it.each([
     'Who is the video shot detector being presented to?',
     'Where was the video shot detector project carried out, and under whose supervision?',
@@ -120,6 +144,75 @@ describe('QueryRouterAgentUseCase', () => {
       needsRetrieval: false,
     });
   });
+
+  it.each([
+    ['TRANSCRIPT_CONTENT', ['TRANSCRIPT']],
+    ['VISUAL_CONTENT', ['VISUAL']],
+    ['GENERAL_REEL_SUMMARY', ['TRANSCRIPT', 'METADATA']],
+    ['REEL_METADATA', ['METADATA']],
+  ])(
+    'uses only the canonical evidence modalities for typed reel routes: %s',
+    async (reelQuestionType, requiredEvidence) => {
+      const structuredLlmService = {
+        generateObject: jest.fn().mockResolvedValue({
+          ...normalRouterResponse,
+          intent: 'REEL_VIDEO_QUESTION',
+          reelQuestionType,
+          requiredEvidence: [
+            'TRANSCRIPT',
+            'VISUAL',
+            'METADATA',
+            'CONVERSATION_MEMORY',
+            'USER_MEMORY',
+          ],
+        }),
+      };
+      const useCase = new QueryRouterAgentUseCase(
+        structuredLlmService as never,
+      );
+
+      await expect(
+        useCase.execute({
+          message: 'What is this shared reel about?',
+          hasSharedReelContext: false,
+        }),
+      ).resolves.toMatchObject({
+        intent: 'REEL_VIDEO_QUESTION',
+        reelQuestionType,
+        requiredEvidence,
+      });
+    },
+  );
+
+  it.each([
+    ['CONVERSATION_MEMORY_QUESTION', ['CONVERSATION_MEMORY']],
+    ['USER_MEMORY_QUESTION', ['USER_MEMORY']],
+  ])(
+    'preserves canonical memory evidence for %s',
+    async (intent, requiredEvidence) => {
+      const structuredLlmService = {
+        generateObject: jest.fn().mockResolvedValue({
+          ...normalRouterResponse,
+          intent,
+          requiredEvidence: [
+            'TRANSCRIPT',
+            'CONVERSATION_MEMORY',
+            'USER_MEMORY',
+          ],
+        }),
+      };
+      const useCase = new QueryRouterAgentUseCase(
+        structuredLlmService as never,
+      );
+
+      await expect(
+        useCase.execute({ message: 'What did we discuss?' }),
+      ).resolves.toMatchObject({
+        intent,
+        requiredEvidence,
+      });
+    },
+  );
 
   it('keeps ordinary chat as normal chat even when reel context exists', async () => {
     const structuredLlmService = {

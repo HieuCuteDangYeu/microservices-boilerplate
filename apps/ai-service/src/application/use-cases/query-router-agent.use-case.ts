@@ -539,24 +539,32 @@ Classify the current user message.
     intent: RagChatIntent,
     reelQuestionType: RagReelQuestionType,
   ): RagRequiredEvidence[] {
+    if (intent === 'CONVERSATION_MEMORY_QUESTION') {
+      return ['CONVERSATION_MEMORY'];
+    }
+
+    if (intent === 'USER_MEMORY_QUESTION') {
+      return ['USER_MEMORY'];
+    }
+
     if (intent !== 'REEL_VIDEO_QUESTION') {
       return this.dedupeEvidence(evidence);
     }
 
     if (reelQuestionType === 'GENERAL_REEL_SUMMARY') {
-      return this.dedupeEvidence([...evidence, 'TRANSCRIPT', 'METADATA']);
+      return ['TRANSCRIPT', 'METADATA'];
     }
 
     if (reelQuestionType === 'TRANSCRIPT_CONTENT') {
-      return this.dedupeEvidence([...evidence, 'TRANSCRIPT']);
+      return ['TRANSCRIPT'];
     }
 
     if (reelQuestionType === 'REEL_METADATA') {
-      return this.dedupeEvidence([...evidence, 'METADATA']);
+      return ['METADATA'];
     }
 
     if (reelQuestionType === 'VISUAL_CONTENT') {
-      return this.dedupeEvidence([...evidence, 'VISUAL']);
+      return ['VISUAL'];
     }
 
     return this.dedupeEvidence(evidence);
