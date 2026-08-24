@@ -570,7 +570,13 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         this.streamFinalAnswerUseCase.execute(state),
       );
 
-      return { answer, finalFailureSource: 'NONE' };
+      return {
+        answer,
+        finalFailureSource:
+          state.finalFailureSource === 'UNKNOWN'
+            ? 'NONE'
+            : state.finalFailureSource,
+      };
     };
   }
 

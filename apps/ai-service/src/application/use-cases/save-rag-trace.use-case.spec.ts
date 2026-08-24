@@ -26,7 +26,7 @@ describe('SaveRagTraceUseCase', () => {
         },
       ],
       nextDraftSource: 'INITIAL',
-      finalFailureSource: 'NONE',
+      finalFailureSource: 'NO_CONTEXT',
       contextSufficiency: {
         sufficient: true,
         confidence: 1,
@@ -69,7 +69,7 @@ describe('SaveRagTraceUseCase', () => {
           citationRetryCount: 1,
           diagnostics: expect.objectContaining({
             draftHistory: state.draftHistory,
-            finalFailureSource: 'NONE',
+            finalFailureSource: 'NO_CONTEXT',
             citationAttempts: state.citationAttempts,
           }),
         }),

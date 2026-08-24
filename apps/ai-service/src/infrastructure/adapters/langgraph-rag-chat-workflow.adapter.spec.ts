@@ -258,12 +258,38 @@ describe('LangGraphRagChatWorkflowAdapter diagnostic nodes', () => {
     ]);
   });
 
-  it('sets no-context and successful terminal sources through terminal nodes', async () => {
+  it('preserves terminal failure sources when final streaming runs', async () => {
     const workflow = makeWorkflow() as any;
     const noContext = await workflow.createNoContextAnswerNode({})(base());
     expect(noContext.finalFailureSource).toBe('NO_CONTEXT');
-    const final = await workflow.createFinalAnswerNode({})(base());
+    const final = await workflow.createFinalAnswerNode({})({
+      ...base(),
+      ...noContext,
+    });
     expect(final).toMatchObject({
+      answer: 'final',
+      finalFailureSource: 'NO_CONTEXT',
+    });
+  });
+
+  it.each(['VERIFIER', 'CITATION'] as const)(
+    'preserves %s when final streaming runs',
+    async (finalFailureSource) => {
+      const workflow = makeWorkflow() as any;
+      await expect(
+        workflow.createFinalAnswerNode({})({
+          ...base(),
+          finalFailureSource,
+        }),
+      ).resolves.toMatchObject({ finalFailureSource });
+    },
+  );
+
+  it('marks a successful terminal answer as having no failure source', async () => {
+    const workflow = makeWorkflow() as any;
+    await expect(
+      workflow.createFinalAnswerNode({})(base()),
+    ).resolves.toMatchObject({
       answer: 'final',
       finalFailureSource: 'NONE',
     });
