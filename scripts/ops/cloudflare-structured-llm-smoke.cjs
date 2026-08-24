@@ -13,7 +13,6 @@ const role = process.env.CLOUDFLARE_STRUCTURED_SMOKE_ROLE || 'VERIFIER';
 const allowedRoles = new Set([
   'ROUTER',
   'RETRIEVAL_PLANNER',
-  'CONTEXT_SUFFICIENCY',
   'VERIFIER',
   'VERIFIER_ESCALATION',
 ]);
@@ -24,12 +23,15 @@ if (!allowedRoles.has(role)) {
 const model = process.env[`AI_${role}_MODEL`];
 const maxTokens = Number(
   process.env.CLOUDFLARE_STRUCTURED_SMOKE_MAX_TOKENS ||
-    (role === 'VERIFIER_ESCALATION'
-      ? process.env.AI_VERIFIER_ESCALATION_MAX_TOKENS || 1024
-      : process.env.AI_VERIFIER_MAX_TOKENS || 650),
+    (role === 'ROUTER' || role === 'RETRIEVAL_PLANNER'
+      ? 2048
+      : role === 'VERIFIER_ESCALATION'
+        ? process.env.AI_VERIFIER_ESCALATION_MAX_TOKENS || 1024
+        : process.env.AI_VERIFIER_MAX_TOKENS || 650),
 );
-const reasoningEffort =
-  process.env.CLOUDFLARE_STRUCTURED_REASONING_EFFORT || 'low';
+const reasoningEffort = role.startsWith('VERIFIER')
+  ? process.env.CLOUDFLARE_STRUCTURED_REASONING_EFFORT || 'low'
+  : undefined;
 
 if (!accountId || !apiToken || !model || !Number.isFinite(maxTokens)) {
   console.error(
@@ -38,7 +40,7 @@ if (!accountId || !apiToken || !model || !Number.isFinite(maxTokens)) {
   process.exit(1);
 }
 
-const schema = {
+const verifierSchema = {
   type: 'object',
   properties: {
     passed: { type: 'boolean' },
@@ -85,7 +87,133 @@ const schema = {
   additionalProperties: false,
 };
 
+const plannerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['query'],
+  properties: { query: { type: 'string', maxLength: 500 } },
+};
+
+const routerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'intent',
+    'needsRetrieval',
+    'needsUserMemory',
+    'needsConversationSummary',
+    'needsVerification',
+    'reelQuestionType',
+    'requiredEvidence',
+    'recommendationAction',
+    'reason',
+  ],
+  properties: {
+    intent: {
+      type: 'string',
+      enum: [
+        'NORMAL_CHAT',
+        'REEL_VIDEO_QUESTION',
+        'CONVERSATION_MEMORY_QUESTION',
+        'USER_MEMORY_QUESTION',
+        'TASK_ACTION_REQUEST',
+      ],
+    },
+    needsRetrieval: { type: 'boolean' },
+    needsUserMemory: { type: 'boolean' },
+    needsConversationSummary: { type: 'boolean' },
+    needsVerification: { type: 'boolean' },
+    reelQuestionType: {
+      type: 'string',
+      enum: [
+        'NONE',
+        'TRANSCRIPT_CONTENT',
+        'VISUAL_CONTENT',
+        'GENERAL_REEL_SUMMARY',
+        'REEL_METADATA',
+        'AMBIGUOUS_REEL_REFERENCE',
+      ],
+    },
+    requiredEvidence: {
+      type: 'array',
+      maxItems: 7,
+      items: {
+        type: 'string',
+        enum: [
+          'NONE',
+          'TRANSCRIPT',
+          'VISUAL',
+          'AUDIO',
+          'METADATA',
+          'CONVERSATION_MEMORY',
+          'USER_MEMORY',
+        ],
+      },
+    },
+    recommendationAction: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'type',
+        'query',
+        'minRelevantItems',
+        'allowPersonalizedFallback',
+        'suggestedQueries',
+        'reason',
+      ],
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['NONE', 'RECOMMEND_REELS', 'SUGGEST_QUERIES'],
+        },
+        query: { type: 'string', maxLength: 500 },
+        minRelevantItems: { type: 'number' },
+        allowPersonalizedFallback: { type: 'boolean' },
+        suggestedQueries: {
+          type: 'array',
+          maxItems: 8,
+          items: { type: 'string', maxLength: 500 },
+        },
+        reason: { type: 'string', maxLength: 500 },
+      },
+    },
+    reason: { type: 'string', maxLength: 500 },
+  },
+};
+
+const schema =
+  role === 'ROUTER'
+    ? routerSchema
+    : role === 'RETRIEVAL_PLANNER'
+      ? plannerSchema
+      : verifierSchema;
+
 function valid(result) {
+  if (role === 'RETRIEVAL_PLANNER') {
+    return (
+      result && typeof result.query === 'string' && result.query.length <= 500
+    );
+  }
+  if (role === 'ROUTER') {
+    return (
+      result &&
+      typeof result.intent === 'string' &&
+      typeof result.needsRetrieval === 'boolean' &&
+      typeof result.needsUserMemory === 'boolean' &&
+      typeof result.needsConversationSummary === 'boolean' &&
+      typeof result.needsVerification === 'boolean' &&
+      typeof result.reelQuestionType === 'string' &&
+      Array.isArray(result.requiredEvidence) &&
+      typeof result.recommendationAction?.type === 'string' &&
+      typeof result.recommendationAction?.query === 'string' &&
+      typeof result.recommendationAction?.minRelevantItems === 'number' &&
+      typeof result.recommendationAction?.allowPersonalizedFallback ===
+        'boolean' &&
+      Array.isArray(result.recommendationAction?.suggestedQueries) &&
+      typeof result.recommendationAction?.reason === 'string' &&
+      typeof result.reason === 'string'
+    );
+  }
   const boundedStrings = (value, maxItems, maxLength) =>
     Array.isArray(value) &&
     value.length <= maxItems &&
@@ -117,6 +245,7 @@ function valid(result) {
 }
 
 async function main() {
+  const prompts = rolePrompts();
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`,
     {
@@ -134,54 +263,16 @@ async function main() {
         messages: [
           {
             role: 'system',
-            content:
-              'Check every factual claim against the authorized evidence and requested relation/modality. Return only compact JSON matching the schema. Use only evidence IDs; do not repeat evidence text or expose reasoning.',
+            content: prompts.system,
           },
           {
             role: 'user',
-            content: JSON.stringify({
-              question:
-                'Which objects orbit the synthetic quasar, and which color is the observatory beacon?',
-              requiredEvidence: ['TRANSCRIPT', 'VISUAL'],
-              answer:
-                'The zorb and the neral orbit the quasar. The observatory beacon is blue.',
-              proposedClaims: [
-                'The zorb orbits the quasar.',
-                'The neral orbits the quasar.',
-                'The observatory beacon is blue.',
-              ],
-              evidence: [
-                {
-                  evidenceId: 'e0',
-                  evidenceType: 'TRANSCRIPT',
-                  evidenceText:
-                    'The zorb and the neral orbit the quasar during the synthetic observation.',
-                },
-                {
-                  evidenceId: 'e1',
-                  evidenceType: 'VISUAL',
-                  evidenceText:
-                    'A blue beacon is visible above the synthetic observatory.',
-                },
-                {
-                  evidenceId: 'e2',
-                  evidenceType: 'METADATA',
-                  evidenceText:
-                    'Synthetic fixture; no private or production data.',
-                },
-                {
-                  evidenceId: 'e3',
-                  evidenceType: 'TRANSCRIPT',
-                  evidenceText:
-                    'The presenter explicitly distinguishes the zorb from a fern beside a lake.',
-                },
-              ],
-            }),
+            content: prompts.user,
           },
         ],
         max_tokens: maxTokens,
         temperature: 0,
-        reasoning_effort: reasoningEffort,
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         response_format: { type: 'json_schema', json_schema: schema },
       }),
     },
@@ -220,12 +311,70 @@ async function main() {
   report(response.status, finishReason, payload.usage);
 }
 
+function rolePrompts() {
+  if (role === 'ROUTER') {
+    return {
+      system:
+        'Classify the user message semantically. Return only JSON matching the routing schema. Do not answer the user or expose reasoning.',
+      user: 'A shared synthetic reel is available. User message: What color is the beacon visible in this reel?',
+    };
+  }
+  if (role === 'RETRIEVAL_PLANNER') {
+    return {
+      system:
+        'Rewrite the reel retrieval question as one concise search query. Preserve entities and modality. Return only JSON matching the schema.',
+      user: 'USER QUESTION: What color is the beacon visible in the synthetic reel?\nREQUIRED EVIDENCE: VISUAL\nPREVIOUS QUERY: beacon color',
+    };
+  }
+  return {
+    system:
+      'Check every factual claim against the authorized evidence and requested relation/modality. Return only compact JSON matching the schema. Use only evidence IDs; do not repeat evidence text or expose reasoning.',
+    user: JSON.stringify({
+      question:
+        'Which objects orbit the synthetic quasar, and which color is the observatory beacon?',
+      requiredEvidence: ['TRANSCRIPT', 'VISUAL'],
+      answer:
+        'The zorb and the neral orbit the quasar. The observatory beacon is blue.',
+      proposedClaims: [
+        'The zorb orbits the quasar.',
+        'The neral orbits the quasar.',
+        'The observatory beacon is blue.',
+      ],
+      evidence: [
+        {
+          evidenceId: 'e0',
+          evidenceType: 'TRANSCRIPT',
+          evidenceText:
+            'The zorb and the neral orbit the quasar during the synthetic observation.',
+        },
+        {
+          evidenceId: 'e1',
+          evidenceType: 'VISUAL',
+          evidenceText:
+            'A blue beacon is visible above the synthetic observatory.',
+        },
+        {
+          evidenceId: 'e2',
+          evidenceType: 'METADATA',
+          evidenceText: 'Synthetic fixture; no private or production data.',
+        },
+        {
+          evidenceId: 'e3',
+          evidenceType: 'TRANSCRIPT',
+          evidenceText:
+            'The presenter explicitly distinguishes the zorb from a fern beside a lake.',
+        },
+      ],
+    }),
+  };
+}
+
 function report(status, finishReason, usage) {
   console.log('MODEL_ACTIVE=YES');
   console.log(`ROLE=${role}`);
   console.log(`MODEL=${model}`);
   console.log(`MAX_TOKENS=${maxTokens}`);
-  console.log(`REASONING_EFFORT=${reasoningEffort}`);
+  console.log(`REASONING_EFFORT=${reasoningEffort ?? 'NOT_SENT'}`);
   console.log(`HTTP=${status}`);
   console.log(`FINISH_REASON=${finishReason}`);
   console.log(`PROMPT_TOKENS=${usage?.prompt_tokens ?? 'NOT_RETURNED'}`);
