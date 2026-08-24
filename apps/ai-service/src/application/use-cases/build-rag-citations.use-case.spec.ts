@@ -205,6 +205,60 @@ describe('BuildRagCitationsUseCase', () => {
     },
   );
 
+  it('repairs a partial LLM citation result for a directly supported label answer', async () => {
+    const attributionService: ICitationAttributionService = {
+      attribute: jest.fn().mockResolvedValue({
+        selections: [{ evidenceId: 'e0', confidence: 0.9 }],
+        claims: [
+          {
+            claim: 'The example label used for a marble in the bag is blue.',
+            supported: true,
+            evidenceIds: ['e0'],
+            confidence: 0.9,
+          },
+          {
+            claim: 'The marble is put into a bag.',
+            supported: false,
+            evidenceIds: [],
+            confidence: 0.9,
+          },
+        ],
+        factualClaimCount: 2,
+        supportedClaimCount: 1,
+        coverage: 0.5,
+      }),
+    };
+    const useCase = new BuildRagCitationsUseCase(attributionService);
+    const state = buildState();
+    state.userMessage =
+      'What example label is used for a marble that is put into a bag?';
+    state.answer =
+      'The example label used for a marble that is put into a bag is blue.';
+    state.rerankedChunks[0] = {
+      ...state.rerankedChunks[0],
+      chunkId: 'reel:in1005:chunk:1',
+      reelId: 'in1005',
+      evidenceType: 'TRANSCRIPT',
+      evidenceText:
+        'Those two marbles are compared. This one is said to be blue, for example. I put it in the blue bag. I do not know if it is the label.',
+      chunkText:
+        'Those two marbles are compared. This one is said to be blue, for example. I put it in the blue bag. I do not know if it is the label.',
+    };
+
+    await expect(useCase.execute(state)).resolves.toMatchObject({
+      citations: [expect.objectContaining({ reelId: 'in1005' })],
+      coverage: {
+        mode: 'DETERMINISTIC',
+        coverage: 1,
+        factualClaimCount: 1,
+        supportedClaimCount: 1,
+        diagnostics: {
+          deterministicSupportingEvidenceIds: ['e0'],
+        },
+      },
+    });
+  });
+
   it('does not repair a topic-only citation attribution failure', async () => {
     const attributionService: ICitationAttributionService = {
       attribute: jest.fn().mockResolvedValue({

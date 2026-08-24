@@ -41,6 +41,16 @@ describe('assessDirectTranscriptFactSupport', () => {
     },
   );
 
+  it('supports a label answer that restates generic question scaffolding', () => {
+    expect(
+      assess(
+        'What example label is used for a marble that is put into a bag?',
+        'The example label used for a marble that is put into a bag is blue.',
+        'Those two marbles are compared. This one is said to be blue, for example. I put it in the blue bag. I do not know if it is the label.',
+      ).supported,
+    ).toBe(true);
+  });
+
   it.each([
     [
       'How should backups be protected from fire?',

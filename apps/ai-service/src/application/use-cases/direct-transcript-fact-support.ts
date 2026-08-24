@@ -82,12 +82,17 @@ export function assessDirectTranscriptFactSupport(input: {
   answer: string;
   candidates: DirectTranscriptEvidence[];
 }): DirectTranscriptFactSupport {
-  const answerTokens = contentTokens(input.answer);
-  if (answerTokens.length === 0 || answerTokens.length > 12) {
+  const rawAnswerTokens = contentTokens(input.answer);
+  if (rawAnswerTokens.length === 0 || rawAnswerTokens.length > 12) {
     return unsupported();
   }
 
   const questionTokens = contentTokens(input.question);
+  const answerTokens = rawAnswerTokens.filter(
+    (token) => !questionTokens.includes(token),
+  );
+  if (answerTokens.length === 0) return unsupported();
+
   const quantityQuestion = /\b(how many|what number|how low)\b/i.test(
     input.question,
   );
@@ -144,8 +149,8 @@ export function assessDirectTranscriptFactSupport(input: {
 
 function contentTokens(value: string): string[] {
   return (value.toLowerCase().match(/\d+(?:\.\d+)?|[a-z]+/g) ?? [])
-    .map((token) => NUMBER_WORDS[token] ?? token)
-    .filter((token) => token.length > 0 && !STOP_WORDS.has(token));
+    .map((token: string): string => NUMBER_WORDS[token] ?? token)
+    .filter((token: string) => token.length > 0 && !STOP_WORDS.has(token));
 }
 
 function unsupported(): DirectTranscriptFactSupport {
