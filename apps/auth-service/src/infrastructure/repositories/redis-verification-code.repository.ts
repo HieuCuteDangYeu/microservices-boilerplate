@@ -14,6 +14,10 @@ export class RedisVerificationCodeRepository implements IVerificationCodeReposit
     return this.redis.get(`verify:${code}`);
   }
 
+  async consumeUserId(code: string): Promise<string | null> {
+    return this.redis.getdel(`verify:${code}`);
+  }
+
   async delete(code: string): Promise<void> {
     await this.redis.del(`verify:${code}`);
   }
