@@ -6,6 +6,7 @@ import type {
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type {
   IStructuredLlmService,
+  StructuredLlmCallDiagnostics,
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable } from '@nestjs/common';
@@ -19,6 +20,7 @@ export interface RagDraftAnswer {
   answer: string;
   claims: RagAnswerClaim[];
   modelRole: 'ANSWER';
+  diagnostics: StructuredLlmCallDiagnostics[];
 }
 
 @Injectable()
@@ -33,6 +35,7 @@ export class GenerateDraftAnswerUseCase {
   ) {}
 
   async execute(state: RagChatWorkflowState): Promise<RagDraftAnswer> {
+    const diagnostics: StructuredLlmCallDiagnostics[] = [];
     const authorizedEvidence = state.rerankedChunks.map((chunk, index) => ({
       evidenceId: `e${index}`,
       evidenceType: chunk.evidenceType ?? 'TRANSCRIPT',
@@ -42,7 +45,9 @@ export class GenerateDraftAnswerUseCase {
     }));
     const raw = await this.structuredLlmService.generateObject<RawDraftAnswer>({
       systemPrompt: [
-        this.chatPromptBuilder.build(state),
+        this.chatPromptBuilder.build(state, {
+          includeRetrievedEvidence: false,
+        }),
         'Return only JSON matching the supplied schema.',
         'For every factual claim about a reel, declare the exact authorized evidence IDs that support it.',
         'Do not declare an evidence ID for a claim unless its exact evidence text supports the requested relation and modality.',
@@ -56,10 +61,12 @@ export class GenerateDraftAnswerUseCase {
       model: this.config.model('ANSWER'),
       timeoutMs: this.config.timeoutMs('ANSWER'),
       temperature: 0,
-      maxTokens: 1_200,
+      maxTokens: this.config.maxCompletionTokens('ANSWER'),
+      modelRole: 'ANSWER',
+      onDiagnostics: (call) => diagnostics.push(call),
     });
 
-    return this.normalize(raw, state);
+    return { ...this.normalize(raw, state), diagnostics };
   }
 
   private schema(): StructuredLlmJsonSchema {
@@ -68,16 +75,21 @@ export class GenerateDraftAnswerUseCase {
       additionalProperties: false,
       required: ['answer', 'claims'],
       properties: {
-        answer: { type: 'string' },
+        answer: { type: 'string', maxLength: 2_500 },
         claims: {
           type: 'array',
+          maxItems: 12,
           items: {
             type: 'object',
             additionalProperties: false,
             required: ['claim', 'evidenceIds'],
             properties: {
-              claim: { type: 'string' },
-              evidenceIds: { type: 'array', items: { type: 'string' } },
+              claim: { type: 'string', maxLength: 500 },
+              evidenceIds: {
+                type: 'array',
+                maxItems: 3,
+                items: { type: 'string', maxLength: 64 },
+              },
             },
           },
         },
@@ -102,7 +114,7 @@ export class GenerateDraftAnswerUseCase {
       throw new Error('Reel answer model returned no grounded claim mappings');
     }
 
-    return { answer, claims, modelRole: 'ANSWER' };
+    return { answer, claims, modelRole: 'ANSWER', diagnostics: [] };
   }
 
   private normalizeClaim(

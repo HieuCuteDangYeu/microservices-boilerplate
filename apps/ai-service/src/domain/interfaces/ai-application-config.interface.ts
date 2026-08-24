@@ -18,11 +18,16 @@ export type AiModelRole =
   | 'CONVERSATION_SUMMARY'
   | 'MEMORY_EXTRACTION';
 
+export type AiCompletionRole = Exclude<
+  AiModelRole,
+  'VISION' | 'TRANSCRIPTION' | 'EMBEDDING' | 'RERANKER'
+>;
+
 export interface IAiApplicationConfig {
   get<T = string>(key: string): T | undefined;
   model(role: AiModelRole): string;
   timeoutMs(role: AiModelRole): number;
-  verifierMaxTokens(role: 'VERIFIER' | 'VERIFIER_ESCALATION'): number;
+  maxCompletionTokens(role: AiCompletionRole): number;
   boolean(key: string, fallback: boolean): boolean;
   number(key: string, fallback: number, min: number, max: number): number;
 }

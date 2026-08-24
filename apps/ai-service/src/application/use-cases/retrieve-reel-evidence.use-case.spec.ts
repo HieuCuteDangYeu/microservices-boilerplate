@@ -46,6 +46,10 @@ const enabledPolicy = {
   callTimeoutMs: 8_000,
 };
 
+const aiConfig = {
+  maxCompletionTokens: jest.fn(() => 500),
+};
+
 describe('RetrieveReelEvidenceUseCase', () => {
   it('executes a model-selected high-level search through the retrieval engine port', async () => {
     const toolLlm = {
@@ -80,6 +84,7 @@ describe('RetrieveReelEvidenceUseCase', () => {
       content as never,
       toolLlm,
       enabledPolicy,
+      aiConfig as never,
     );
 
     const result = await useCase.execute({
@@ -136,6 +141,7 @@ describe('RetrieveReelEvidenceUseCase', () => {
       { resolveReelContextAccess: jest.fn() } as never,
       toolLlm,
       enabledPolicy,
+      aiConfig as never,
     );
 
     await useCase.execute({
@@ -163,6 +169,7 @@ describe('RetrieveReelEvidenceUseCase', () => {
       { resolveReelContextAccess: jest.fn() } as never,
       { complete: jest.fn() },
       { ...enabledPolicy, enabled: false },
+      aiConfig as never,
     );
 
     await expect(

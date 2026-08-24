@@ -16,6 +16,7 @@ export interface RagWorkflowTraceMetrics {
     draftHistory?: unknown[];
     groundedRevision?: unknown;
     answerClaims?: unknown[];
+    answerCalls?: unknown[];
     verification?: unknown;
     citationAttempts?: unknown[];
     finalFailureSource?: string;

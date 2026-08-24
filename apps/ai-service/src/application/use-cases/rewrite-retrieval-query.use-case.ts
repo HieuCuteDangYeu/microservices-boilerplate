@@ -38,12 +38,13 @@ export class RewriteRetrievalQueryUseCase {
           jsonSchema: {
             type: 'object',
             properties: {
-              query: { type: 'string' },
+              query: { type: 'string', maxLength: 500 },
             },
             required: ['query'],
             additionalProperties: false,
           },
-          maxTokens: 120,
+          maxTokens: this.config.maxCompletionTokens('RETRIEVAL_PLANNER'),
+          modelRole: 'RETRIEVAL_PLANNER',
           temperature: 0,
           model: this.config.model('RETRIEVAL_PLANNER'),
           timeoutMs: this.config.timeoutMs('RETRIEVAL_PLANNER'),

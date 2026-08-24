@@ -6,6 +6,7 @@ describe('GenerateDraftAnswerUseCase', () => {
   const config = {
     model: jest.fn(() => '@cf/test/answer'),
     timeoutMs: jest.fn(() => 10_000),
+    maxCompletionTokens: jest.fn(() => 1_536),
   } as unknown as IAiApplicationConfig;
   const promptBuilder = { build: jest.fn(() => 'Grounding instructions.') };
   const state = {
@@ -19,7 +20,7 @@ describe('GenerateDraftAnswerUseCase', () => {
         tags: [],
       },
     ],
-  } as RagChatWorkflowState;
+  } as unknown as RagChatWorkflowState;
 
   it('returns answer claims mapped to authorized evidence IDs', async () => {
     const service = {
@@ -48,15 +49,27 @@ describe('GenerateDraftAnswerUseCase', () => {
         },
       ],
       modelRole: 'ANSWER',
+      diagnostics: [],
     });
     expect(service.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({
         model: '@cf/test/answer',
         timeoutMs: 10_000,
+        maxTokens: 1_536,
         temperature: 0,
         userPrompt: expect.stringContaining('"evidenceId":"e0"'),
       }),
     );
+    const request = service.generateObject.mock.calls[0]?.[0];
+    expect(request.jsonSchema.properties.answer).toMatchObject({
+      maxLength: 2_500,
+    });
+    expect(request.jsonSchema.properties.claims).toMatchObject({
+      maxItems: 12,
+    });
+    expect(promptBuilder.build).toHaveBeenCalledWith(state, {
+      includeRetrievedEvidence: false,
+    });
   });
 
   it.each([
@@ -99,7 +112,7 @@ describe('GenerateDraftAnswerUseCase', () => {
         ...state,
         route: { intent: 'NORMAL_CHAT' },
         rerankedChunks: [],
-      } as RagChatWorkflowState),
+      } as unknown as RagChatWorkflowState),
     ).resolves.toMatchObject({ answer: 'Hello!', claims: [] });
   });
 });

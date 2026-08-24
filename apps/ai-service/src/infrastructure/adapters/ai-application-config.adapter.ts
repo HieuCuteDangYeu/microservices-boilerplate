@@ -1,4 +1,5 @@
 import type {
+  AiCompletionRole,
   AiModelRole,
   IAiApplicationConfig,
 } from '@ai/domain/interfaces/ai-application-config.interface';
@@ -42,13 +43,49 @@ const TIMEOUT_ENV_BY_ROLE: Partial<Record<AiModelRole, string>> = {
   RERANKER: 'AI_RAG_NEURAL_RERANK_TIMEOUT_MS',
 };
 
-const VERIFIER_MAX_TOKENS_BY_ROLE = {
+const MAX_COMPLETION_TOKENS_BY_ROLE: Record<
+  AiCompletionRole,
+  { key: string; fallback: number }
+> = {
+  ROUTER: { key: 'AI_ROUTER_MAX_TOKENS', fallback: 2_048 },
+  RETRIEVAL_PLANNER: {
+    key: 'AI_RETRIEVAL_PLANNER_MAX_TOKENS',
+    fallback: 256,
+  },
+  RETRIEVAL_TOOL: { key: 'AI_RETRIEVAL_TOOL_MAX_TOKENS', fallback: 500 },
+  CONTEXT_SUFFICIENCY: {
+    key: 'AI_CONTEXT_SUFFICIENCY_MAX_TOKENS',
+    fallback: 512,
+  },
+  ANSWER: { key: 'AI_ANSWER_MAX_TOKENS', fallback: 1_536 },
+  ANSWER_REVISION: {
+    key: 'AI_ANSWER_REVISION_MAX_TOKENS',
+    fallback: 768,
+  },
   VERIFIER: { key: 'AI_VERIFIER_MAX_TOKENS', fallback: 650 },
   VERIFIER_ESCALATION: {
     key: 'AI_VERIFIER_ESCALATION_MAX_TOKENS',
     fallback: 1_024,
   },
-} as const;
+  CITATION_ATTRIBUTION: {
+    key: 'AI_CITATION_MAX_TOKENS',
+    fallback: 768,
+  },
+  INDEX_QUALITY: { key: 'AI_INDEX_QUALITY_MAX_TOKENS', fallback: 768 },
+  METADATA_EXTRACTION: {
+    key: 'AI_METADATA_EXTRACTION_MAX_TOKENS',
+    fallback: 512,
+  },
+  SECTION_SUMMARY: { key: 'AI_SECTION_SUMMARY_MAX_TOKENS', fallback: 512 },
+  CONVERSATION_SUMMARY: {
+    key: 'CLOUDFLARE_MEMORY_MAX_TOKENS',
+    fallback: 650,
+  },
+  MEMORY_EXTRACTION: {
+    key: 'CLOUDFLARE_MEMORY_EXTRACTION_MAX_TOKENS',
+    fallback: 350,
+  },
+};
 
 @Injectable()
 export class AiApplicationConfigAdapter
@@ -67,8 +104,11 @@ export class AiApplicationConfigAdapter
       this.model(role);
     }
     this.number('AI_EMBEDDING_DIMENSIONS', 0, 1, 4_096);
-    this.verifierMaxTokens('VERIFIER');
-    this.verifierMaxTokens('VERIFIER_ESCALATION');
+    for (const role of Object.keys(
+      MAX_COMPLETION_TOKENS_BY_ROLE,
+    ) as AiCompletionRole[]) {
+      this.maxCompletionTokens(role);
+    }
     this.required('AI_EMBEDDING_VERSION');
   }
 
@@ -81,8 +121,8 @@ export class AiApplicationConfigAdapter
     return key ? Math.round(this.number(key, 8_000, 500, 120_000)) : 8_000;
   }
 
-  verifierMaxTokens(role: 'VERIFIER' | 'VERIFIER_ESCALATION'): number {
-    const { key, fallback } = VERIFIER_MAX_TOKENS_BY_ROLE[role];
+  maxCompletionTokens(role: AiCompletionRole): number {
+    const { key, fallback } = MAX_COMPLETION_TOKENS_BY_ROLE[role];
     return Math.round(this.number(key, fallback, 128, 4_096));
   }
 

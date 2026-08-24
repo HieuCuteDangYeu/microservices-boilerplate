@@ -10,6 +10,11 @@ import type { UserMemoryType } from '@common/ai/interfaces/user-memory.interface
 import { Injectable } from '@nestjs/common';
 import type { UserMemory as PrismaUserMemory } from '@prisma/ai-client';
 
+type PrismaUserMemoryWithEmbeddingIdentity = PrismaUserMemory & {
+  embeddingDimensions?: number | null;
+  embeddingVersion?: string | null;
+};
+
 interface UserMemoryRawRecord {
   id: string;
   userId: string;
@@ -19,6 +24,8 @@ interface UserMemoryRawRecord {
   confidence: number;
   sourceConversationId: string | null;
   embeddingModel: string | null;
+  embeddingDimensions: number | null;
+  embeddingVersion: string | null;
   semanticScore?: number | null;
   lastUsedAt: Date | null;
   createdAt: Date;
@@ -28,6 +35,23 @@ interface UserMemoryRawRecord {
 @Injectable()
 export class PrismaUserMemoryRepository implements IUserMemoryRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getEmbeddingDimensions(): Promise<number> {
+    const rows = await this.prisma.$queryRaw<Array<{ formattedType: string }>>`
+      SELECT format_type(a.atttypid, a.atttypmod) AS "formattedType"
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname = 'UserMemory'
+        AND a.attname = 'embedding'
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+    `;
+    const match = /^vector\((\d+)\)$/.exec(rows[0]?.formattedType ?? '');
+    if (!match) throw new Error('UserMemory embedding column is unavailable');
+    return Number(match[1]);
+  }
 
   async findByUserId(userId: string, limit: number): Promise<UserMemory[]> {
     const memories = await this.prisma.userMemory.findMany({
@@ -51,6 +75,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       return [];
     }
 
+    await this.assertEmbeddingDimensions(input.queryVector);
+
     const vectorLiteral = `[${input.queryVector.join(',')}]`;
     const limit = this.normalizeLimit(input.limit, 1, 50);
     const minScore = this.clamp(input.minScore ?? 0.42, -1, 1);
@@ -67,6 +93,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
           um.confidence,
           um."sourceConversationId",
           um."embeddingModel",
+          um."embeddingDimensions",
+          um."embeddingVersion",
           um."lastUsedAt",
           um."createdAt",
           um."updatedAt",
@@ -112,6 +140,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
         confidence,
         "sourceConversationId",
         "embeddingModel",
+        "embeddingDimensions",
+        "embeddingVersion",
         "semanticScore",
         "lastUsedAt",
         "createdAt",
@@ -138,6 +168,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
         confidence,
         "sourceConversationId",
         "embeddingModel",
+        "embeddingDimensions",
+        "embeddingVersion",
         NULL::float AS "semanticScore",
         "lastUsedAt",
         "createdAt",
@@ -155,6 +187,9 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
     const results: UserMemory[] = [];
 
     for (const input of inputs) {
+      if (this.hasEmbedding(input.embedding)) {
+        await this.assertEmbeddingDimensions(input.embedding);
+      }
       const memory = await this.prisma.$transaction(async (tx) => {
         const saved = await tx.userMemory.upsert({
           where: {
@@ -190,6 +225,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
             SET
               embedding = ${vectorLiteral}::vector,
               "embeddingModel" = ${input.embeddingModel ?? null},
+              "embeddingDimensions" = ${input.embeddingDimensions ?? null},
+              "embeddingVersion" = ${input.embeddingVersion ?? null},
               "updatedAt" = CURRENT_TIMESTAMP
             WHERE id = ${saved.id}
           `;
@@ -208,6 +245,9 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
     memoryId: string,
     input: UserMemoryUpsertInput,
   ): Promise<UserMemory> {
+    if (this.hasEmbedding(input.embedding)) {
+      await this.assertEmbeddingDimensions(input.embedding);
+    }
     const saved = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.userMemory.findUnique({
         where: { id: memoryId },
@@ -239,6 +279,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
           SET
             embedding = ${vectorLiteral}::vector,
             "embeddingModel" = ${input.embeddingModel ?? null},
+            "embeddingDimensions" = ${input.embeddingDimensions ?? null},
+            "embeddingVersion" = ${input.embeddingVersion ?? null},
             "updatedAt" = CURRENT_TIMESTAMP
           WHERE id = ${memoryId}
         `;
@@ -255,6 +297,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       return;
     }
 
+    await this.assertEmbeddingDimensions(input.embedding);
+
     const vectorLiteral = `[${input.embedding.join(',')}]`;
 
     await this.prisma.$executeRaw`
@@ -262,6 +306,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       SET
         embedding = ${vectorLiteral}::vector,
         "embeddingModel" = ${input.embeddingModel},
+        "embeddingDimensions" = ${input.embeddingDimensions},
+        "embeddingVersion" = ${input.embeddingVersion},
         "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = ${input.memoryId}
     `;
@@ -284,7 +330,7 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
     });
   }
 
-  private toDomain(memory: PrismaUserMemory): UserMemory {
+  private toDomain(memory: PrismaUserMemoryWithEmbeddingIdentity): UserMemory {
     return new UserMemory({
       id: memory.id,
       userId: memory.userId,
@@ -294,6 +340,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       confidence: memory.confidence,
       sourceConversationId: memory.sourceConversationId ?? undefined,
       embeddingModel: memory.embeddingModel ?? undefined,
+      embeddingDimensions: memory.embeddingDimensions ?? undefined,
+      embeddingVersion: memory.embeddingVersion ?? undefined,
       lastUsedAt: memory.lastUsedAt ?? undefined,
       createdAt: memory.createdAt,
       updatedAt: memory.updatedAt,
@@ -310,6 +358,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       confidence: memory.confidence,
       sourceConversationId: memory.sourceConversationId ?? undefined,
       embeddingModel: memory.embeddingModel ?? undefined,
+      embeddingDimensions: memory.embeddingDimensions ?? undefined,
+      embeddingVersion: memory.embeddingVersion ?? undefined,
       semanticScore: memory.semanticScore ?? undefined,
       lastUsedAt: memory.lastUsedAt ?? undefined,
       createdAt: memory.createdAt,
@@ -323,6 +373,15 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
       value.length > 0 &&
       value.every((item) => typeof item === 'number' && Number.isFinite(item))
     );
+  }
+
+  private async assertEmbeddingDimensions(embedding: number[]): Promise<void> {
+    const storedDimensions = await this.getEmbeddingDimensions();
+    if (embedding.length !== storedDimensions) {
+      throw new Error(
+        `UserMemory embedding dimension mismatch: query=${embedding.length}, stored=${storedDimensions}`,
+      );
+    }
   }
 
   private normalizeLimit(value: number, min: number, max: number): number {

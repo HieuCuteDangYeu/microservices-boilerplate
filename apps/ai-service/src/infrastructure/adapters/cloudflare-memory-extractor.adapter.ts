@@ -1,9 +1,10 @@
 import type { CloudflareChatEndpoint } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type {
   ExtractUserMemoriesRequest,
   ExtractUserMemoriesResult,
 } from '@common/ai/interfaces/extract-user-memory.interface';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IMemoryExtractorService } from '../../domain/interfaces/memory-extractor.service.interface';
 import { CloudflareWorkersAiTextClient } from './cloudflare-workers-ai-text.client';
@@ -17,6 +18,8 @@ export class CloudflareMemoryExtractorAdapter implements IMemoryExtractorService
   constructor(
     private readonly configService: ConfigService,
     private readonly cloudflareTextClient: CloudflareWorkersAiTextClient,
+    @Inject('IAiApplicationConfig')
+    private readonly applicationConfig: IAiApplicationConfig,
   ) {}
 
   async extract(
@@ -73,15 +76,7 @@ export class CloudflareMemoryExtractorAdapter implements IMemoryExtractorService
   }
 
   private getMemoryExtractionMaxTokens(): number {
-    const value = Number(
-      this.configService.get<string>(
-        'CLOUDFLARE_MEMORY_EXTRACTION_MAX_TOKENS',
-      ) ??
-        this.configService.get<string>('CLOUDFLARE_MEMORY_MAX_TOKENS') ??
-        '350',
-    );
-
-    return Number.isFinite(value) && value > 0 ? value : 350;
+    return this.applicationConfig.maxCompletionTokens('MEMORY_EXTRACTION');
   }
 
   private getMemoryTemperature(): number {

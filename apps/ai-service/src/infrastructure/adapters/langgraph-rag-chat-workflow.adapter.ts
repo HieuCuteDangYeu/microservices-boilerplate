@@ -455,6 +455,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
               },
             ]
           : draft!.claims,
+        answerDiagnostics: draft?.diagnostics,
         citations: [],
         citationCoverage: undefined,
         groundedRevision: groundedRevision

@@ -8,6 +8,7 @@ import type {
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type {
   IStructuredLlmService,
+  StructuredLlmCallDiagnostics,
   StructuredLlmJsonSchema,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -25,6 +26,15 @@ interface RawRouteDecision {
 }
 
 type RawRecord = Record<string, unknown>;
+
+export class RouterUnavailableError extends Error {
+  readonly code = 'ROUTER_UNAVAILABLE';
+
+  constructor() {
+    super('Semantic router is temporarily unavailable');
+    this.name = 'RouterUnavailableError';
+  }
+}
 
 @Injectable()
 export class QueryRouterAgentUseCase {
@@ -83,50 +93,123 @@ export class QueryRouterAgentUseCase {
       };
     }
 
+    const semanticCalls: StructuredLlmCallDiagnostics[] = [];
+    const primaryModel = this.config.model('ROUTER');
+
     try {
-      const result =
-        await this.structuredLlmService.generateObject<RawRouteDecision>({
-          systemPrompt: this.buildSystemPrompt(),
-          userPrompt: this.buildUserPrompt(input),
-          jsonSchema: this.getJsonSchema(),
-          maxTokens: 650,
-          temperature: 0,
-          model: this.config.model('ROUTER'),
-          timeoutMs: this.config.timeoutMs('ROUTER'),
-        });
+      const result = await this.routeWithModel({
+        input,
+        model: primaryModel,
+        attempt: 1,
+        semanticCalls,
+        timeoutMs: this.config.timeoutMs('ROUTER'),
+      });
 
       return {
         ...this.normalize(result),
         diagnostics: {
           modelRole: 'ROUTER',
-          model: this.config.model('ROUTER'),
+          model: primaryModel,
           providerStatus: 'SUCCESS',
           decisionSource: 'LLM',
+          semanticCalls,
         },
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      if (!this.isTransientProviderFailure(error)) {
+        this.logger.warn(
+          `[QueryRouterAgent] semantic routing failed: ${message}`,
+        );
+        throw error;
+      }
 
-      this.logger.warn(`[QueryRouterAgent] fallback NORMAL_CHAT: ${message}`);
+      const fallbackModel = this.config
+        .get<string>('AI_ROUTER_FALLBACK_MODEL')
+        ?.trim();
+      if (!fallbackModel) {
+        this.logger.warn(
+          `[QueryRouterAgent] transient primary failure without fallback: ${message}`,
+        );
+        throw new RouterUnavailableError();
+      }
 
-      return {
-        ...this.createNormalChatRoute('Fallback route because router failed.'),
-        diagnostics: {
-          modelRole: 'ROUTER',
-          providerStatus: 'ERROR',
-          decisionSource: 'FAIL_SAFE',
-        },
-      };
+      try {
+        const result = await this.routeWithModel({
+          input,
+          model: fallbackModel,
+          attempt: 2,
+          semanticCalls,
+          timeoutMs: Math.round(
+            this.config.number(
+              'AI_ROUTER_FALLBACK_TIMEOUT_MS',
+              30_000,
+              500,
+              120_000,
+            ),
+          ),
+        });
+        return {
+          ...this.normalize(result),
+          diagnostics: {
+            modelRole: 'ROUTER',
+            model: fallbackModel,
+            providerStatus: 'SUCCESS',
+            decisionSource: 'LLM_FALLBACK',
+            semanticCalls,
+          },
+        };
+      } catch (fallbackError: unknown) {
+        const fallbackMessage =
+          fallbackError instanceof Error
+            ? fallbackError.message
+            : String(fallbackError);
+        this.logger.warn(
+          `[QueryRouterAgent] bounded semantic fallback failed: ${fallbackMessage}`,
+        );
+        throw new RouterUnavailableError();
+      }
     }
+  }
+
+  private async routeWithModel(input: {
+    input: {
+      message: string;
+      recentHistory?: string;
+      hasSharedReelContext?: boolean;
+      sharedReelCount?: number;
+    };
+    model: string;
+    attempt: number;
+    semanticCalls: StructuredLlmCallDiagnostics[];
+    timeoutMs: number;
+  }): Promise<RawRouteDecision> {
+    return await this.structuredLlmService.generateObject<RawRouteDecision>({
+      systemPrompt: this.buildSystemPrompt(),
+      userPrompt: this.buildUserPrompt(input.input),
+      jsonSchema: this.getJsonSchema(),
+      maxTokens: this.config.maxCompletionTokens('ROUTER'),
+      temperature: 0,
+      model: input.model,
+      modelRole: 'ROUTER',
+      attempt: input.attempt,
+      onDiagnostics: (diagnostics) => input.semanticCalls.push(diagnostics),
+      timeoutMs: input.timeoutMs,
+    });
+  }
+
+  private isTransientProviderFailure(error: unknown): boolean {
+    if (!error || typeof error !== 'object' || !('code' in error)) return false;
+    return (
+      error.code === 'STRUCTURED_COMPLETION_TIMEOUT' ||
+      error.code === 'STRUCTURED_COMPLETION_PROVIDER_ERROR'
+    );
   }
 
   private buildSystemPrompt(): string {
     return `
-You are the semantic query router for Velora AI, a RAG chatbot and reel discovery assistant.
-
-Classify the current user message by meaning, not by keyword matching.
-
-Return only JSON matching the schema. Do not answer the user.
+You route Velora AI messages by meaning. Return only schema-valid JSON and never answer the user.
+Output exactly these top-level fields and no others: intent, needsRetrieval, needsUserMemory, needsConversationSummary, needsVerification, reelQuestionType, requiredEvidence, recommendationAction, reason. recommendationAction must contain exactly: type, query, minRelevantItems, allowPersonalizedFallback, suggestedQueries, reason.
 
 Intent meanings:
 - NORMAL_CHAT: general conversation, coding help, app discussion, clarification, recommendation/discovery requests, or normal assistant chat.
@@ -157,34 +240,14 @@ Recommendation action meanings:
 - RECOMMEND_REELS: user clearly asks to find, recommend, show, discover, or get reels/videos/content.
 - SUGGEST_QUERIES: user asks what to search, search keywords, topic ideas, or query suggestions.
 
-Recommendation rules:
-1. Use RECOMMEND_REELS only when the user clearly wants reel/video/content discovery.
-2. Do not use RECOMMEND_REELS for normal chat.
-3. Do not use RECOMMEND_REELS when the user only asks about a shared reel, such as "what is this reel about?" or "summarize this video".
-4. Use SUGGEST_QUERIES only when the user asks for search terms, keywords, or what to search.
-5. recommendationAction.query must be the clean searchable topic, not the full sentence.
-6. If the user asks "recommend AI coding reels", query should be "AI coding".
-7. If the user asks "find gym motivation videos", query should be "gym motivation".
-8. If the user asks broad discovery like "recommend me some reels", query can be empty and allowPersonalizedFallback should be true.
-9. If the user asks topic-specific discovery, allowPersonalizedFallback must be false so unrelated reels are not padded.
-10. Never attach reel recommendations if they are unrelated to the user message.
-11. If fewer than two relevant reels exist, returning fewer is better than padding unrelated reels.
-
-Routing rules:
-1. Do not answer the user.
-2. Do not invent available context.
-3. If the user asks about a shared reel/video/media item, use REEL_VIDEO_QUESTION.
-4. If the user asks for a general summary of a shared reel/video/media item, use GENERAL_REEL_SUMMARY.
-5. GENERAL_REEL_SUMMARY should require TRANSCRIPT and METADATA.
-6. TRANSCRIPT_CONTENT should require TRANSCRIPT.
-7. REEL_METADATA should require METADATA.
-8. VISUAL_CONTENT should require VISUAL.
-9. If the user asks what is visually shown, written on screen, or visible, do not treat transcript alone as enough.
-10. Retrieval is needed for REEL_VIDEO_QUESTION when requiredEvidence includes TRANSCRIPT or METADATA.
-11. Conversation summary is useful for follow-up references to earlier discussion.
-12. User memory is useful only for stable user preferences or profile.
-13. Verification is useful for reel/video and memory answers.
-14. Recommendation decisions must be semantic and based on the user's intent.
+Invariants:
+- A question about an available shared reel is REEL_VIDEO_QUESTION, not discovery.
+- Summary needs TRANSCRIPT and METADATA; transcript, visual, and metadata questions require their matching evidence. Never substitute transcript for visual proof.
+- Reel retrieval is required when grounded reel evidence is needed. Reel and memory answers require verification.
+- Conversation memory is for prior conversation context; user memory is only for stable preferences/profile.
+- RECOMMEND_REELS is only for explicit content discovery. Use a clean topic query; broad discovery may allow personalized fallback, topic-specific discovery may not.
+- SUGGEST_QUERIES is only for requested search terms. Otherwise recommendationAction is NONE.
+- Do not invent context or use keyword/regex routing.
 `.trim();
   }
 
@@ -251,6 +314,7 @@ Classify the current user message.
         },
         requiredEvidence: {
           type: 'array',
+          maxItems: 4,
           items: {
             type: 'string',
             enum: [
@@ -280,17 +344,18 @@ Classify the current user message.
               type: 'string',
               enum: ['NONE', 'RECOMMEND_REELS', 'SUGGEST_QUERIES'],
             },
-            query: { type: 'string' },
-            minRelevantItems: { type: 'number' },
+            query: { type: 'string', maxLength: 240 },
+            minRelevantItems: { type: 'number', minimum: 0, maximum: 20 },
             allowPersonalizedFallback: { type: 'boolean' },
             suggestedQueries: {
               type: 'array',
-              items: { type: 'string' },
+              maxItems: 5,
+              items: { type: 'string', maxLength: 160 },
             },
-            reason: { type: 'string' },
+            reason: { type: 'string', maxLength: 240 },
           },
         },
-        reason: { type: 'string' },
+        reason: { type: 'string', maxLength: 240 },
       },
     };
   }

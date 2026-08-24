@@ -71,7 +71,9 @@ describe('ChatPromptBuilderAdapter', () => {
       },
       rerankedChunks: [
         {
+          chunkId: 'chunk-1',
           reelId: 'in1002',
+          distance: 0.1,
           evidenceType: 'TRANSCRIPT',
           evidenceText:
             'They have three backups in the university, but they will have backup at different.',
@@ -80,14 +82,18 @@ describe('ChatPromptBuilderAdapter', () => {
           tags: [],
         },
         {
+          chunkId: 'chunk-2',
           reelId: 'other-reel',
+          distance: 0.2,
           evidenceType: 'TRANSCRIPT',
           evidenceText: 'Unrelated ranked result.',
           chunkText: 'Unrelated ranked result.',
           tags: [],
         },
         {
+          chunkId: 'chunk-3',
           reelId: 'in1002',
+          distance: 0.3,
           evidenceType: 'TRANSCRIPT',
           evidenceText:
             'They will have backup at different physical places and some underground, so it is fireproof.',

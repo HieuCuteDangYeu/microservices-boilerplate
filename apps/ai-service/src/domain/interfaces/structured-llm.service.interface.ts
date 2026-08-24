@@ -5,6 +5,23 @@ export interface StructuredLlmJsonSchema {
   additionalProperties?: boolean;
 }
 
+export interface StructuredLlmCallDiagnostics {
+  modelRole?: string;
+  model: string;
+  providerStatus: number | 'NETWORK_ERROR' | 'TIMEOUT';
+  latencyMs: number;
+  configuredTimeoutMs: number;
+  configuredMaxCompletionTokens: number;
+  finishReason?: string;
+  attempt: number;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+  errorCode?: string;
+}
+
 export interface GenerateStructuredObjectInput {
   model?: string;
   systemPrompt: string;
@@ -13,6 +30,9 @@ export interface GenerateStructuredObjectInput {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
+  modelRole?: string;
+  attempt?: number;
+  onDiagnostics?: (diagnostics: StructuredLlmCallDiagnostics) => void;
 }
 
 export interface IStructuredLlmService {

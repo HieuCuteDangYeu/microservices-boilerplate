@@ -6,6 +6,7 @@ describe('BuildGroundedAnswerRevisionUseCase', () => {
   const config = {
     model: jest.fn().mockReturnValue('@cf/test/answer-revision'),
     timeoutMs: jest.fn().mockReturnValue(1_000),
+    maxCompletionTokens: jest.fn().mockReturnValue(768),
   };
   const useCase = new BuildGroundedAnswerRevisionUseCase(
     structuredLlm as never,
@@ -44,7 +45,7 @@ describe('BuildGroundedAnswerRevisionUseCase', () => {
       draftRevision: 1,
       citationAttempts: [],
       finalFailureSource: 'UNKNOWN',
-    }) as RagChatWorkflowState;
+    }) as unknown as RagChatWorkflowState;
 
   beforeEach(() => jest.clearAllMocks());
 

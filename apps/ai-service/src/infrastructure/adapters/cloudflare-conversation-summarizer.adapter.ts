@@ -1,5 +1,7 @@
 import type { CloudflareChatEndpoint } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import { Injectable, Logger } from '@nestjs/common';
+import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
   IConversationSummarizerService,
@@ -24,6 +26,8 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
   constructor(
     private readonly configService: ConfigService,
     private readonly cloudflareTextClient: CloudflareWorkersAiTextClient,
+    @Inject('IAiApplicationConfig')
+    private readonly applicationConfig: IAiApplicationConfig,
   ) {}
 
   async summarizeTurn(
@@ -152,11 +156,7 @@ export class CloudflareConversationSummarizerAdapter implements IConversationSum
   }
 
   private getMemoryMaxTokens(): number {
-    const value = Number(
-      this.configService.get<string>('CLOUDFLARE_MEMORY_MAX_TOKENS') ?? '650',
-    );
-
-    return Number.isFinite(value) && value > 0 ? value : 650;
+    return this.applicationConfig.maxCompletionTokens('CONVERSATION_SUMMARY');
   }
 
   private getMemoryTemperature(): number {

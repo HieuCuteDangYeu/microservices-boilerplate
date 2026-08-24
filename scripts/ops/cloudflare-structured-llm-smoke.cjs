@@ -136,7 +136,7 @@ const routerSchema = {
     },
     requiredEvidence: {
       type: 'array',
-      maxItems: 7,
+      maxItems: 4,
       items: {
         type: 'string',
         enum: [
@@ -166,18 +166,18 @@ const routerSchema = {
           type: 'string',
           enum: ['NONE', 'RECOMMEND_REELS', 'SUGGEST_QUERIES'],
         },
-        query: { type: 'string', maxLength: 500 },
-        minRelevantItems: { type: 'number' },
+        query: { type: 'string', maxLength: 240 },
+        minRelevantItems: { type: 'number', minimum: 0, maximum: 20 },
         allowPersonalizedFallback: { type: 'boolean' },
         suggestedQueries: {
           type: 'array',
-          maxItems: 8,
-          items: { type: 'string', maxLength: 500 },
+          maxItems: 5,
+          items: { type: 'string', maxLength: 160 },
         },
-        reason: { type: 'string', maxLength: 500 },
+        reason: { type: 'string', maxLength: 240 },
       },
     },
-    reason: { type: 'string', maxLength: 500 },
+    reason: { type: 'string', maxLength: 240 },
   },
 };
 
@@ -270,7 +270,7 @@ async function main() {
             content: prompts.user,
           },
         ],
-        max_tokens: maxTokens,
+        max_completion_tokens: maxTokens,
         temperature: 0,
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         response_format: { type: 'json_schema', json_schema: schema },

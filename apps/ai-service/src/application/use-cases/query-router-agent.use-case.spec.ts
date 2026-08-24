@@ -1,10 +1,16 @@
 import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
-import { QueryRouterAgentUseCase } from './query-router-agent.use-case';
+import {
+  QueryRouterAgentUseCase,
+  RouterUnavailableError,
+} from './query-router-agent.use-case';
 
 describe('QueryRouterAgentUseCase', () => {
   const config = {
     model: jest.fn(() => '@cf/test/router'),
     timeoutMs: jest.fn(() => 7_000),
+    maxCompletionTokens: jest.fn(() => 384),
+    get: jest.fn().mockReturnValue(undefined),
+    number: jest.fn((_key: string, fallback: number) => fallback),
   } as unknown as IAiApplicationConfig;
 
   const response = (overrides: Record<string, unknown> = {}) => ({
@@ -74,6 +80,7 @@ describe('QueryRouterAgentUseCase', () => {
         expect.objectContaining({
           model: '@cf/test/router',
           timeoutMs: 7_000,
+          maxTokens: 384,
           temperature: 0,
         }),
       );
@@ -154,7 +161,7 @@ describe('QueryRouterAgentUseCase', () => {
     });
   });
 
-  it('fails safely to normal chat when semantic routing is unavailable', async () => {
+  it('does not misclassify provider failure as normal chat', async () => {
     const useCase = new QueryRouterAgentUseCase(
       {
         generateObject: jest.fn().mockRejectedValue(new Error('provider down')),
@@ -164,10 +171,71 @@ describe('QueryRouterAgentUseCase', () => {
 
     await expect(
       useCase.execute({ message: 'Novel shared-media question.' }),
-    ).resolves.toMatchObject({
-      intent: 'NORMAL_CHAT',
-      needsRetrieval: false,
-      needsVerification: false,
+    ).rejects.toThrow('provider down');
+  });
+
+  it('uses one configured fallback only after a transient primary failure', async () => {
+    const transient = Object.assign(new Error('primary timeout'), {
+      code: 'STRUCTURED_COMPLETION_TIMEOUT',
     });
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockRejectedValueOnce(transient)
+        .mockResolvedValueOnce(
+          response({
+            intent: 'REEL_VIDEO_QUESTION',
+            needsRetrieval: true,
+            needsVerification: true,
+            reelQuestionType: 'TRANSCRIPT_CONTENT',
+            requiredEvidence: ['TRANSCRIPT'],
+          }),
+        ),
+    };
+    const fallbackConfig = {
+      ...config,
+      get: jest.fn((key: string) =>
+        key === 'AI_ROUTER_FALLBACK_MODEL'
+          ? '@cf/openai/gpt-oss-20b'
+          : undefined,
+      ),
+    } as unknown as IAiApplicationConfig;
+    const useCase = new QueryRouterAgentUseCase(
+      service as never,
+      fallbackConfig,
+    );
+
+    await expect(
+      useCase.execute({
+        message: 'What does the shared synthetic reel explain?',
+        hasSharedReelContext: true,
+      }),
+    ).resolves.toMatchObject({
+      intent: 'REEL_VIDEO_QUESTION',
+      diagnostics: {
+        model: '@cf/openai/gpt-oss-20b',
+        decisionSource: 'LLM_FALLBACK',
+      },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+    expect(service.generateObject.mock.calls[1]?.[0]).toMatchObject({
+      model: '@cf/openai/gpt-oss-20b',
+      attempt: 2,
+      timeoutMs: 30_000,
+    });
+  });
+
+  it('returns typed unavailable after bounded transient failure', async () => {
+    const transient = Object.assign(new Error('provider unavailable'), {
+      code: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+    });
+    const useCase = new QueryRouterAgentUseCase(
+      { generateObject: jest.fn().mockRejectedValue(transient) } as never,
+      config,
+    );
+
+    await expect(
+      useCase.execute({ message: 'Novel shared-media question.' }),
+    ).rejects.toBeInstanceOf(RouterUnavailableError);
   });
 });

@@ -157,6 +157,7 @@ const buildAdapter = (configValues: Record<string, string>) => {
     {} as IRerankerService,
     hierarchyObservationRepository,
     new ConfigService(configValues),
+    { maxCompletionTokens: jest.fn(() => 256) } as never,
   );
 
   return {

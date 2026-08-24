@@ -46,13 +46,14 @@ export class BackfillUserMemoryEmbeddingsUseCase {
         const embedding = await this.embeddingService.generateVector({
           text: this.buildMemoryEmbeddingText({
             type: memory.type,
-            content: memory.content,
+            content: memory.normalizedContent,
           }),
           taskType: 'RETRIEVAL_DOCUMENT',
           title: 'User memory',
         });
 
-        const expectedDimensions = this.getExpectedEmbeddingDimensions();
+        const expectedDimensions =
+          await this.userMemoryRepository.getEmbeddingDimensions();
 
         if (embedding.dimensions !== expectedDimensions) {
           failed += 1;
@@ -67,7 +68,9 @@ export class BackfillUserMemoryEmbeddingsUseCase {
         await this.userMemoryRepository.updateEmbedding({
           memoryId: memory.id,
           embedding: embedding.values,
-          embeddingModel: `${embedding.model}:${embedding.dimensions}`,
+          embeddingModel: embedding.model,
+          embeddingDimensions: embedding.dimensions,
+          embeddingVersion: this.getEmbeddingVersion(),
         });
 
         updated += 1;
@@ -99,14 +102,12 @@ export class BackfillUserMemoryEmbeddingsUseCase {
     ].join('\n');
   }
 
-  private getExpectedEmbeddingDimensions(): number {
-    const value = Number(
-      this.configService.get<string>('AI_USER_MEMORY_EMBEDDING_DIMENSIONS') ??
-        this.configService.get<string>('GEMINI_EMBEDDING_DIMENSIONS') ??
-        '384',
-    );
-
-    return Number.isFinite(value) && value > 0 ? Math.round(value) : 384;
+  private getEmbeddingVersion(): string {
+    const value = this.configService
+      .get<string>('AI_EMBEDDING_VERSION')
+      ?.trim();
+    if (!value) throw new Error('Missing required AI_EMBEDDING_VERSION');
+    return value;
   }
 
   private normalizeLimit(value: number, min: number, max: number): number {

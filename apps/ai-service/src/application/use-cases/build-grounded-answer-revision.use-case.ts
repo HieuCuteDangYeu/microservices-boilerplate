@@ -67,7 +67,8 @@ export class BuildGroundedAnswerRevisionUseCase {
         model: this.config.model('ANSWER_REVISION'),
         timeoutMs: this.config.timeoutMs('ANSWER_REVISION'),
         temperature: 0.1,
-        maxTokens: 600,
+        maxTokens: this.config.maxCompletionTokens('ANSWER_REVISION'),
+        modelRole: 'ANSWER_REVISION',
         systemPrompt: [
           'Revise a rejected reel RAG answer using only the supplied authorized evidence.',
           'Answer the exact relation requested by the user, including noisy or punctuation-free ASR when the evidence semantically supports it.',
@@ -87,12 +88,12 @@ export class BuildGroundedAnswerRevisionUseCase {
           additionalProperties: false,
           required: ['answer', 'evidenceIds'],
           properties: {
-            answer: { type: 'string' },
+            answer: { type: 'string', maxLength: 2_500 },
             evidenceIds: {
               type: 'array',
               minItems: 1,
               maxItems: 3,
-              items: { type: 'string' },
+              items: { type: 'string', maxLength: 64 },
             },
           },
         },

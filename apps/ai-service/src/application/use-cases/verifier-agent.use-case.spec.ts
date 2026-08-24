@@ -10,7 +10,7 @@ describe('VerifierAgentUseCase', () => {
         : '@cf/openai/gpt-oss-120b',
     ),
     timeoutMs: jest.fn(() => 8_000),
-    verifierMaxTokens: jest.fn((role: string) =>
+    maxCompletionTokens: jest.fn((role: string) =>
       role === 'VERIFIER' ? 650 : 1_024,
     ),
     boolean: jest.fn(() => true),
@@ -41,7 +41,7 @@ describe('VerifierAgentUseCase', () => {
         : [],
       retryCount: input.retryCount ?? 0,
       citationRetryCount: 0,
-    }) as RagChatWorkflowState;
+    }) as unknown as RagChatWorkflowState;
 
   const result = (overrides: Record<string, unknown> = {}) => ({
     passed: true,

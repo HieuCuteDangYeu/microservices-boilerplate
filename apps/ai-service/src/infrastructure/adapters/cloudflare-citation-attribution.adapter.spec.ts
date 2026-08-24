@@ -3,6 +3,11 @@ import type { ConfigService } from '@nestjs/config';
 import { CloudflareCitationAttributionAdapter } from './cloudflare-citation-attribution.adapter';
 
 describe('CloudflareCitationAttributionAdapter', () => {
+  const aiConfig = {
+    model: jest.fn(() => '@cf/test/citation'),
+    timeoutMs: jest.fn(() => 4_000),
+    maxCompletionTokens: jest.fn(() => 768),
+  };
   const createConfig = (values: Record<string, string> = {}) =>
     ({
       get: jest.fn((key: string) => values[key]),
@@ -38,6 +43,7 @@ describe('CloudflareCitationAttributionAdapter', () => {
     const adapter = new CloudflareCitationAttributionAdapter(
       structuredLlmService,
       createConfig(),
+      aiConfig as never,
     );
 
     await expect(
@@ -103,6 +109,7 @@ describe('CloudflareCitationAttributionAdapter', () => {
     const adapter = new CloudflareCitationAttributionAdapter(
       structuredLlmService,
       createConfig(),
+      aiConfig as never,
     );
 
     await expect(

@@ -3,6 +3,7 @@ import type {
   TranscriptMatch,
 } from '@ai/domain/interfaces/content-service.interface';
 import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import type {
   RagChatRouteDecision,
   RagRequiredEvidence,
@@ -72,6 +73,8 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
     @Inject('IRagHierarchyShadowObservationRepository')
     private readonly hierarchyObservationRepository: IRagHierarchyShadowObservationRepository,
     private readonly config: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly applicationConfig: IAiApplicationConfig,
   ) {}
 
   async plan(input: {
@@ -525,7 +528,9 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
           systemPrompt: this.buildSystemPrompt(),
           userPrompt: this.buildUserPrompt(input.message, input.route),
           jsonSchema: this.getJsonSchema(),
-          maxTokens: 450,
+          maxTokens:
+            this.applicationConfig.maxCompletionTokens('RETRIEVAL_PLANNER'),
+          modelRole: 'RETRIEVAL_PLANNER',
           temperature: 0,
           model: this.config.getOrThrow<string>('AI_RETRIEVAL_PLANNER_MODEL'),
           timeoutMs: Number(

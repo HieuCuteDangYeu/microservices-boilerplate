@@ -18,35 +18,37 @@ enum UserMemoryType {
 }
 
 model UserMemory {
-  id                   String         @id @default(uuid())
+  id                   String                       @id @default(uuid())
   userId               String
   type                 UserMemoryType
-  content              String         @db.Text
-  normalizedContent    String         @db.Text
-  confidence           Float          @default(0.7)
+  content              String                       @db.Text
+  normalizedContent    String                       @db.Text
+  confidence           Float                        @default(0.7)
   sourceConversationId String?
-  embedding            Unsupported("vector(384)")?
+  embedding            Unsupported("vector(1024)")?
   embeddingModel       String?
+  embeddingDimensions  Int?
+  embeddingVersion     String?
   lastUsedAt           DateTime?
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
 
+  @@unique([userId, type, normalizedContent])
   @@index([userId])
   @@index([type])
   @@index([updatedAt])
-  @@index([userId, embeddingModel])
-  @@unique([userId, type, normalizedContent])
+  @@index([userId, embeddingModel, embeddingDimensions, embeddingVersion])
 }
 
 model ConversationMemory {
-  id             String   @id @default(uuid())
-  conversationId String   @unique
+  id             String    @id @default(uuid())
+  conversationId String    @unique
   userId         String
-  summary        String   @db.Text
-  messageCount   Int      @default(0)
+  summary        String    @db.Text
+  messageCount   Int       @default(0)
   lastMessageAt  DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([userId])
   @@index([updatedAt])
@@ -66,13 +68,13 @@ model RagTrace {
   rerankedChunkIds  Json?
   citations         Json?
 
-  answer             String? @db.Text
+  answer             String?  @db.Text
   verifierPassed     Boolean?
   verifierConfidence Float?
   verifierIssues     Json?
 
   latencyMs       Int?
-  nodeTimings      Json?
+  nodeTimings     Json?
   workflowMetrics Json?
 
   createdAt DateTime @default(now())
@@ -85,20 +87,20 @@ model RagTrace {
 model RagHierarchyShadowObservation {
   id String @id @default(uuid())
 
-  userId         String
-  conversationId String
-  queryText      String @db.Text
-  retrievalMode  String
+  userId           String
+  conversationId   String
+  queryText        String   @db.Text
+  retrievalMode    String
   requiredEvidence String[]
 
   directChunkIds       Json
   hierarchicalChunkIds Json
-  directCount           Int
-  hierarchicalCount     Int
-  directMs              Int
-  hierarchicalMs        Int
-  overlapAtK            Float
-  jaccard               Float
+  directCount          Int
+  hierarchicalCount    Int
+  directMs             Int
+  hierarchicalMs       Int
+  overlapAtK           Float
+  jaccard              Float
 
   createdAt DateTime @default(now())
 

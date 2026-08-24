@@ -18,7 +18,21 @@ interface CloudflareChatCompletionResponse {
   errors?: Array<{
     message?: string;
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
+
+interface StructuredCallState {
+  providerStatus: number | 'NETWORK_ERROR' | 'TIMEOUT';
+  finishReason?: string;
+  usage?: CloudflareChatCompletionResponse['usage'];
+  errorCode?: string;
+}
+
+const MAX_STRUCTURED_TIMEOUT_MS = 120_000;
 
 export class StructuredCompletionTruncatedError extends Error {
   readonly code = 'STRUCTURED_COMPLETION_TRUNCATED';
@@ -99,6 +113,66 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
   constructor(private readonly configService: ConfigService) {}
 
   async generateObject<T>(input: GenerateStructuredObjectInput): Promise<T> {
+    const model = input.model?.trim();
+    if (!model) throw new Error('Structured LLM requests require a model role');
+
+    const timeoutMs = this.resolveTimeout(input.timeoutMs);
+    const maxTokens = input.maxTokens ?? 500;
+    const startedAt = Date.now();
+    const state: StructuredCallState = { providerStatus: 'NETWORK_ERROR' };
+
+    try {
+      return await this.generateObjectInternal<T>(
+        input,
+        model,
+        timeoutMs,
+        maxTokens,
+        state,
+      );
+    } catch (error: unknown) {
+      state.errorCode =
+        error && typeof error === 'object' && 'code' in error
+          ? String(error.code)
+          : 'STRUCTURED_COMPLETION_UNKNOWN_ERROR';
+      if (error instanceof StructuredCompletionTimeoutError) {
+        state.providerStatus = 'TIMEOUT';
+      }
+      throw error;
+    } finally {
+      const diagnostics = {
+        modelRole: input.modelRole,
+        model,
+        providerStatus: state.providerStatus,
+        latencyMs: Date.now() - startedAt,
+        configuredTimeoutMs: timeoutMs,
+        configuredMaxCompletionTokens: maxTokens,
+        finishReason: state.finishReason,
+        attempt: input.attempt ?? 1,
+        usage: state.usage
+          ? {
+              inputTokens: state.usage.prompt_tokens,
+              outputTokens: state.usage.completion_tokens,
+              totalTokens: state.usage.total_tokens,
+            }
+          : undefined,
+        errorCode: state.errorCode,
+      };
+      this.logger.debug(`[StructuredCall] ${JSON.stringify(diagnostics)}`);
+      try {
+        input.onDiagnostics?.(diagnostics);
+      } catch {
+        this.logger.warn('Structured call diagnostics callback failed');
+      }
+    }
+  }
+
+  private async generateObjectInternal<T>(
+    input: GenerateStructuredObjectInput,
+    model: string,
+    timeoutMs: number,
+    maxTokens: number,
+    state: StructuredCallState,
+  ): Promise<T> {
     const accountId = this.configService.getOrThrow<string>(
       'CLOUDFLARE_ACCOUNT_ID',
     );
@@ -107,12 +181,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
       'CLOUDFLARE_API_TOKEN',
     );
 
-    const model = input.model?.trim();
-    if (!model) throw new Error('Structured LLM requests require a model role');
-
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
-    const timeoutMs = this.resolveTimeout(input.timeoutMs);
-    const maxTokens = input.maxTokens ?? 500;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref();
@@ -139,7 +208,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
               content: input.userPrompt,
             },
           ],
-          max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
           temperature: input.temperature ?? 0.1,
           ...this.reasoningEffort(),
           response_format: {
@@ -158,6 +227,8 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
       clearTimeout(timeout);
     }
 
+    state.providerStatus = response.status;
+
     let json: CloudflareChatCompletionResponse;
     try {
       json = (await response.json()) as CloudflareChatCompletionResponse;
@@ -173,6 +244,8 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
     }
 
     const choice = json.choices?.[0];
+    state.finishReason = choice?.finish_reason ?? undefined;
+    state.usage = json.usage;
     if (choice?.finish_reason === 'length') {
       throw new StructuredCompletionTruncatedError(
         model,
@@ -347,7 +420,10 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
     const fallback = Number.isFinite(configured) ? configured : 8_000;
     const requested = Number(requestTimeoutMs ?? fallback);
     return Number.isFinite(requested)
-      ? Math.min(30_000, Math.max(500, Math.round(requested)))
+      ? Math.min(
+          MAX_STRUCTURED_TIMEOUT_MS,
+          Math.max(500, Math.round(requested)),
+        )
       : 8_000;
   }
 }

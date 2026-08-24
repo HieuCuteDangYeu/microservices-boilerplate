@@ -6,6 +6,7 @@ import type {
   ICitationAttributionService,
 } from '@ai/domain/interfaces/citation-attribution.service.interface';
 import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -26,6 +27,8 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
     @Inject('IStructuredLlmService')
     private readonly structuredLlmService: IStructuredLlmService,
     private readonly configService: ConfigService,
+    @Inject('IAiApplicationConfig')
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async attribute(input: {
@@ -39,9 +42,7 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
       return this.emptyResult();
     }
 
-    const model = this.configService.getOrThrow<string>(
-      'AI_CITATION_ATTRIBUTION_MODEL',
-    );
+    const model = this.config.model('CITATION_ATTRIBUTION');
     const minConfidence = this.number(
       'AI_RAG_CITATION_MIN_CONFIDENCE',
       0.65,
@@ -51,9 +52,7 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
     const maxCandidates = Math.round(
       this.number('AI_RAG_CITATION_CANDIDATE_LIMIT', 8, 1, 20),
     );
-    const timeoutMs = Math.round(
-      this.number('AI_RAG_CITATION_TIMEOUT_MS', 4_000, 500, 20_000),
-    );
+    const timeoutMs = this.config.timeoutMs('CITATION_ATTRIBUTION');
     const candidates = input.candidates.slice(0, maxCandidates);
 
     const result =
@@ -71,11 +70,11 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
                 items: {
                   type: 'object',
                   properties: {
-                    claim: { type: 'string' },
+                    claim: { type: 'string', maxLength: 500 },
                     supported: { type: 'boolean' },
                     evidenceIds: {
                       type: 'array',
-                      items: { type: 'string' },
+                      items: { type: 'string', maxLength: 64 },
                       maxItems: 3,
                     },
                     confidence: { type: 'number', minimum: 0, maximum: 1 },
@@ -88,7 +87,8 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
             required: ['claims'],
             additionalProperties: false,
           },
-          maxTokens: 700,
+          maxTokens: this.config.maxCompletionTokens('CITATION_ATTRIBUTION'),
+          modelRole: 'CITATION_ATTRIBUTION',
           temperature: 0,
           timeoutMs,
         },

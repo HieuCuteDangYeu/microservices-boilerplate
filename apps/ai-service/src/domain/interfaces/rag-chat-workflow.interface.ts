@@ -5,6 +5,7 @@ import type {
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import type { ConversationMemoryContext } from '@common/ai/interfaces/conversation-memory.interface';
 import type { RelevantUserMemoriesContext } from '@common/ai/interfaces/user-memory.interface';
+import type { StructuredLlmCallDiagnostics } from './structured-llm.service.interface';
 import type { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 
 export type RagChatIntent =
@@ -67,7 +68,8 @@ export interface RagChatRouteDecision {
     modelRole: 'ROUTER';
     model?: string;
     providerStatus: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
-    decisionSource: 'LLM' | 'FAIL_SAFE' | 'STRUCTURAL';
+    decisionSource: 'LLM' | 'LLM_FALLBACK' | 'FAIL_SAFE' | 'STRUCTURAL';
+    semanticCalls?: StructuredLlmCallDiagnostics[];
   };
 }
 
@@ -236,6 +238,7 @@ export interface RagChatWorkflowState {
 
   answer?: string;
   answerClaims?: RagAnswerClaim[];
+  answerDiagnostics?: StructuredLlmCallDiagnostics[];
   verification?: RagVerificationResult;
   citations?: RagCitation[];
   citationCoverage?: RagCitationCoverageResult;

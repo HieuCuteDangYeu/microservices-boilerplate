@@ -16,6 +16,7 @@ import type {
   LlmToolDefinition,
   ToolCallingMessage,
 } from '@ai/domain/interfaces/tool-calling-llm.service.interface';
+import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 interface RetrievalToolResult {
@@ -36,6 +37,8 @@ export class RetrieveReelEvidenceUseCase {
     private readonly toolLlm: IToolCallingLlmService,
     @Inject('IRetrievalAgentPolicy')
     private readonly policy: IRetrievalAgentPolicy,
+    @Inject('IAiApplicationConfig')
+    private readonly config: IAiApplicationConfig,
   ) {}
 
   async execute(input: {
@@ -76,7 +79,7 @@ export class RetrieveReelEvidenceUseCase {
           messages,
           tools: this.getTools(),
           toolChoice: step === 0 ? 'required' : 'auto',
-          maxTokens: 500,
+          maxTokens: this.config.maxCompletionTokens('RETRIEVAL_TOOL'),
           temperature: 0.1,
           timeoutMs: this.policy.callTimeoutMs,
         });

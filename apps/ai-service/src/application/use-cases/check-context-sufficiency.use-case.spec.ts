@@ -6,6 +6,7 @@ describe('CheckContextSufficiencyUseCase', () => {
   const config = {
     model: jest.fn(() => '@cf/test/sufficiency'),
     timeoutMs: jest.fn(() => 6_000),
+    maxCompletionTokens: jest.fn(() => 512),
   } as unknown as IAiApplicationConfig;
 
   const state = (input: {
@@ -29,7 +30,7 @@ describe('CheckContextSufficiencyUseCase', () => {
             },
           ]
         : [],
-    }) as RagChatWorkflowState;
+    }) as unknown as RagChatWorkflowState;
 
   it('refuses deterministically when no evidence exists', async () => {
     const service = { generateObject: jest.fn() };

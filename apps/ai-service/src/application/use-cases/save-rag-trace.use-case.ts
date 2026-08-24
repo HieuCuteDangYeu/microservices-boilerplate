@@ -80,6 +80,7 @@ export class SaveRagTraceUseCase {
             draftHistory: input.state.draftHistory,
             groundedRevision: input.state.groundedRevision,
             answerClaims: input.state.answerClaims?.slice(0, 12),
+            answerCalls: input.state.answerDiagnostics,
             verification: input.state.verification?.diagnostics,
             citationAttempts: input.state.citationAttempts,
             finalFailureSource: input.state.finalFailureSource,

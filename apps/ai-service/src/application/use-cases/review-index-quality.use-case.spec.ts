@@ -27,6 +27,7 @@ describe('ReviewIndexQualityUseCase', () => {
       {
         model: jest.fn(() => '@cf/test/index-quality'),
         timeoutMs: jest.fn(() => 8_000),
+        maxCompletionTokens: jest.fn(() => 768),
       } as never,
     );
 

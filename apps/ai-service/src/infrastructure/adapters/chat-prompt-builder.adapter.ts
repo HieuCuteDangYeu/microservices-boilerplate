@@ -5,7 +5,10 @@ import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class ChatPromptBuilderAdapter implements IChatPromptBuilder {
-  build(state: RagChatWorkflowState): string {
+  build(
+    state: RagChatWorkflowState,
+    options?: { includeRetrievedEvidence?: boolean },
+  ): string {
     const longTermMemory = state.memorySelection?.includeUserMemory
       ? this.formatUserMemories(state)
       : 'Long-term user memory was not selected for this request.';
@@ -16,9 +19,12 @@ export class ChatPromptBuilderAdapter implements IChatPromptBuilder {
     const recentHistory = state.memorySelection?.includeRecentHistory
       ? this.formatRecentHistory(state)
       : 'Recent chat history was not selected for this request.';
-    const reelContext = state.memorySelection?.includeRetrievedChunks
-      ? this.formatRetrievedReelEvidence(state.rerankedChunks)
-      : 'Retrieved reel evidence was not selected for this request.';
+    const reelContext =
+      options?.includeRetrievedEvidence === false
+        ? 'Authorized reel evidence is supplied separately with stable evidence IDs.'
+        : state.memorySelection?.includeRetrievedChunks
+          ? this.formatRetrievedReelEvidence(state.rerankedChunks)
+          : 'Retrieved reel evidence was not selected for this request.';
     const routeContext = this.formatRouteContext(state);
     const revisionInstruction = state.verification?.revisedInstruction?.trim();
 

@@ -153,7 +153,13 @@ export class UpsertUserMemoriesUseCase {
   }
 
   private async attachEmbedding(
-    memory: Omit<UserMemoryUpsertInput, 'embedding' | 'embeddingModel'>,
+    memory: Omit<
+      UserMemoryUpsertInput,
+      | 'embedding'
+      | 'embeddingModel'
+      | 'embeddingDimensions'
+      | 'embeddingVersion'
+    >,
   ): Promise<UserMemoryUpsertInput> {
     if (!this.getBoolean('AI_USER_MEMORY_EMBEDDINGS_ENABLED', true)) {
       return memory;
@@ -166,7 +172,8 @@ export class UpsertUserMemoriesUseCase {
         title: 'User memory',
       });
 
-      const expectedDimensions = this.getExpectedEmbeddingDimensions();
+      const expectedDimensions =
+        await this.userMemoryRepository.getEmbeddingDimensions();
 
       if (embedding.dimensions !== expectedDimensions) {
         this.logger.warn(
@@ -179,7 +186,9 @@ export class UpsertUserMemoriesUseCase {
       return {
         ...memory,
         embedding: embedding.values,
-        embeddingModel: `${embedding.model}:${embedding.dimensions}`,
+        embeddingModel: embedding.model,
+        embeddingDimensions: embedding.dimensions,
+        embeddingVersion: this.getEmbeddingVersion(),
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -278,14 +287,12 @@ export class UpsertUserMemoriesUseCase {
       .trim();
   }
 
-  private getExpectedEmbeddingDimensions(): number {
-    const value = Number(
-      this.configService.get<string>('AI_USER_MEMORY_EMBEDDING_DIMENSIONS') ??
-        this.configService.get<string>('GEMINI_EMBEDDING_DIMENSIONS') ??
-        '384',
-    );
-
-    return Number.isFinite(value) && value > 0 ? Math.round(value) : 384;
+  private getEmbeddingVersion(): string {
+    const value = this.configService
+      .get<string>('AI_EMBEDDING_VERSION')
+      ?.trim();
+    if (!value) throw new Error('Missing required AI_EMBEDDING_VERSION');
+    return value;
   }
 
   private getBoolean(key: string, fallback: boolean): boolean {

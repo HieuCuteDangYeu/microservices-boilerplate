@@ -100,7 +100,8 @@ export class GetRelevantUserMemoriesUseCase {
         taskType: 'RETRIEVAL_QUERY',
       });
 
-      const expectedDimensions = this.getExpectedEmbeddingDimensions();
+      const expectedDimensions =
+        await this.userMemoryRepository.getEmbeddingDimensions();
 
       if (embedding.dimensions !== expectedDimensions) {
         this.logger.warn(
@@ -353,16 +354,6 @@ export class GetRelevantUserMemoriesUseCase {
       .replace(/[^\p{L}\p{N}\s.-]/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-  }
-
-  private getExpectedEmbeddingDimensions(): number {
-    const value = Number(
-      this.configService.get<string>('AI_USER_MEMORY_EMBEDDING_DIMENSIONS') ??
-        this.configService.get<string>('GEMINI_EMBEDDING_DIMENSIONS') ??
-        '384',
-    );
-
-    return Number.isFinite(value) && value > 0 ? Math.round(value) : 384;
   }
 
   private getBoolean(key: string, fallback: boolean): boolean {

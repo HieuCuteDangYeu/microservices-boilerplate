@@ -63,7 +63,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
         systemPrompt: 'Return JSON.',
         userPrompt: 'Set passed.',
         model: '@cf/test/structured',
-        jsonSchema: { type: 'object' },
+        jsonSchema: { type: 'object', properties: {} },
       }),
     ).rejects.toBeInstanceOf(StructuredCompletionInvalidJsonError);
   });
@@ -164,7 +164,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
         userPrompt: 'Set passed.',
         model: '@cf/openai/gpt-oss-120b',
         maxTokens: 1_024,
-        jsonSchema: { type: 'object' },
+        jsonSchema: { type: 'object', properties: {} },
       }),
     ).rejects.toMatchObject({
       name: StructuredCompletionTruncatedError.name,
@@ -192,7 +192,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
         systemPrompt: 'Return JSON.',
         userPrompt: 'Set passed.',
         model: '@cf/test/structured',
-        jsonSchema: { type: 'object' },
+        jsonSchema: { type: 'object', properties: {} },
       }),
     ).rejects.toBeInstanceOf(StructuredCompletionEmptyContentError);
   });
@@ -217,7 +217,7 @@ describe('CloudflareStructuredLlmAdapter', () => {
         systemPrompt: 'Return JSON.',
         userPrompt: 'Set passed.',
         model: '@cf/test/structured',
-        jsonSchema: { type: 'object' },
+        jsonSchema: { type: 'object', properties: {} },
       });
       await expect(request).rejects.toBeInstanceOf(
         StructuredCompletionProviderError,
@@ -226,33 +226,77 @@ describe('CloudflareStructuredLlmAdapter', () => {
     },
   );
 
-  it('classifies an aborted request as a typed timeout', async () => {
-    jest.useFakeTimers();
+  it.each([
+    [500, 500],
+    [45_000, 45_000],
+    [60_000, 60_000],
+    [130_000, 120_000],
+  ])(
+    'classifies an aborted request at requested timeout %i as %i',
+    async (requestedTimeout, expectedTimeout) => {
+      jest.useFakeTimers();
+      const config = {
+        getOrThrow: jest.fn().mockReturnValue('value'),
+        get: jest.fn().mockReturnValue('false'),
+      };
+      jest.spyOn(global, 'fetch').mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new Error('aborted')),
+            );
+          }),
+      );
+      const adapter = new CloudflareStructuredLlmAdapter(config as never);
+      const request = adapter.generateObject({
+        systemPrompt: 'Return JSON.',
+        userPrompt: 'Set passed.',
+        model: '@cf/test/structured',
+        timeoutMs: requestedTimeout,
+        jsonSchema: { type: 'object', properties: {} },
+      });
+
+      jest.advanceTimersByTime(expectedTimeout);
+      await expect(request).rejects.toMatchObject({
+        name: StructuredCompletionTimeoutError.name,
+        timeoutMs: expectedTimeout,
+      });
+      jest.useRealTimers();
+    },
+  );
+
+  it('uses max_completion_tokens without deprecated max_tokens', async () => {
     const config = {
       getOrThrow: jest.fn().mockReturnValue('value'),
       get: jest.fn().mockReturnValue('false'),
     };
-    jest.spyOn(global, 'fetch').mockImplementation(
-      (_url, init) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () =>
-            reject(new Error('aborted')),
-          );
-        }),
-    );
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        choices: [
+          { finish_reason: 'stop', message: { content: '{"ok":true}' } },
+        ],
+      }),
+    } as never);
     const adapter = new CloudflareStructuredLlmAdapter(config as never);
-    const request = adapter.generateObject({
+
+    await adapter.generateObject({
       systemPrompt: 'Return JSON.',
-      userPrompt: 'Set passed.',
+      userPrompt: 'Return ok.',
       model: '@cf/test/structured',
-      timeoutMs: 500,
-      jsonSchema: { type: 'object' },
+      maxTokens: 768,
+      jsonSchema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' } },
+        required: ['ok'],
+      },
     });
 
-    jest.advanceTimersByTime(500);
-    await expect(request).rejects.toBeInstanceOf(
-      StructuredCompletionTimeoutError,
-    );
-    jest.useRealTimers();
+    const requestBody = fetchMock.mock.calls[0]?.[1]?.body;
+    expect(typeof requestBody).toBe('string');
+    const body = JSON.parse(requestBody as string) as Record<string, unknown>;
+    expect(body).toMatchObject({ max_completion_tokens: 768 });
+    expect(body).not.toHaveProperty('max_tokens');
   });
 });

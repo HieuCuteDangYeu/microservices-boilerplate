@@ -10,6 +10,8 @@ export interface UserMemoryUpsertInput {
   sourceConversationId?: string;
   embedding?: number[];
   embeddingModel?: string;
+  embeddingDimensions?: number;
+  embeddingVersion?: string;
 }
 
 export interface UserMemorySemanticSearchInput {
@@ -24,9 +26,12 @@ export interface UserMemoryEmbeddingUpdateInput {
   memoryId: string;
   embedding: number[];
   embeddingModel: string;
+  embeddingDimensions: number;
+  embeddingVersion: string;
 }
 
 export interface IUserMemoryRepository {
+  getEmbeddingDimensions(): Promise<number>;
   findByUserId(userId: string, limit: number): Promise<UserMemory[]>;
   findRelevantByUserId(
     input: UserMemorySemanticSearchInput,
