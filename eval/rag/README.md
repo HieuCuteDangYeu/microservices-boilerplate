@@ -1,0 +1,66 @@
+# Ragas evaluation
+
+This tooling-only package is the canonical evaluator for repository RAG experiments. It uses Ragas 0.4.3's current `Dataset` and `@experiment().arun(...)` APIs. Python is not imported by the AI service, indexing service, Docker production stack, or ordinary repository tests.
+
+## Ownership boundary
+
+Ragas owns versioned evaluation datasets, experiment results, semantic metrics, deterministic metrics, operational/cost aggregation, category slices, comparisons, and reports. The TypeScript runner remains responsible for production API execution, exactly one primary request per case, `benchmarkRunId` state, `IN_FLIGHT` protection, no-resend reconciliation, and RagTrace extraction. NestJS/LangGraph remains the application under test.
+
+The runner and `normalize-existing-ami-rag-retest.cjs` emit `rag-eval-result-v1`; they do not determine correctness. The deprecated `summarize-existing-ami-rag-retest.cjs` is now only a compatibility alias for normalization.
+
+## Environment
+
+Install [uv](https://docs.astral.sh/uv/) and run `uv sync` in this directory. The lock pins Ragas 0.4.3. Generated experiments and reports, private live traces, virtual environments, and caches are ignored by Git.
+
+No evaluation dependency is a production dependency. `pnpm eval:rag:test` and offline mode perform zero LLM calls, zero production requests, and zero database writes.
+
+## Datasets
+
+- `rag-frozen-ami-v1`: the immutable eight AMI questions, answers, reel scope, evidence modality, time interval, and curated concepts.
+- `rag-generalization-v1`: 65 router, 20 sufficiency, 15 verifier, and four generic retrieval/citation/access/provider rows. Tags are analysis metadata only.
+
+The JSONL files under `datasets/` are the source of truth. Existing Jest control-plane tests read their fixture payloads from the same generic dataset. To add a case, add safe, non-production fixture data, increment the dataset version when semantics change, update the declared count, and add contract tests. Never place credentials, private production text, or benchmark answers in runtime code.
+
+## Commands
+
+```sh
+pnpm eval:rag:offline --dataset rag-generalization-v1
+pnpm eval:rag:live --dataset rag-frozen-ami-v1 --variant production \
+  --definitions-report <safe-definitions.json> --confirm-live
+pnpm eval:rag:report --run <run-id>
+pnpm eval:rag:compare --baseline <run-a> --candidate <run-b>
+pnpm eval:rag:test
+pnpm eval:rag:capacity-check --confirm-one-call
+```
+
+Offline mode uses explicit `FIXTURE` normalized results and never creates provider clients. Live mode is opt-in, invokes the existing TypeScript runner, refuses unsupported datasets, and evaluates only completed/reconciled rows. A failed or missing response remains in the denominator with a failure status; semantic metrics may be null.
+
+Capacity check makes exactly one cheap judge-model request and never launches a benchmark. It requires both explicit confirmation and the evaluation-specific Cloudflare variables. Do not repeat it while an account-limit response is already known.
+
+## Metrics and hard gates
+
+Current Ragas built-ins are wired for Faithfulness, Factual Correctness, Answer Relevancy (reported as response relevancy), Context Precision, and Context Recall. Tool Call Accuracy is order-insensitive, Tool Call F1 and Agent Goal Accuracy are supported when a structured trajectory exists. Native multimodal metrics are available only when original image inputs exist; textual visual evidence uses the deterministic modality metric and is never passed off as an image.
+
+Exact IDs drive Recall@1/3/5/10, MRR, NDCG@5/10, evidence hit rate, citation precision/recall, wrong-reel/modality counts, router contract accuracy, modality accuracy, and access violations without an LLM. The curated frozen-answer rule remains a custom deterministic metric. Semantic scores supplement these rules and cannot override them. Any access-control violation fails the experiment hard gate.
+
+Retrieval metrics measure whether relevant evidence was ranked and cited. Semantic metrics judge response grounding/correctness only when their required inputs are actually present. Null is retained when a metric is inapplicable or its judge is unavailable.
+
+## Judge configuration
+
+Judge models are evaluation roles, never production RAG roles:
+
+```sh
+RAG_EVAL_JUDGE_MODEL=@cf/...
+RAG_EVAL_EMBEDDING_MODEL=@cf/...
+RAG_EVAL_CLOUDFLARE_BASE_URL=https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1
+```
+
+The adapter uses Ragas' current factory with an OpenAI-compatible Cloudflare client. It never silently falls back to `AI_ANSWER_MODEL` or `AI_VERIFIER_MODEL`. Judge token usage and cost use `EVALUATION_JUDGE` scope and remain separate from `QUERY` and `INDEXING` costs.
+
+## Pricing, reports, and comparisons
+
+`config/cloudflare-pricing-v1.json` is a versioned snapshot of official Workers AI pricing. Update it only after checking the linked Cloudflare source, change the version and verification date, and add pricing tests. Unknown models or missing usage produce `costUsd=null` plus a warning, never a fabricated zero. Provider token counts remain labeled `PROVIDER`; explicit estimates are labeled `ESTIMATED`; absent usage is `UNAVAILABLE`.
+
+Each run writes one schema family: `summary.json`, `cases.jsonl`, and `summary.md`. Query, indexing, and evaluation-judge costs stay separate. End-to-end latency uses actual wall time rather than summing potentially parallel node durations; role latency comes from individual model-call diagnostics. Reports include dataset/variant metadata and per-tag slices. `compare` calculates deltas without overwriting either run.
+
+Live benchmark reconciliation remains TypeScript-owned. If a case is `IN_FLIGHT`, inspect/reconcile it through the runner; never resend it from Python. Once Workers capacity is restored, use the Ragas datasets and live command for model comparison, sufficiency/verifier gates, and a new frozen-eight run rather than returning to the legacy scorer.

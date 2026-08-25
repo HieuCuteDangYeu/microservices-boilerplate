@@ -21,6 +21,15 @@ lerna-debug.log*
 
 # Reel integration/load-test fixtures and reports
 /test-data/reel-integration/
+/eval/rag/.venv/
+/eval/rag/.pytest_cache/
+/eval/rag/.ruff_cache/
+/eval/rag/.uv-cache/
+/eval/rag/**/__pycache__/
+/eval/rag/**/*.py[cod]
+/eval/rag/.ragas/
+/eval/rag/results/
+/eval/rag/experiments/
 
 # IDEs and editors
 /.idea
