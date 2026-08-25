@@ -6,7 +6,7 @@ import time
 from contextvars import ContextVar
 from typing import Any
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 from ragas.embeddings import embedding_factory
 from ragas.llms import llm_factory
 
@@ -16,15 +16,15 @@ _usage_key: ContextVar[str | None] = ContextVar("rag_eval_judge_usage_key", defa
 
 
 class JudgeUsageTracker:
-    def __init__(self, client: OpenAI):
+    def __init__(self, client: AsyncOpenAI):
         self._calls: dict[str, list[dict[str, Any]]] = {}
         self._lock = threading.Lock()
         original = client.chat.completions.create
 
-        def tracked_create(*args: Any, **kwargs: Any) -> Any:
+        async def tracked_create(*args: Any, **kwargs: Any) -> Any:
             started = time.monotonic()
             try:
-                response = original(*args, **kwargs)
+                response = await original(*args, **kwargs)
             except Exception as error:
                 key = _usage_key.get()
                 if key:
@@ -97,7 +97,11 @@ def build_live_judge() -> tuple[Any, Any, Any]:
     judge_model = os.environ["RAG_EVAL_JUDGE_MODEL"]
     embedding_model = os.environ["RAG_EVAL_EMBEDDING_MODEL"]
     token = os.environ["CLOUDFLARE_API_TOKEN"]
-    client = OpenAI(api_key=token, base_url=cloudflare_base_url())
+    client = AsyncOpenAI(
+        api_key=token,
+        base_url=cloudflare_base_url(),
+        max_retries=0,
+    )
     usage_tracker = JudgeUsageTracker(client)
     llm = llm_factory(model=judge_model, provider="openai", client=client)
     embeddings = embedding_factory(provider="openai", model=embedding_model, client=client)
@@ -108,12 +112,44 @@ def build_live_judge() -> tuple[Any, Any, Any]:
     )
 
 
+def build_capacity_client() -> tuple[AsyncOpenAI, str]:
+    token = os.environ["CLOUDFLARE_API_TOKEN"]
+    model = os.getenv("RAG_EVAL_CAPACITY_MODEL", "@cf/openai/gpt-oss-20b")
+    return (
+        AsyncOpenAI(
+            api_key=token,
+            base_url=cloudflare_base_url(),
+            max_retries=0,
+        ),
+        model,
+    )
+
+
 def classify_capacity_error(status: int | None, code: int | None, message: str) -> str:
     normalized = message.lower()
-    if status == 429 and (code == 3036 or "daily" in normalized and "allocation" in normalized):
+    daily_allocation = (
+        ("daily" in normalized or "per day" in normalized)
+        and any(term in normalized for term in ("allocation", "quota", "limit"))
+        and any(
+            term in normalized
+            for term in ("exhausted", "exceeded", "limited", "reached", "used up")
+        )
+    )
+    if status == 429 and (code == 3036 or daily_allocation):
         return "ACCOUNT_LIMITED"
     if status == 429 and code == 3040:
         return "OUT_OF_CAPACITY"
-    if status == 429:
+    if status == 429 and ("rate limit" in normalized or "too many requests" in normalized):
         return "RATE_LIMITED"
     return "UNKNOWN_PROVIDER_FAILURE"
+
+
+def capacity_message_class(message: str) -> str:
+    normalized = message.lower()
+    if classify_capacity_error(429, None, message) == "ACCOUNT_LIMITED":
+        return "DAILY_ALLOCATION_ACCOUNT_LIMIT"
+    if any(term in normalized for term in ("out of capacity", "temporary capacity")):
+        return "TEMPORARY_CAPACITY"
+    if "rate limit" in normalized or "too many requests" in normalized:
+        return "RATE_LIMIT"
+    return "NO_SAFE_PROVIDER_MESSAGE"

@@ -46,6 +46,31 @@ function sameArray(left, right) {
   return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
 }
 
+function normalizeCalls(calls) {
+  return calls.map((call) => ({
+    modelRole: call.modelRole,
+    model: call.model,
+    inputTokens: call.usage?.inputTokens ?? null,
+    outputTokens: call.usage?.outputTokens ?? null,
+    totalTokens: call.usage?.totalTokens ?? null,
+    usageSource: call.usage ? 'PROVIDER' : 'UNAVAILABLE',
+    latencyMs: call.latencyMs,
+    finishReason: call.finishReason,
+    attempt: call.attempt ?? 1,
+    providerStatus: call.providerStatus,
+    providerCode: call.providerCode,
+    providerCategory: call.providerCategory,
+    retryAfterMs: call.retryAfterMs,
+    transient: call.transient,
+    errorCode: call.errorCode,
+    scope: 'QUERY',
+  }));
+}
+
+function accountLimited(calls) {
+  return calls.some((call) => call.providerCategory === 'ACCOUNT_LIMITED');
+}
+
 function stateForSufficiency(fixture) {
   return {
     userId: 'synthetic-evaluation-user',
@@ -100,7 +125,7 @@ function stateForVerifier(fixture) {
   };
 }
 
-async function evaluateRouter(llm, config, model) {
+async function evaluateRouter(llm, config, model, callLog) {
   const modelConfig = {
     model: (role) => (role === 'ROUTER' ? model : config.model(role)),
     get: (key) =>
@@ -116,6 +141,7 @@ async function evaluateRouter(llm, config, model) {
   const fixtures = routerCases.slice(0, limit);
   for (const fixture of fixtures) {
     const startedAt = Date.now();
+    const callOffset = callLog.length;
     try {
       const result = await useCase.execute(fixture);
       const strictPass =
@@ -129,6 +155,12 @@ async function evaluateRouter(llm, config, model) {
         strictPass,
         expectedIntent: fixture.expected.intent,
         actualIntent: result.intent,
+        expectedReferenceTarget: fixture.expected.referenceTarget,
+        actualReferenceTarget: result.referenceTarget,
+        expectedReelQuestionType: fixture.expected.reelQuestionType,
+        actualReelQuestionType: result.reelQuestionType,
+        expectedRequiredEvidence: fixture.expected.requiredEvidence,
+        actualRequiredEvidence: result.requiredEvidence,
         referencePass:
           result.referenceTarget === fixture.expected.referenceTarget,
         evidencePass: sameArray(
@@ -136,22 +168,26 @@ async function evaluateRouter(llm, config, model) {
           fixture.expected.requiredEvidence,
         ),
         latencyMs: Date.now() - startedAt,
-        calls: result.diagnostics?.semanticCalls ?? [],
+        calls: normalizeCalls(callLog.slice(callOffset)),
       });
     } catch (error) {
-      const calls = Array.isArray(error?.semanticCalls)
-        ? error.semanticCalls
-        : [];
       samples.push({
         id: fixture.id,
         success: false,
         strictPass: false,
         expectedIntent: fixture.expected.intent,
+        expectedReferenceTarget: fixture.expected.referenceTarget,
+        actualReferenceTarget: null,
+        expectedReelQuestionType: fixture.expected.reelQuestionType,
+        actualReelQuestionType: null,
+        expectedRequiredEvidence: fixture.expected.requiredEvidence,
+        actualRequiredEvidence: [],
         latencyMs: Date.now() - startedAt,
         errorCode: error?.causeCode || error?.code || error?.name || 'ERROR',
-        calls,
+        calls: normalizeCalls(callLog.slice(callOffset)),
       });
     }
+    if (accountLimited(samples.at(-1).calls)) break;
   }
   const expectedReel = samples.filter(
     (sample) => sample.expectedIntent === 'REEL_VIDEO_QUESTION',
@@ -206,6 +242,10 @@ async function evaluateRouter(llm, config, model) {
       samples.map((sample) => sample.latencyMs),
       0.5,
     ),
+    p90Ms: percentile(
+      samples.map((sample) => sample.latencyMs),
+      0.9,
+    ),
     p95Ms: percentile(
       samples.map((sample) => sample.latencyMs),
       0.95,
@@ -226,21 +266,59 @@ async function evaluateRouter(llm, config, model) {
         actualIntent: sample.actualIntent,
         errorCode: sample.errorCode,
       })),
+    samples,
+    stoppedReason: samples.some((sample) => accountLimited(sample.calls))
+      ? 'ACCOUNT_LIMITED'
+      : null,
   };
 }
 
-async function evaluateSufficiency(llm, config) {
+async function evaluateSufficiency(llm, config, callLog) {
   const useCase = new CheckContextSufficiencyUseCase(llm, config);
   const samples = [];
   for (const fixture of sufficiencyCases) {
     const startedAt = Date.now();
-    const result = await useCase.execute(stateForSufficiency(fixture));
-    samples.push({
-      id: fixture.id,
-      pass: result.sufficient === fixture.expectedSufficient,
-      providerStatus: result.diagnostics?.providerStatus,
-      latencyMs: Date.now() - startedAt,
-    });
+    const callOffset = callLog.length;
+    try {
+      const result = await useCase.execute(stateForSufficiency(fixture));
+      samples.push({
+        id: fixture.id,
+        success: true,
+        pass: result.sufficient === fixture.expectedSufficient,
+        expectedSufficient: fixture.expectedSufficient,
+        actualSufficient: result.sufficient,
+        expectedSupportedEvidenceIds:
+          fixture.expectedSufficient && fixture.evidence.length > 0
+            ? ['e0']
+            : [],
+        actualSupportedEvidenceIds: result.supportedEvidenceIds ?? [],
+        expectedRecommendedAction: fixture.expectedSufficient
+          ? 'ANSWER'
+          : 'REFUSE_NO_CONTEXT',
+        actualRecommendedAction: result.recommendedAction,
+        providerStatus: result.diagnostics?.providerStatus,
+        latencyMs: Date.now() - startedAt,
+        calls: normalizeCalls(callLog.slice(callOffset)),
+      });
+    } catch (error) {
+      samples.push({
+        id: fixture.id,
+        success: false,
+        pass: false,
+        expectedSufficient: fixture.expectedSufficient,
+        actualSufficient: null,
+        expectedSupportedEvidenceIds: [],
+        actualSupportedEvidenceIds: [],
+        expectedRecommendedAction: fixture.expectedSufficient
+          ? 'ANSWER'
+          : 'REFUSE_NO_CONTEXT',
+        actualRecommendedAction: null,
+        errorCode: error?.code || error?.name || 'ERROR',
+        latencyMs: Date.now() - startedAt,
+        calls: normalizeCalls(callLog.slice(callOffset)),
+      });
+    }
+    if (accountLimited(samples.at(-1).calls)) break;
   }
   return {
     mode: 'SUFFICIENCY',
@@ -252,6 +330,10 @@ async function evaluateSufficiency(llm, config) {
       samples.map((sample) => sample.latencyMs),
       0.5,
     ),
+    p90Ms: percentile(
+      samples.map((sample) => sample.latencyMs),
+      0.9,
+    ),
     p95Ms: percentile(
       samples.map((sample) => sample.latencyMs),
       0.95,
@@ -259,23 +341,64 @@ async function evaluateSufficiency(llm, config) {
     failures: samples
       .filter((sample) => !sample.pass)
       .map((sample) => sample.id),
+    samples,
+    stoppedReason: samples.some((sample) => accountLimited(sample.calls))
+      ? 'ACCOUNT_LIMITED'
+      : null,
   };
 }
 
-async function evaluateVerifier(llm, config) {
+async function evaluateVerifier(llm, config, callLog) {
   const useCase = new VerifierAgentUseCase(llm, config);
   const samples = [];
   for (const fixture of verifierCases) {
     const startedAt = Date.now();
-    const result = await useCase.verifyWithRole(
-      stateForVerifier(fixture),
-      'VERIFIER',
-    );
-    samples.push({
-      id: fixture.id,
-      pass: result.passed,
-      latencyMs: Date.now() - startedAt,
-    });
+    const callOffset = callLog.length;
+    try {
+      const result = await useCase.verifyWithRole(
+        stateForVerifier(fixture),
+        'VERIFIER',
+      );
+      samples.push({
+        id: fixture.id,
+        success: true,
+        expectedPassed: fixture.expectedPassed ?? true,
+        actualPassed: result.passed,
+        pass: result.passed === (fixture.expectedPassed ?? true),
+        expectedSupportedEvidenceIds: fixture.expectedSupportedEvidenceIds ?? [
+          'e0',
+        ],
+        actualSupportedEvidenceIds: [
+          ...new Set(
+            (result.supportedClaimMappings ?? []).flatMap(
+              (mapping) => mapping.evidenceIds ?? [],
+            ),
+          ),
+        ],
+        expectedContradiction: fixture.expectedContradiction ?? false,
+        actualContradiction: (result.contradictions ?? []).length > 0,
+        latencyMs: Date.now() - startedAt,
+        calls: normalizeCalls(callLog.slice(callOffset)),
+      });
+    } catch (error) {
+      samples.push({
+        id: fixture.id,
+        success: false,
+        expectedPassed: fixture.expectedPassed ?? true,
+        actualPassed: null,
+        pass: false,
+        expectedSupportedEvidenceIds: fixture.expectedSupportedEvidenceIds ?? [
+          'e0',
+        ],
+        actualSupportedEvidenceIds: [],
+        expectedContradiction: fixture.expectedContradiction ?? false,
+        actualContradiction: null,
+        errorCode: error?.code || error?.name || 'ERROR',
+        latencyMs: Date.now() - startedAt,
+        calls: normalizeCalls(callLog.slice(callOffset)),
+      });
+    }
+    if (accountLimited(samples.at(-1).calls)) break;
   }
   const latencies = samples.map((sample) => sample.latencyMs);
   return {
@@ -289,6 +412,10 @@ async function evaluateVerifier(llm, config) {
     failures: samples
       .filter((sample) => !sample.pass)
       .map((sample) => sample.id),
+    samples,
+    stoppedReason: samples.some((sample) => accountLimited(sample.calls))
+      ? 'ACCOUNT_LIMITED'
+      : null,
   };
 }
 
@@ -296,21 +423,35 @@ async function main() {
   dotenv.config({
     path: arg('--env-file') || path.join(ROOT, '.env.test.local'),
   });
+  if (!process.env.CLOUDFLARE_AI_GATEWAY_ID?.trim()) {
+    process.env.CLOUDFLARE_AI_GATEWAY_ENABLED = 'false';
+  }
   const mode = (arg('--mode') || '').toUpperCase();
   const configService = new ConfigService(process.env);
   const config = new AiApplicationConfigAdapter(configService);
   const llm = new CloudflareStructuredLlmAdapter(configService);
+  const callLog = [];
+  const generateObject = llm.generateObject.bind(llm);
+  llm.generateObject = async (input) =>
+    await generateObject({
+      ...input,
+      onDiagnostics: (diagnostics) => {
+        callLog.push(diagnostics);
+        input.onDiagnostics?.(diagnostics);
+      },
+    });
   const result =
     mode === 'ROUTER'
       ? await evaluateRouter(
           llm,
           config,
           arg('--model') || config.model('ROUTER'),
+          callLog,
         )
       : mode === 'SUFFICIENCY'
-        ? await evaluateSufficiency(llm, config)
+        ? await evaluateSufficiency(llm, config, callLog)
         : mode === 'VERIFIER'
-          ? await evaluateVerifier(llm, config)
+          ? await evaluateVerifier(llm, config, callLog)
           : (() => {
               throw new Error(
                 '--mode must be ROUTER, SUFFICIENCY, or VERIFIER',

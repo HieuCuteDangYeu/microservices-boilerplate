@@ -11,13 +11,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-from rag_eval.adapters.cloudflare_judge import build_live_judge, classify_capacity_error
+from rag_eval.adapters.cloudflare_judge import (
+    build_capacity_client,
+    build_live_judge,
+    capacity_message_class,
+    classify_capacity_error,
+)
 from rag_eval.adapters.runner_output import (
     fixture_execution,
     invoke_typescript_runner,
     load_runner_report,
 )
 from rag_eval.compare import compare_files
+from rag_eval.control_plane import run_control_plane
 from rag_eval.dataset import ROOT, load_dataset
 from rag_eval.experiment import rag_experiment
 from rag_eval.reports import build_summary, load_cases, write_report
@@ -162,14 +168,14 @@ def run_compare(args: argparse.Namespace) -> None:
     print(json.dumps(comparison, indent=2, sort_keys=True))
 
 
-def run_capacity_check(args: argparse.Namespace) -> None:
+async def run_capacity_check(args: argparse.Namespace) -> None:
     if not args.confirm_one_call and os.getenv("RAG_EVAL_CAPACITY_CHECK_CONFIRM") != "YES":
         raise SystemExit(
             "capacity check requires --confirm-one-call and performs exactly one provider call"
         )
-    _suite, client, model = build_live_judge()
+    client, model = build_capacity_client()
     try:
-        client.chat.completions.create(
+        await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "Reply OK."}],
             max_tokens=2,
@@ -178,12 +184,37 @@ def run_capacity_check(args: argparse.Namespace) -> None:
     except Exception as error:
         status = getattr(error, "status_code", None)
         body = getattr(error, "body", {}) or {}
-        provider = body.get("error", body) if isinstance(body, dict) else {}
-        category = classify_capacity_error(
-            status, provider.get("code") if isinstance(provider, dict) else None, str(error)
-        )
-        print(f"CAPACITY_AVAILABLE=NO\nPROVIDER_CATEGORY={category}")
+        provider: Any = body
+        if isinstance(body, dict) and isinstance(body.get("error"), dict):
+            provider = body["error"]
+        elif isinstance(body, dict) and isinstance(body.get("errors"), list):
+            provider = body["errors"][0] if body["errors"] else {}
+        code = provider.get("code") if isinstance(provider, dict) else None
+        message = provider.get("message", "") if isinstance(provider, dict) else ""
+        category = classify_capacity_error(status, code, message)
+        response = getattr(error, "response", None)
+        retry_after = response.headers.get("retry-after") if response is not None else None
+        transient = category != "ACCOUNT_LIMITED" and status in {
+            408,
+            429,
+            500,
+            502,
+            503,
+            504,
+        }
+        print(f"CAPACITY_CHECK_STATUS=HTTP_{status or 'UNKNOWN'}")
+        print(f"CAPACITY_CHECK_PROVIDER_CODE={code if code is not None else 'null'}")
+        print(f"CAPACITY_CHECK_MESSAGE_CLASS={capacity_message_class(message)}")
+        print(f"CAPACITY_CHECK_RETRY_AFTER={retry_after or 'null'}")
+        print(f"CAPACITY_CHECK_TRANSIENT={str(transient).lower()}")
+        print("CAPACITY_AVAILABLE=NO")
+        print(f"PROVIDER_CATEGORY={category}")
         return
+    print("CAPACITY_CHECK_STATUS=HTTP_200")
+    print("CAPACITY_CHECK_PROVIDER_CODE=null")
+    print("CAPACITY_CHECK_MESSAGE_CLASS=SUCCESS")
+    print("CAPACITY_CHECK_RETRY_AFTER=null")
+    print("CAPACITY_CHECK_TRANSIENT=false")
     print("CAPACITY_AVAILABLE=YES")
 
 
@@ -217,6 +248,11 @@ def parser() -> argparse.ArgumentParser:
     compare.add_argument("--candidate", required=True)
     capacity = commands.add_parser("capacity-check")
     capacity.add_argument("--confirm-one-call", action="store_true")
+    control_plane = commands.add_parser("control-plane")
+    control_plane.add_argument("--mode", required=True)
+    control_plane.add_argument("--model", required=True)
+    control_plane.add_argument("--env-file", default=".env.test.local")
+    control_plane.add_argument("--run-id")
     return root
 
 
@@ -230,5 +266,11 @@ def main() -> None:
         run_report(args)
     elif args.command == "compare":
         run_compare(args)
+    elif args.command == "capacity-check":
+        asyncio.run(run_capacity_check(args))
     else:
-        run_capacity_check(args)
+        directory, summary = asyncio.run(
+            run_control_plane(args.mode, args.model, args.env_file, args.run_id)
+        )
+        print(json.dumps(summary, sort_keys=True))
+        print(f"CONTROL_PLANE_RAGAS_REPORT_PATH={directory}")

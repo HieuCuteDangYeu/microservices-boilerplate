@@ -35,7 +35,9 @@ pnpm eval:rag:capacity-check --confirm-one-call
 
 Offline mode uses explicit `FIXTURE` normalized results and never creates provider clients. Live mode is opt-in, invokes the existing TypeScript runner, refuses unsupported datasets, and evaluates only completed/reconciled rows. A failed or missing response remains in the denominator with a failure status; semantic metrics may be null.
 
-Capacity check makes exactly one cheap judge-model request and never launches a benchmark. It requires both explicit confirmation and the evaluation-specific Cloudflare variables. Do not repeat it while an account-limit response is already known.
+Capacity check makes exactly one cheap production-model request and never launches a benchmark. It requires explicit confirmation and Cloudflare credentials. Do not repeat it while an account-limit response is already known.
+
+The capacity check uses `RAG_EVAL_CAPACITY_MODEL` (default `@cf/openai/gpt-oss-20b`) through a separate no-retry client. It does not construct the Ragas judge, invoke the judge model, or call embeddings. Run production-model deterministic gates and persist normalized frozen execution results before invoking semantic judge metrics.
 
 ## Metrics and hard gates
 
