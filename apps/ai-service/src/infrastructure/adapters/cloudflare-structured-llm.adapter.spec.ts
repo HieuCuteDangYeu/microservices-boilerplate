@@ -71,9 +71,11 @@ describe('CloudflareStructuredLlmAdapter', () => {
   it('rejects parsed objects with unknown enum values or properties', async () => {
     const config = {
       getOrThrow: jest.fn().mockReturnValue('value'),
-      get: jest.fn().mockReturnValue('false'),
+      get: jest.fn((key: string) =>
+        key === 'CLOUDFLARE_AI_GATEWAY_ENABLED' ? 'true' : undefined,
+      ),
     };
-    jest.spyOn(global, 'fetch').mockResolvedValue({
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
         choices: [
@@ -101,6 +103,65 @@ describe('CloudflareStructuredLlmAdapter', () => {
         },
       }),
     ).rejects.toBeInstanceOf(StructuredCompletionSchemaError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures a safe schema path and constraint without the rejected value', async () => {
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('value'),
+      get: jest.fn().mockReturnValue('false'),
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: { content: '{"items":[{"id":"private-value-too-long"}]}' },
+          },
+        ],
+      }),
+    } as never);
+    const diagnostics = jest.fn();
+
+    await expect(
+      new CloudflareStructuredLlmAdapter(config as never).generateObject({
+        systemPrompt: 'Return JSON.',
+        userPrompt: 'Return an item.',
+        model: '@cf/test/structured',
+        schemaVersion: 'safe-v1',
+        onDiagnostics: diagnostics,
+        jsonSchema: {
+          type: 'object',
+          required: ['items'],
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['id'],
+                properties: { id: { type: 'string', maxLength: 8 } },
+              },
+            },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      path: '$.items[0].id',
+      constraint: 'maxLength',
+      schemaVersion: 'safe-v1',
+    });
+    expect(diagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaPath: '$.items[0].id',
+        schemaConstraint: 'maxLength',
+        schemaVersion: 'safe-v1',
+      }),
+    );
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toContain(
+      'private-value-too-long',
+    );
   });
 
   it.each([
@@ -227,6 +288,116 @@ describe('CloudflareStructuredLlmAdapter', () => {
   );
 
   it.each([
+    [3036, false, 'ACCOUNT_LIMITED'],
+    [3040, true, 'OUT_OF_CAPACITY'],
+  ])(
+    'classifies Cloudflare 429 code %i with transient=%s and category=%s',
+    async (providerCode, transient, providerCategory) => {
+      const config = {
+        getOrThrow: jest.fn().mockReturnValue('value'),
+        get: jest.fn().mockReturnValue('false'),
+      };
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: {
+          get: jest.fn((name: string) =>
+            name === 'retry-after'
+              ? '2'
+              : name === 'cf-ray'
+                ? 'safe-ray-id'
+                : null,
+          ),
+        },
+        json: jest.fn().mockResolvedValue({
+          errors: [{ code: providerCode, message: 'redacted provider detail' }],
+        }),
+      } as never);
+      const diagnostics = jest.fn();
+
+      await expect(
+        new CloudflareStructuredLlmAdapter(config as never).generateObject({
+          systemPrompt: 'Return JSON.',
+          userPrompt: 'Set passed.',
+          model: '@cf/test/structured',
+          onDiagnostics: diagnostics,
+          jsonSchema: { type: 'object', properties: {} },
+        }),
+      ).rejects.toMatchObject({
+        status: 429,
+        providerCode,
+        providerCategory,
+        retryAfterMs: 2_000,
+        requestId: 'safe-ray-id',
+        transient,
+      });
+      expect(diagnostics).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerCode,
+          providerCategory,
+          retryAfterMs: 2_000,
+          requestId: 'safe-ray-id',
+          transient,
+        }),
+      );
+    },
+  );
+
+  it.each([408, 500, 502, 503, 504])(
+    'classifies HTTP %i as a transient provider failure',
+    async (status) => {
+      const config = {
+        getOrThrow: jest.fn().mockReturnValue('value'),
+        get: jest.fn().mockReturnValue('false'),
+      };
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status,
+        headers: { get: jest.fn().mockReturnValue(null) },
+        json: jest.fn().mockResolvedValue({ errors: [] }),
+      } as never);
+
+      await expect(
+        new CloudflareStructuredLlmAdapter(config as never).generateObject({
+          systemPrompt: 'Return JSON.',
+          userPrompt: 'Set passed.',
+          model: '@cf/test/structured',
+          jsonSchema: { type: 'object', properties: {} },
+        }),
+      ).rejects.toMatchObject({ status, transient: true });
+    },
+  );
+
+  it('classifies a network failure as transient without exposing its detail', async () => {
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('value'),
+      get: jest.fn().mockReturnValue('false'),
+    };
+    jest
+      .spyOn(global, 'fetch')
+      .mockRejectedValue(new Error('private network detail'));
+    const diagnostics = jest.fn();
+
+    const request = new CloudflareStructuredLlmAdapter(
+      config as never,
+    ).generateObject({
+      systemPrompt: 'Return JSON.',
+      userPrompt: 'Set passed.',
+      model: '@cf/test/structured',
+      onDiagnostics: diagnostics,
+      jsonSchema: { type: 'object', properties: {} },
+    });
+    await expect(request).rejects.toMatchObject({ transient: true });
+    await expect(request).rejects.not.toThrow('private network detail');
+    expect(diagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerStatus: 'NETWORK_ERROR',
+        transient: true,
+      }),
+    );
+  });
+
+  it.each([
     [500, 500],
     [45_000, 45_000],
     [60_000, 60_000],
@@ -248,11 +419,13 @@ describe('CloudflareStructuredLlmAdapter', () => {
           }),
       );
       const adapter = new CloudflareStructuredLlmAdapter(config as never);
+      const diagnostics = jest.fn();
       const request = adapter.generateObject({
         systemPrompt: 'Return JSON.',
         userPrompt: 'Set passed.',
         model: '@cf/test/structured',
         timeoutMs: requestedTimeout,
+        onDiagnostics: diagnostics,
         jsonSchema: { type: 'object', properties: {} },
       });
 
@@ -261,6 +434,13 @@ describe('CloudflareStructuredLlmAdapter', () => {
         name: StructuredCompletionTimeoutError.name,
         timeoutMs: expectedTimeout,
       });
+      expect(diagnostics).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerStatus: 'TIMEOUT',
+          transient: true,
+          providerCategory: 'TRANSIENT_PROVIDER_FAILURE',
+        }),
+      );
       jest.useRealTimers();
     },
   );
@@ -268,7 +448,9 @@ describe('CloudflareStructuredLlmAdapter', () => {
   it('uses max_completion_tokens without deprecated max_tokens', async () => {
     const config = {
       getOrThrow: jest.fn().mockReturnValue('value'),
-      get: jest.fn().mockReturnValue('false'),
+      get: jest.fn((key: string) =>
+        key === 'CLOUDFLARE_AI_GATEWAY_ENABLED' ? 'true' : undefined,
+      ),
     };
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
@@ -298,5 +480,10 @@ describe('CloudflareStructuredLlmAdapter', () => {
     const body = JSON.parse(requestBody as string) as Record<string, unknown>;
     expect(body).toMatchObject({ max_completion_tokens: 768 });
     expect(body).not.toHaveProperty('max_tokens');
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'cf-aig-max-attempts': '1',
+      'cf-aig-retry-delay': '250',
+      'cf-aig-backoff': 'exponential',
+    });
   });
 });

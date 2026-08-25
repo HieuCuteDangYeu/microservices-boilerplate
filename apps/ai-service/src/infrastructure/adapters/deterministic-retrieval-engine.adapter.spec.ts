@@ -18,6 +18,7 @@ import { DeterministicRetrievalEngineAdapter } from './deterministic-retrieval-e
 
 const transcriptRoute: RagChatRouteDecision = {
   intent: 'REEL_VIDEO_QUESTION',
+  referenceTarget: 'SHARED_REEL',
   needsRetrieval: true,
   needsUserMemory: false,
   needsConversationSummary: false,

@@ -5,6 +5,13 @@ export interface StructuredLlmJsonSchema {
   additionalProperties?: boolean;
 }
 
+export type StructuredProviderFailureCategory =
+  | 'ACCOUNT_LIMITED'
+  | 'OUT_OF_CAPACITY'
+  | 'RATE_LIMITED'
+  | 'TRANSIENT_PROVIDER_FAILURE'
+  | 'UNKNOWN_PROVIDER_FAILURE';
+
 export interface StructuredLlmCallDiagnostics {
   modelRole?: string;
   model: string;
@@ -20,6 +27,14 @@ export interface StructuredLlmCallDiagnostics {
     totalTokens?: number;
   };
   errorCode?: string;
+  providerCode?: number;
+  providerCategory?: StructuredProviderFailureCategory;
+  retryAfterMs?: number;
+  requestId?: string;
+  transient?: boolean;
+  schemaPath?: string;
+  schemaConstraint?: string;
+  schemaVersion?: string;
 }
 
 export interface GenerateStructuredObjectInput {
@@ -31,6 +46,7 @@ export interface GenerateStructuredObjectInput {
   temperature?: number;
   timeoutMs?: number;
   modelRole?: string;
+  schemaVersion?: string;
   attempt?: number;
   onDiagnostics?: (diagnostics: StructuredLlmCallDiagnostics) => void;
 }

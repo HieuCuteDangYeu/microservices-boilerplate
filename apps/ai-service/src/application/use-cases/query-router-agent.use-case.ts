@@ -3,7 +3,9 @@ import type {
   RagChatIntent,
   RagChatRouteDecision,
   RagRecommendationAction,
+  RagReferenceTarget,
   RagReelQuestionType,
+  RagRouterReferentContext,
   RagRequiredEvidence,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type {
@@ -15,6 +17,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 
 interface RawRouteDecision {
   intent?: unknown;
+  referenceTarget?: unknown;
   needsRetrieval?: unknown;
   needsUserMemory?: unknown;
   needsConversationSummary?: unknown;
@@ -30,9 +33,21 @@ type RawRecord = Record<string, unknown>;
 export class RouterUnavailableError extends Error {
   readonly code = 'ROUTER_UNAVAILABLE';
 
-  constructor() {
+  constructor(
+    readonly semanticCalls: StructuredLlmCallDiagnostics[] = [],
+    readonly causeCode?: string,
+  ) {
     super('Semantic router is temporarily unavailable');
     this.name = 'RouterUnavailableError';
+  }
+}
+
+export class RouterSemanticInconsistencyError extends Error {
+  readonly code = 'ROUTER_SEMANTIC_INCONSISTENT';
+
+  constructor() {
+    super('Semantic router returned an internally inconsistent referent');
+    this.name = 'RouterSemanticInconsistencyError';
   }
 }
 
@@ -46,6 +61,13 @@ export class QueryRouterAgentUseCase {
     'CONVERSATION_MEMORY_QUESTION',
     'USER_MEMORY_QUESTION',
     'TASK_ACTION_REQUEST',
+  ]);
+
+  private readonly validReferenceTargets = new Set<RagReferenceTarget>([
+    'NONE',
+    'SHARED_REEL',
+    'CONVERSATION',
+    'USER_MEMORY',
   ]);
 
   private readonly validReelQuestionTypes = new Set<RagReelQuestionType>([
@@ -79,6 +101,7 @@ export class QueryRouterAgentUseCase {
     recentHistory?: string;
     hasSharedReelContext?: boolean;
     sharedReelCount?: number;
+    referentContext?: RagRouterReferentContext;
   }): Promise<RagChatRouteDecision> {
     if (!input.message.trim()) {
       return {
@@ -97,16 +120,28 @@ export class QueryRouterAgentUseCase {
     const primaryModel = this.config.model('ROUTER');
 
     try {
-      const result = await this.routeWithModel({
+      const result = this.normalize(
+        await this.routeWithModel({
+          input,
+          model: primaryModel,
+          attempt: 1,
+          semanticCalls,
+          timeoutMs: this.config.timeoutMs('ROUTER'),
+        }),
         input,
-        model: primaryModel,
-        attempt: 1,
-        semanticCalls,
-        timeoutMs: this.config.timeoutMs('ROUTER'),
-      });
+      );
+
+      if (this.needsReferentReconciliation(result, input)) {
+        return await this.routeWithFallback({
+          input,
+          semanticCalls,
+          primaryResult: result,
+          reason: 'STRUCTURAL_REFERENT_AMBIGUITY',
+        });
+      }
 
       return {
-        ...this.normalize(result),
+        ...result,
         diagnostics: {
           modelRole: 'ROUTER',
           model: primaryModel,
@@ -117,29 +152,48 @@ export class QueryRouterAgentUseCase {
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!this.isTransientProviderFailure(error)) {
+      if (!this.isFallbackEligible(error)) {
         this.logger.warn(
           `[QueryRouterAgent] semantic routing failed: ${message}`,
         );
         throw error;
       }
 
-      const fallbackModel = this.config
-        .get<string>('AI_ROUTER_FALLBACK_MODEL')
-        ?.trim();
-      if (!fallbackModel) {
-        this.logger.warn(
-          `[QueryRouterAgent] transient primary failure without fallback: ${message}`,
-        );
-        throw new RouterUnavailableError();
-      }
+      return await this.routeWithFallback({
+        input,
+        semanticCalls,
+        reason:
+          error instanceof RouterSemanticInconsistencyError
+            ? 'PRIMARY_SEMANTIC_INCONSISTENCY'
+            : 'PRIMARY_PROVIDER_FAILURE',
+      });
+    }
+  }
 
-      try {
-        const result = await this.routeWithModel({
-          input,
+  private async routeWithFallback(input: {
+    input: Parameters<QueryRouterAgentUseCase['execute']>[0];
+    semanticCalls: StructuredLlmCallDiagnostics[];
+    primaryResult?: RagChatRouteDecision;
+    reason: string;
+  }): Promise<RagChatRouteDecision> {
+    const fallbackModel = this.config
+      .get<string>('AI_ROUTER_FALLBACK_MODEL')
+      ?.trim();
+    if (!fallbackModel) {
+      if (input.primaryResult) return input.primaryResult;
+      throw new RouterUnavailableError(
+        input.semanticCalls,
+        input.semanticCalls.at(-1)?.errorCode,
+      );
+    }
+
+    try {
+      const result = this.normalize(
+        await this.routeWithModel({
+          input: input.input,
           model: fallbackModel,
           attempt: 2,
-          semanticCalls,
+          semanticCalls: input.semanticCalls,
           timeoutMs: Math.round(
             this.config.number(
               'AI_ROUTER_FALLBACK_TIMEOUT_MS',
@@ -148,28 +202,37 @@ export class QueryRouterAgentUseCase {
               120_000,
             ),
           ),
-        });
-        return {
-          ...this.normalize(result),
-          diagnostics: {
-            modelRole: 'ROUTER',
-            model: fallbackModel,
-            providerStatus: 'SUCCESS',
-            decisionSource: 'LLM_FALLBACK',
-            semanticCalls,
-          },
-        };
-      } catch (fallbackError: unknown) {
-        const fallbackMessage =
-          fallbackError instanceof Error
-            ? fallbackError.message
-            : String(fallbackError);
-        this.logger.warn(
-          `[QueryRouterAgent] bounded semantic fallback failed: ${fallbackMessage}`,
-        );
-        throw new RouterUnavailableError();
-      }
+        }),
+        input.input,
+      );
+      return {
+        ...result,
+        diagnostics: {
+          modelRole: 'ROUTER',
+          model: fallbackModel,
+          providerStatus: 'SUCCESS',
+          decisionSource: 'LLM_FALLBACK',
+          semanticCalls: input.semanticCalls,
+          fallbackReason: input.reason,
+        },
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[QueryRouterAgent] bounded semantic fallback failed: ${message}`,
+      );
+      throw new RouterUnavailableError(
+        input.semanticCalls,
+        this.errorCode(error),
+      );
     }
+  }
+
+  private errorCode(error: unknown): string | undefined {
+    if (!error || typeof error !== 'object' || !('code' in error)) {
+      return undefined;
+    }
+    return typeof error.code === 'string' ? error.code : undefined;
   }
 
   private async routeWithModel(input: {
@@ -178,6 +241,7 @@ export class QueryRouterAgentUseCase {
       recentHistory?: string;
       hasSharedReelContext?: boolean;
       sharedReelCount?: number;
+      referentContext?: RagRouterReferentContext;
     };
     model: string;
     attempt: number;
@@ -198,18 +262,27 @@ export class QueryRouterAgentUseCase {
     });
   }
 
-  private isTransientProviderFailure(error: unknown): boolean {
+  private isFallbackEligible(error: unknown): boolean {
     if (!error || typeof error !== 'object' || !('code' in error)) return false;
+    if (
+      error.code === 'STRUCTURED_COMPLETION_PROVIDER_ERROR' &&
+      'transient' in error &&
+      error.transient === false
+    ) {
+      return false;
+    }
     return (
       error.code === 'STRUCTURED_COMPLETION_TIMEOUT' ||
-      error.code === 'STRUCTURED_COMPLETION_PROVIDER_ERROR'
+      error.code === 'STRUCTURED_COMPLETION_PROVIDER_ERROR' ||
+      error.code === 'STRUCTURED_COMPLETION_SCHEMA_INVALID' ||
+      error.code === 'ROUTER_SEMANTIC_INCONSISTENT'
     );
   }
 
   private buildSystemPrompt(): string {
     return `
 You route Velora AI messages by meaning. Return only schema-valid JSON and never answer the user.
-Output exactly these top-level fields and no others: intent, needsRetrieval, needsUserMemory, needsConversationSummary, needsVerification, reelQuestionType, requiredEvidence, recommendationAction, reason. recommendationAction must contain exactly: type, query, minRelevantItems, allowPersonalizedFallback, suggestedQueries, reason.
+Output exactly these top-level fields and no others: intent, referenceTarget, needsRetrieval, needsUserMemory, needsConversationSummary, needsVerification, reelQuestionType, requiredEvidence, recommendationAction, reason. recommendationAction must contain exactly: type, query, minRelevantItems, allowPersonalizedFallback, suggestedQueries, reason.
 
 Intent meanings:
 - NORMAL_CHAT: general conversation, coding help, app discussion, clarification, recommendation/discovery requests, or normal assistant chat.
@@ -217,6 +290,12 @@ Intent meanings:
 - CONVERSATION_MEMORY_QUESTION: the user asks what happened earlier in this conversation.
 - USER_MEMORY_QUESTION: the user asks about stable facts, preferences, profile, or remembered user information.
 - TASK_ACTION_REQUEST: the user asks the system to perform an external action or tool operation.
+
+Reference target meanings:
+- NONE: the current message does not semantically refer to shared media, conversation history, or user memory.
+- SHARED_REEL: the meaning of the current message depends on reel/video/media shared in this conversation, including implicit factual follow-ups.
+- CONVERSATION: the user asks about earlier turns or events in this conversation.
+- USER_MEMORY: the user asks about stable remembered facts or preferences about the user.
 
 Reel question type meanings:
 - NONE: not a question about a shared reel/video.
@@ -248,6 +327,8 @@ Invariants:
 - RECOMMEND_REELS is only for explicit content discovery. Use a clean topic query; broad discovery may allow personalized fallback, topic-specific discovery may not.
 - SUGGEST_QUERIES is only for requested search terms. Otherwise recommendationAction is NONE.
 - Do not invent context or use keyword/regex routing.
+- Structural event metadata says what happened, not what the current message means. A recent reel share is evidence for resolving an implicit referent, but unrelated chat remains NORMAL_CHAT with referenceTarget=NONE.
+- referenceTarget=SHARED_REEL requires intent=REEL_VIDEO_QUESTION. CONVERSATION requires CONVERSATION_MEMORY_QUESTION. USER_MEMORY requires USER_MEMORY_QUESTION. All other routes use NONE.
 `.trim();
   }
 
@@ -256,6 +337,7 @@ Invariants:
     recentHistory?: string;
     hasSharedReelContext?: boolean;
     sharedReelCount?: number;
+    referentContext?: RagRouterReferentContext;
   }): string {
     return `
 Current user message:
@@ -263,6 +345,16 @@ ${input.message}
 
 Shared reel context:
 ${input.hasSharedReelContext ? `AVAILABLE (${input.sharedReelCount ?? 0} accessible reel${input.sharedReelCount === 1 ? '' : 's'})` : 'NOT AVAILABLE'}
+
+Structural referent context (contains no reel IDs and does not decide meaning):
+${JSON.stringify(
+  input.referentContext ?? {
+    conversationHasSharedReelContext: input.hasSharedReelContext ?? false,
+    accessibleSharedReelCount: input.sharedReelCount ?? 0,
+    recentShareEvent: false,
+    recentEventTypes: [],
+  },
+)}
 
 Recent conversation context:
 ${input.recentHistory || '(empty)'}
@@ -277,6 +369,7 @@ Classify the current user message.
       additionalProperties: false,
       required: [
         'intent',
+        'referenceTarget',
         'needsRetrieval',
         'needsUserMemory',
         'needsConversationSummary',
@@ -296,6 +389,10 @@ Classify the current user message.
             'USER_MEMORY_QUESTION',
             'TASK_ACTION_REQUEST',
           ],
+        },
+        referenceTarget: {
+          type: 'string',
+          enum: ['NONE', 'SHARED_REEL', 'CONVERSATION', 'USER_MEMORY'],
         },
         needsRetrieval: { type: 'boolean' },
         needsUserMemory: { type: 'boolean' },
@@ -360,8 +457,17 @@ Classify the current user message.
     };
   }
 
-  private normalize(raw: RawRouteDecision): RagChatRouteDecision {
+  private normalize(
+    raw: RawRouteDecision,
+    input: { hasSharedReelContext?: boolean },
+  ): RagChatRouteDecision {
     const intent = this.normalizeIntent(raw.intent);
+    const referenceTarget = this.normalizeReferenceTarget(raw.referenceTarget);
+    this.validateReferentConsistency(
+      intent,
+      referenceTarget,
+      input.hasSharedReelContext ?? false,
+    );
     const reelQuestionType = this.normalizeReelQuestionType(
       raw.reelQuestionType,
       intent,
@@ -375,6 +481,7 @@ Classify the current user message.
 
     return {
       intent,
+      referenceTarget,
       needsRetrieval: this.normalizeNeedsRetrieval(
         raw.needsRetrieval,
         intent,
@@ -403,6 +510,46 @@ Classify the current user message.
           ? raw.reason.trim()
           : 'No router reason provided.',
     };
+  }
+
+  private normalizeReferenceTarget(value: unknown): RagReferenceTarget {
+    if (
+      typeof value === 'string' &&
+      this.validReferenceTargets.has(value as RagReferenceTarget)
+    ) {
+      return value as RagReferenceTarget;
+    }
+    throw new RouterSemanticInconsistencyError();
+  }
+
+  private validateReferentConsistency(
+    intent: RagChatIntent,
+    referenceTarget: RagReferenceTarget,
+    hasSharedReelContext: boolean,
+  ): void {
+    const expected: Record<RagChatIntent, RagReferenceTarget> = {
+      NORMAL_CHAT: 'NONE',
+      REEL_VIDEO_QUESTION: 'SHARED_REEL',
+      CONVERSATION_MEMORY_QUESTION: 'CONVERSATION',
+      USER_MEMORY_QUESTION: 'USER_MEMORY',
+      TASK_ACTION_REQUEST: 'NONE',
+    };
+    if (
+      referenceTarget !== expected[intent] ||
+      (referenceTarget === 'SHARED_REEL' && !hasSharedReelContext)
+    ) {
+      throw new RouterSemanticInconsistencyError();
+    }
+  }
+
+  private needsReferentReconciliation(
+    route: RagChatRouteDecision,
+    input: { referentContext?: RagRouterReferentContext },
+  ): boolean {
+    return Boolean(
+      input.referentContext?.recentShareEvent &&
+      route.referenceTarget === 'NONE',
+    );
   }
 
   private normalizeIntent(value: unknown): RagChatIntent {
@@ -745,6 +892,7 @@ Classify the current user message.
   private createNormalChatRoute(reason: string): RagChatRouteDecision {
     return {
       intent: 'NORMAL_CHAT',
+      referenceTarget: 'NONE',
       needsRetrieval: false,
       needsUserMemory: true,
       needsConversationSummary: true,

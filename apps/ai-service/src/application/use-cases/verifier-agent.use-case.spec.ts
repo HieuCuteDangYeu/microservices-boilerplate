@@ -144,6 +144,51 @@ describe('VerifierAgentUseCase', () => {
     );
   });
 
+  it('escalates exactly once after a transient primary provider failure', async () => {
+    const timeout = Object.assign(new Error('primary timeout'), {
+      code: 'STRUCTURED_COMPLETION_TIMEOUT',
+    });
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockRejectedValueOnce(timeout)
+        .mockResolvedValueOnce(result()),
+    };
+
+    await expect(
+      new VerifierAgentUseCase(service as never, config).execute(
+        state({ evidenceText: 'The zorb is linked to the quasar.' }),
+      ),
+    ).resolves.toMatchObject({
+      passed: true,
+      diagnostics: {
+        modelRole: 'VERIFIER_ESCALATION',
+        escalationReason: 'PRIMARY_PROVIDER_FAILURE',
+        escalated: true,
+      },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not escalate a non-transient account-limited provider failure', async () => {
+    const limited = Object.assign(new Error('account limited'), {
+      code: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+      transient: false,
+      providerCode: 3036,
+    });
+    const service = { generateObject: jest.fn().mockRejectedValue(limited) };
+
+    await expect(
+      new VerifierAgentUseCase(service as never, config).execute(
+        state({ evidenceText: 'Potential evidence.' }),
+      ),
+    ).resolves.toMatchObject({
+      passed: false,
+      diagnostics: { decisionSource: 'FAIL_CLOSED' },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(1);
+  });
+
   it('escalates a low-confidence primary acceptance', async () => {
     const service = {
       generateObject: jest

@@ -23,11 +23,13 @@ export class BuildCompletedTurnMemoryContextUseCase {
         role: userRole,
         content: input.userMessage.content?.trim() ?? '',
         createdAt: input.userMessage.createdAt.toISOString(),
+        eventType: 'TEXT' as const,
       },
       {
         role: assistantRole,
         content: input.assistantMessage.content?.trim() ?? '',
         createdAt: input.assistantMessage.createdAt.toISOString(),
+        eventType: 'TEXT' as const,
       },
     ]
       .filter((message) => message.content.length > 0)

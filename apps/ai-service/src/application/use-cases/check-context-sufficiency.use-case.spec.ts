@@ -108,8 +108,19 @@ describe('CheckContextSufficiencyUseCase', () => {
           model: '@cf/test/sufficiency',
           timeoutMs: 6_000,
           temperature: 0,
+          schemaVersion: 'context-sufficiency-v2',
         }),
       );
+      const schema = service.generateObject.mock.calls[0][0].jsonSchema;
+      expect(schema.required).not.toEqual(
+        expect.arrayContaining(['availableEvidence', 'missingEvidence']),
+      );
+      expect(schema.properties).toMatchObject({
+        confidence: { minimum: 0, maximum: 1 },
+        supportedEvidenceIds: { maxItems: 8 },
+        reason: { maxLength: 400 },
+        userFacingReason: { maxLength: 300 },
+      });
     },
   );
 

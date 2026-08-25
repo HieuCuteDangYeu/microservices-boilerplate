@@ -1,4 +1,5 @@
 import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
+import type { GenerateStructuredObjectInput } from '@ai/domain/interfaces/structured-llm.service.interface';
 import {
   QueryRouterAgentUseCase,
   RouterUnavailableError,
@@ -13,25 +14,38 @@ describe('QueryRouterAgentUseCase', () => {
     number: jest.fn((_key: string, fallback: number) => fallback),
   } as unknown as IAiApplicationConfig;
 
-  const response = (overrides: Record<string, unknown> = {}) => ({
-    intent: 'NORMAL_CHAT',
-    needsRetrieval: false,
-    needsUserMemory: false,
-    needsConversationSummary: false,
-    needsVerification: false,
-    reelQuestionType: 'NONE',
-    requiredEvidence: ['NONE'],
-    recommendationAction: {
-      type: 'NONE',
-      query: '',
-      minRelevantItems: 2,
-      allowPersonalizedFallback: false,
-      suggestedQueries: [],
-      reason: 'No discovery request.',
-    },
-    reason: 'Semantic classification.',
-    ...overrides,
-  });
+  const response = (overrides: Record<string, unknown> = {}) => {
+    const intent =
+      typeof overrides.intent === 'string' ? overrides.intent : 'NORMAL_CHAT';
+    const referenceTarget =
+      intent === 'REEL_VIDEO_QUESTION'
+        ? 'SHARED_REEL'
+        : intent === 'CONVERSATION_MEMORY_QUESTION'
+          ? 'CONVERSATION'
+          : intent === 'USER_MEMORY_QUESTION'
+            ? 'USER_MEMORY'
+            : 'NONE';
+    return {
+      intent,
+      referenceTarget,
+      needsRetrieval: false,
+      needsUserMemory: false,
+      needsConversationSummary: false,
+      needsVerification: false,
+      reelQuestionType: 'NONE',
+      requiredEvidence: ['NONE'],
+      recommendationAction: {
+        type: 'NONE',
+        query: '',
+        minRelevantItems: 2,
+        allowPersonalizedFallback: false,
+        suggestedQueries: [],
+        reason: 'No discovery request.',
+      },
+      reason: 'Semantic classification.',
+      ...overrides,
+    };
+  };
 
   it.each([
     [
@@ -111,7 +125,10 @@ describe('QueryRouterAgentUseCase', () => {
     );
 
     await expect(
-      useCase.execute({ message: 'Inspect the shared medium.' }),
+      useCase.execute({
+        message: 'Inspect the shared medium.',
+        hasSharedReelContext: true,
+      }),
     ).resolves.toMatchObject({
       requiredEvidence: ['VISUAL'],
       recommendationAction: { type: 'NONE' },
@@ -225,17 +242,135 @@ describe('QueryRouterAgentUseCase', () => {
     });
   });
 
+  it('does not fallback after a non-transient account limit', async () => {
+    const limited = Object.assign(new Error('account limited'), {
+      code: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+      transient: false,
+      providerCode: 3036,
+    });
+    const service = { generateObject: jest.fn().mockRejectedValue(limited) };
+    const fallbackConfig = {
+      ...config,
+      get: jest.fn((key: string) =>
+        key === 'AI_ROUTER_FALLBACK_MODEL' ? '@cf/test/fallback' : undefined,
+      ),
+    } as unknown as IAiApplicationConfig;
+
+    await expect(
+      new QueryRouterAgentUseCase(service as never, fallbackConfig).execute({
+        message: 'What did the shared clip say?',
+      }),
+    ).rejects.toBe(limited);
+    expect(service.generateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the secondary semantic router for an unresolved recent-share referent', async () => {
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockResolvedValueOnce(response())
+        .mockResolvedValueOnce(
+          response({
+            intent: 'REEL_VIDEO_QUESTION',
+            referenceTarget: 'SHARED_REEL',
+            needsRetrieval: true,
+            needsVerification: true,
+            reelQuestionType: 'TRANSCRIPT_CONTENT',
+            requiredEvidence: ['TRANSCRIPT'],
+          }),
+        ),
+    };
+    const fallbackConfig = {
+      ...config,
+      get: jest.fn((key: string) =>
+        key === 'AI_ROUTER_FALLBACK_MODEL' ? '@cf/test/secondary' : undefined,
+      ),
+    } as unknown as IAiApplicationConfig;
+
+    await expect(
+      new QueryRouterAgentUseCase(service as never, fallbackConfig).execute({
+        message: 'How does the asserted relation follow?',
+        hasSharedReelContext: true,
+        referentContext: {
+          conversationHasSharedReelContext: true,
+          accessibleSharedReelCount: 2,
+          recentShareEvent: true,
+          turnsSinceRecentShare: 0,
+          recentEventTypes: ['REEL_SHARE'],
+        },
+      }),
+    ).resolves.toMatchObject({
+      intent: 'REEL_VIDEO_QUESTION',
+      referenceTarget: 'SHARED_REEL',
+      diagnostics: {
+        decisionSource: 'LLM_FALLBACK',
+        fallbackReason: 'STRUCTURAL_REFERENT_AMBIGUITY',
+      },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not force reel routing when both semantic routers resolve unrelated chat', async () => {
+    const service = { generateObject: jest.fn().mockResolvedValue(response()) };
+    const fallbackConfig = {
+      ...config,
+      get: jest.fn((key: string) =>
+        key === 'AI_ROUTER_FALLBACK_MODEL' ? '@cf/test/secondary' : undefined,
+      ),
+    } as unknown as IAiApplicationConfig;
+
+    await expect(
+      new QueryRouterAgentUseCase(service as never, fallbackConfig).execute({
+        message: 'Design a generic dependency boundary.',
+        hasSharedReelContext: true,
+        referentContext: {
+          conversationHasSharedReelContext: true,
+          accessibleSharedReelCount: 1,
+          recentShareEvent: true,
+          turnsSinceRecentShare: 0,
+          recentEventTypes: ['REEL_SHARE'],
+        },
+      }),
+    ).resolves.toMatchObject({
+      intent: 'NORMAL_CHAT',
+      referenceTarget: 'NONE',
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
   it('returns typed unavailable after bounded transient failure', async () => {
     const transient = Object.assign(new Error('provider unavailable'), {
       code: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
     });
+    const diagnostics = {
+      model: '@cf/test/router',
+      providerStatus: 503 as const,
+      latencyMs: 10,
+      configuredTimeoutMs: 1_000,
+      configuredMaxCompletionTokens: 100,
+      attempt: 1,
+      errorCode: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+      transient: true,
+    };
     const useCase = new QueryRouterAgentUseCase(
-      { generateObject: jest.fn().mockRejectedValue(transient) } as never,
+      {
+        generateObject: jest
+          .fn()
+          .mockImplementation((input: GenerateStructuredObjectInput) => {
+            input.onDiagnostics?.(diagnostics);
+            throw transient;
+          }),
+      } as never,
       config,
     );
 
-    await expect(
-      useCase.execute({ message: 'Novel shared-media question.' }),
-    ).rejects.toBeInstanceOf(RouterUnavailableError);
+    const failure = useCase.execute({
+      message: 'Novel shared-media question.',
+    });
+    await expect(failure).rejects.toBeInstanceOf(RouterUnavailableError);
+    await expect(failure).rejects.toMatchObject({
+      causeCode: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+      semanticCalls: [diagnostics],
+    });
   });
 });

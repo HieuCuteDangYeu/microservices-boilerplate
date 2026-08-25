@@ -51,18 +51,41 @@ export class VerifierAgentUseCase {
       };
     }
 
-    try {
-      const primary = await this.verifyWithRole(state, 'VERIFIER');
-      const escalationReason = this.escalationReason(primary, state);
-      const maxAttempts = Math.round(
-        this.config.number('AI_VERIFIER_MAX_ATTEMPTS', 2, 1, 2),
-      );
+    const maxAttempts = Math.round(
+      this.config.number('AI_VERIFIER_MAX_ATTEMPTS', 2, 1, 2),
+    );
+    const escalationEnabled =
+      maxAttempts >= 2 &&
+      this.config.boolean('AI_VERIFIER_ESCALATION_ENABLED', true);
 
-      if (
-        escalationReason &&
-        maxAttempts >= 2 &&
-        this.config.boolean('AI_VERIFIER_ESCALATION_ENABLED', true)
-      ) {
+    let primary: RagVerificationResult;
+    try {
+      primary = await this.verifyWithRole(state, 'VERIFIER');
+    } catch (primaryError: unknown) {
+      if (escalationEnabled && this.isTransientProviderFailure(primaryError)) {
+        try {
+          const escalated = await this.verifyWithRole(
+            state,
+            'VERIFIER_ESCALATION',
+          );
+          return this.withDiagnostics(escalated, {
+            role: 'VERIFIER_ESCALATION',
+            source: 'LLM_ESCALATION',
+            escalated: true,
+            escalationReason: 'PRIMARY_PROVIDER_FAILURE',
+            state,
+          });
+        } catch (escalationError: unknown) {
+          return this.providerFailureResult(escalationError, state);
+        }
+      }
+      return this.providerFailureResult(primaryError, state);
+    }
+
+    try {
+      const escalationReason = this.escalationReason(primary, state);
+
+      if (escalationReason && escalationEnabled) {
         const escalated = await this.verifyWithRole(
           state,
           'VERIFIER_ESCALATION',
@@ -83,50 +106,68 @@ export class VerifierAgentUseCase {
         state,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        `[VerifierAgent] semantic verification failed: ${message}`,
-      );
+      return this.providerFailureResult(error, state);
+    }
+  }
 
-      const exactProvenance = this.exactProvenance(state);
-      if (exactProvenance.supported) {
-        return {
-          passed: true,
-          confidence: 1,
-          issues: [
-            'Semantic verifier unavailable; answer accepted only as an exact source span.',
-          ],
-          requiresRevision: false,
-          diagnostics: {
-            providerStatus: 'ERROR',
-            decisionSource: 'EXACT_PROVENANCE',
-            finalPassed: true,
-            confidence: 1,
-            issues: [],
-            requiresRevision: false,
-            escalated: false,
-            exactProvenance,
-          },
-        };
-      }
+  private isTransientProviderFailure(error: unknown): boolean {
+    if (!error || typeof error !== 'object' || !('code' in error)) return false;
+    if (
+      error.code !== 'STRUCTURED_COMPLETION_TIMEOUT' &&
+      error.code !== 'STRUCTURED_COMPLETION_PROVIDER_ERROR'
+    ) {
+      return false;
+    }
+    return !('transient' in error) || error.transient !== false;
+  }
 
+  private providerFailureResult(
+    error: unknown,
+    state: RagChatWorkflowState,
+  ): RagVerificationResult {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.warn(
+      `[VerifierAgent] semantic verification failed: ${message}`,
+    );
+
+    const exactProvenance = this.exactProvenance(state);
+    if (exactProvenance.supported) {
       return {
-        passed: false,
-        confidence: 0,
-        issues: ['Required semantic answer verification was unavailable.'],
+        passed: true,
+        confidence: 1,
+        issues: [
+          'Semantic verifier unavailable; answer accepted only as an exact source span.',
+        ],
         requiresRevision: false,
         diagnostics: {
           providerStatus: 'ERROR',
-          decisionSource: 'FAIL_CLOSED',
-          finalPassed: false,
-          confidence: 0,
-          issues: ['Required semantic answer verification was unavailable.'],
+          decisionSource: 'EXACT_PROVENANCE',
+          finalPassed: true,
+          confidence: 1,
+          issues: [],
           requiresRevision: false,
           escalated: false,
           exactProvenance,
         },
       };
     }
+
+    return {
+      passed: false,
+      confidence: 0,
+      issues: ['Required semantic answer verification was unavailable.'],
+      requiresRevision: false,
+      diagnostics: {
+        providerStatus: 'ERROR',
+        decisionSource: 'FAIL_CLOSED',
+        finalPassed: false,
+        confidence: 0,
+        issues: ['Required semantic answer verification was unavailable.'],
+        requiresRevision: false,
+        escalated: false,
+        exactProvenance,
+      },
+    };
   }
 
   private async verifyWithRole(

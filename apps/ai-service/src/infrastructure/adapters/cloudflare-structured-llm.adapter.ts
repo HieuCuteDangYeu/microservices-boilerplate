@@ -1,9 +1,11 @@
 import type {
   GenerateStructuredObjectInput,
   IStructuredLlmService,
+  StructuredProviderFailureCategory,
 } from '@ai/domain/interfaces/structured-llm.service.interface';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { classifyCloudflareProviderFailure } from './cloudflare-provider-error-classifier';
 
 interface CloudflareChatCompletionResponse {
   choices?: Array<{
@@ -13,9 +15,11 @@ interface CloudflareChatCompletionResponse {
     };
   }>;
   error?: {
+    code?: number | string;
     message?: string;
   };
   errors?: Array<{
+    code?: number | string;
     message?: string;
   }>;
   usage?: {
@@ -30,6 +34,14 @@ interface StructuredCallState {
   finishReason?: string;
   usage?: CloudflareChatCompletionResponse['usage'];
   errorCode?: string;
+  providerCode?: number;
+  providerCategory?: StructuredProviderFailureCategory;
+  retryAfterMs?: number;
+  requestId?: string;
+  transient?: boolean;
+  schemaPath?: string;
+  schemaConstraint?: string;
+  schemaVersion?: string;
 }
 
 const MAX_STRUCTURED_TIMEOUT_MS = 120_000;
@@ -61,8 +73,14 @@ export class StructuredCompletionInvalidJsonError extends Error {
 export class StructuredCompletionSchemaError extends Error {
   readonly code = 'STRUCTURED_COMPLETION_SCHEMA_INVALID';
 
-  constructor() {
-    super('Structured completion failed local schema validation');
+  constructor(
+    readonly path: string,
+    readonly constraint: string,
+    readonly schemaVersion?: string,
+  ) {
+    super(
+      `Structured completion failed local schema validation (path=${path}, constraint=${constraint})`,
+    );
     this.name = 'StructuredCompletionSchemaError';
   }
 }
@@ -82,6 +100,11 @@ export class StructuredCompletionProviderError extends Error {
   constructor(
     readonly model: string,
     readonly status?: number,
+    readonly providerCode?: number,
+    readonly retryAfterMs?: number,
+    readonly requestId?: string,
+    readonly transient = true,
+    readonly providerCategory: StructuredProviderFailureCategory = 'UNKNOWN_PROVIDER_FAILURE',
   ) {
     super(
       status
@@ -103,6 +126,15 @@ export class StructuredCompletionTimeoutError extends Error {
       `Structured completion timed out (model=${model}, timeoutMs=${timeoutMs})`,
     );
     this.name = 'StructuredCompletionTimeoutError';
+  }
+}
+
+class StructuredSchemaViolation extends Error {
+  constructor(
+    readonly path: string,
+    readonly constraint: string,
+  ) {
+    super('Structured schema violation');
   }
 }
 
@@ -136,6 +168,20 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
           : 'STRUCTURED_COMPLETION_UNKNOWN_ERROR';
       if (error instanceof StructuredCompletionTimeoutError) {
         state.providerStatus = 'TIMEOUT';
+        state.transient = true;
+        state.providerCategory = 'TRANSIENT_PROVIDER_FAILURE';
+      }
+      if (error instanceof StructuredCompletionProviderError) {
+        state.providerCode = error.providerCode;
+        state.retryAfterMs = error.retryAfterMs;
+        state.requestId = error.requestId;
+        state.transient = error.transient;
+        state.providerCategory = error.providerCategory;
+      }
+      if (error instanceof StructuredCompletionSchemaError) {
+        state.schemaPath = error.path;
+        state.schemaConstraint = error.constraint;
+        state.schemaVersion = error.schemaVersion;
       }
       throw error;
     } finally {
@@ -156,6 +202,14 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
             }
           : undefined,
         errorCode: state.errorCode,
+        providerCode: state.providerCode,
+        providerCategory: state.providerCategory,
+        retryAfterMs: state.retryAfterMs,
+        requestId: state.requestId,
+        transient: state.transient,
+        schemaPath: state.schemaPath,
+        schemaConstraint: state.schemaConstraint,
+        schemaVersion: state.schemaVersion ?? input.schemaVersion,
       };
       this.logger.debug(`[StructuredCall] ${JSON.stringify(diagnostics)}`);
       try {
@@ -222,25 +276,64 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
       if (controller.signal.aborted) {
         throw new StructuredCompletionTimeoutError(model, timeoutMs);
       }
-      throw new StructuredCompletionProviderError(model);
+      throw new StructuredCompletionProviderError(
+        model,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+        'TRANSIENT_PROVIDER_FAILURE',
+      );
     } finally {
       clearTimeout(timeout);
     }
 
     state.providerStatus = response.status;
+    const retryAfterMs = this.parseRetryAfter(
+      response.headers?.get('retry-after'),
+    );
+    const requestId = response.headers?.get('cf-ray') ?? undefined;
 
     let json: CloudflareChatCompletionResponse;
     try {
       json = (await response.json()) as CloudflareChatCompletionResponse;
     } catch {
-      throw new StructuredCompletionProviderError(model, response.status);
+      const classification = classifyCloudflareProviderFailure({
+        status: response.status,
+        retryAfterMs,
+      });
+      throw new StructuredCompletionProviderError(
+        model,
+        response.status,
+        undefined,
+        retryAfterMs,
+        requestId,
+        classification.transient,
+        classification.category,
+      );
     }
 
     if (!response.ok) {
       this.logger.warn(
         `Cloudflare structured completion failed (model=${model}, status=${response.status})`,
       );
-      throw new StructuredCompletionProviderError(model, response.status);
+      const providerCode = this.providerCode(json);
+      const classification = classifyCloudflareProviderFailure({
+        status: response.status,
+        providerCode,
+        retryAfterMs,
+        message: this.providerMessage(json),
+      });
+      throw new StructuredCompletionProviderError(
+        model,
+        response.status,
+        providerCode,
+        retryAfterMs,
+        requestId,
+        classification.transient,
+        classification.category,
+      );
     }
 
     const choice = json.choices?.[0];
@@ -263,6 +356,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
       this.validateLocalSchema(
         content,
         input.jsonSchema as unknown as Record<string, unknown>,
+        input.schemaVersion,
       );
       return content as T;
     }
@@ -276,6 +370,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
     this.validateLocalSchema(
       parsed,
       input.jsonSchema as unknown as Record<string, unknown>,
+      input.schemaVersion,
     );
     return parsed as T;
   }
@@ -287,11 +382,19 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
   private validateLocalSchema(
     value: unknown,
     schema: Record<string, unknown>,
+    schemaVersion?: string,
   ): void {
     try {
-      this.validateSchema(value, schema);
-    } catch {
-      throw new StructuredCompletionSchemaError();
+      this.validateSchema(value, schema, '$');
+    } catch (error: unknown) {
+      if (error instanceof StructuredSchemaViolation) {
+        throw new StructuredCompletionSchemaError(
+          error.path,
+          error.constraint,
+          schemaVersion,
+        );
+      }
+      throw new StructuredCompletionSchemaError('$', 'unknown', schemaVersion);
     }
   }
 
@@ -306,6 +409,9 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
           'cf-aig-gateway-id': this.configService.getOrThrow<string>(
             'CLOUDFLARE_AI_GATEWAY_ID',
           ),
+          'cf-aig-max-attempts': String(this.gatewayMaxAttempts()),
+          'cf-aig-retry-delay': String(this.gatewayRetryDelay()),
+          'cf-aig-backoff': this.gatewayBackoff(),
         }
       : {};
   }
@@ -323,13 +429,12 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
   private validateSchema(
     value: unknown,
     schema: Record<string, unknown>,
+    path: string,
   ): void {
     const type = schema['type'];
     if (type === 'object') {
       if (!value || typeof value !== 'object' || Array.isArray(value))
-        throw new Error(
-          'Structured LLM response failed local schema validation',
-        );
+        throw new StructuredSchemaViolation(path, 'type');
       const record = value as Record<string, unknown>;
       const properties = (schema['properties'] ?? {}) as Record<
         string,
@@ -338,78 +443,149 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
       const required = Array.isArray(schema['required'])
         ? (schema['required'] as string[])
         : [];
-      if (required.some((key) => !(key in record)))
-        throw new Error(
-          'Structured LLM response failed local schema validation',
-        );
+      const missing = required.find((key) => !(key in record));
+      if (missing)
+        throw new StructuredSchemaViolation(`${path}.${missing}`, 'required');
       if (
         schema['additionalProperties'] === false &&
         Object.keys(record).some((key) => !(key in properties))
       )
-        throw new Error(
-          'Structured LLM response failed local schema validation',
+        throw new StructuredSchemaViolation(
+          `${path}.${Object.keys(record).find((key) => !(key in properties))}`,
+          'additionalProperties',
         );
       for (const [key, propertySchema] of Object.entries(properties)) {
-        if (key in record) this.validateSchema(record[key], propertySchema);
+        if (key in record)
+          this.validateSchema(record[key], propertySchema, `${path}.${key}`);
       }
       return;
     }
     if (type === 'array') {
       if (!Array.isArray(value))
-        throw new Error(
-          'Structured LLM response failed local schema validation',
-        );
+        throw new StructuredSchemaViolation(path, 'type');
       const minItems = Number(schema['minItems']);
       const maxItems = Number(schema['maxItems']);
       if (
         (Number.isFinite(minItems) && value.length < minItems) ||
         (Number.isFinite(maxItems) && value.length > maxItems)
       )
-        throw new Error(
-          'Structured LLM response failed local schema validation',
+        throw new StructuredSchemaViolation(
+          path,
+          Number.isFinite(minItems) && value.length < minItems
+            ? 'minItems'
+            : 'maxItems',
         );
       const items = schema['items'];
       if (items && typeof items === 'object')
-        value.forEach((item) =>
-          this.validateSchema(item, items as Record<string, unknown>),
+        value.forEach((item, index) =>
+          this.validateSchema(
+            item,
+            items as Record<string, unknown>,
+            `${path}[${index}]`,
+          ),
         );
       return;
     }
     if (type === 'string') {
       if (typeof value !== 'string')
-        throw new Error(
-          'Structured LLM response failed local schema validation',
-        );
+        throw new StructuredSchemaViolation(path, 'type');
       const minLength = Number(schema['minLength']);
       const maxLength = Number(schema['maxLength']);
       if (
         (Number.isFinite(minLength) && value.length < minLength) ||
         (Number.isFinite(maxLength) && value.length > maxLength)
       )
-        throw new Error(
-          'Structured LLM response failed local schema validation',
+        throw new StructuredSchemaViolation(
+          path,
+          Number.isFinite(minLength) && value.length < minLength
+            ? 'minLength'
+            : 'maxLength',
         );
     }
     if (type === 'boolean' && typeof value !== 'boolean')
-      throw new Error('Structured LLM response failed local schema validation');
+      throw new StructuredSchemaViolation(path, 'type');
     if (type === 'number') {
       if (typeof value !== 'number' || !Number.isFinite(value))
-        throw new Error(
-          'Structured LLM response failed local schema validation',
-        );
+        throw new StructuredSchemaViolation(path, 'type');
       const minimum = Number(schema['minimum']);
       const maximum = Number(schema['maximum']);
       if (
         (Number.isFinite(minimum) && value < minimum) ||
         (Number.isFinite(maximum) && value > maximum)
       )
-        throw new Error(
-          'Structured LLM response failed local schema validation',
+        throw new StructuredSchemaViolation(
+          path,
+          Number.isFinite(minimum) && value < minimum ? 'minimum' : 'maximum',
         );
     }
     const allowed = schema['enum'];
     if (Array.isArray(allowed) && !allowed.includes(value))
-      throw new Error('Structured LLM response failed local schema validation');
+      throw new StructuredSchemaViolation(path, 'enum');
+  }
+
+  private providerCode(
+    payload: CloudflareChatCompletionResponse,
+  ): number | undefined {
+    const values = [
+      payload.error?.code,
+      ...(payload.errors ?? []).map((error) => error.code),
+    ];
+    return values.map(Number).find(Number.isFinite);
+  }
+
+  private providerMessage(
+    payload: CloudflareChatCompletionResponse,
+  ): string | undefined {
+    return [
+      payload.error?.message,
+      ...(payload.errors ?? []).map((error) => error.message),
+    ].find((value): value is string => typeof value === 'string');
+  }
+
+  private parseRetryAfter(
+    value: string | null | undefined,
+  ): number | undefined {
+    if (!value) return undefined;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0)
+      return Math.round(seconds * 1_000);
+    const date = Date.parse(value);
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+  }
+
+  private gatewayMaxAttempts(): number {
+    return this.integerConfig('CLOUDFLARE_AI_GATEWAY_MAX_ATTEMPTS', 1, 1, 5);
+  }
+
+  private gatewayRetryDelay(): number {
+    return this.integerConfig(
+      'CLOUDFLARE_AI_GATEWAY_RETRY_DELAY_MS',
+      250,
+      0,
+      5_000,
+    );
+  }
+
+  private gatewayBackoff(): 'constant' | 'linear' | 'exponential' {
+    const value = this.configService
+      .get<string>('CLOUDFLARE_AI_GATEWAY_BACKOFF')
+      ?.trim()
+      .toLowerCase();
+    return value === 'constant' || value === 'linear' || value === 'exponential'
+      ? value
+      : 'exponential';
+  }
+
+  private integerConfig(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const value = Number(this.configService.get<string>(key) ?? fallback);
+    return Number.isFinite(value)
+      ? Math.min(max, Math.max(min, Math.round(value)))
+      : fallback;
   }
 
   private resolveTimeout(requestTimeoutMs?: number): number {
