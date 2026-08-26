@@ -82,6 +82,10 @@ async def control_plane_experiment(
                 observation.get("actualRequiredEvidence") or [],
                 observation["expectedRequiredEvidence"],
             ),
+            "recommendationActionAccuracy": _exact(
+                observation.get("actualRecommendationAction"),
+                observation["expectedRecommendationAction"],
+            ),
             "falseNormalChat": float(
                 observation["expectedIntent"] == "REEL_VIDEO_QUESTION"
                 and observation.get("actualIntent") == "NORMAL_CHAT"
@@ -282,6 +286,7 @@ async def run_control_plane(
     config_file: str | None = None,
     subset: str | None = None,
     router_timeout_ms: int | None = None,
+    router_max_completion_tokens: int | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     mode = mode.upper()
     if mode not in {"ROUTER", "SUFFICIENCY", "VERIFIER"}:
@@ -314,6 +319,8 @@ async def run_control_plane(
         command += ["--subset", subset]
     if router_timeout_ms is not None:
         command += ["--router-timeout-ms", str(router_timeout_ms)]
+    if router_max_completion_tokens is not None:
+        command += ["--router-max-completion-tokens", str(router_max_completion_tokens)]
     completed = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,

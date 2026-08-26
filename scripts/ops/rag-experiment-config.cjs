@@ -18,7 +18,7 @@ const SAFE_KEY =
   /^(AI_[A-Z_]+_(MODEL|TIMEOUT_MS|MAX_TOKENS)|CLOUDFLARE_STRUCTURED_REASONING_EFFORT|CLOUDFLARE_AI_GATEWAY_(ENABLED|MAX_ATTEMPTS))$/;
 
 function resolveExperiment(
-  { envFile, configFile, model, timeoutMs, mode, subset },
+  { envFile, configFile, model, timeoutMs, maxTokens, mode, subset },
   inherited = process.env,
 ) {
   const parsed = dotenv.parse(fs.readFileSync(path.resolve(ROOT, envFile)));
@@ -55,6 +55,11 @@ function resolveExperiment(
     'CLOUDFLARE_STRUCTURED_REASONING_EFFORT',
     'CLOUDFLARE_AI_GATEWAY_ENABLED',
   ];
+  if (maxTokens !== undefined) {
+    values.AI_ROUTER_MAX_TOKENS = String(maxTokens);
+    sources.AI_ROUTER_MAX_TOKENS = 'CLI_OVERRIDE';
+    overrides.routerMaxCompletionTokens = Number(maxTokens);
+  }
   const role = mode === 'SUFFICIENCY' ? 'CONTEXT_SUFFICIENCY' : mode;
   required.push(
     `AI_${role}_MODEL`,
@@ -134,6 +139,12 @@ function resolveExperiment(
       120000,
     ),
     routerMaxCompletionTokens: config.maxCompletionTokens('ROUTER'),
+    routerFallbackMaxCompletionTokens: config.number(
+      'AI_ROUTER_FALLBACK_MAX_TOKENS',
+      config.maxCompletionTokens('ROUTER'),
+      128,
+      4096,
+    ),
     structuredReasoningEffort: values.CLOUDFLARE_STRUCTURED_REASONING_EFFORT,
     aiGatewayEnabled: config.boolean('CLOUDFLARE_AI_GATEWAY_ENABLED', true),
     role,

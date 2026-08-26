@@ -51,18 +51,12 @@ for (const timeoutMs of [8000, 20000, 45000, 60000]) {
               message: {
                 content: JSON.stringify({
                   intent: 'REEL_VIDEO_QUESTION',
-                  needsRetrieval: true,
-                  needsUserMemory: false,
-                  needsConversationSummary: false,
-                  needsVerification: true,
                   reason: 'Shared reel question',
                   recommendationAction: {
                     type: 'NONE',
                     query: '',
-                    minRelevantItems: 0,
                     allowPersonalizedFallback: false,
                     suggestedQueries: [],
-                    reason: 'No discovery request',
                   },
                   referenceTarget: 'SHARED_REEL',
                   reelQuestionType: 'TRANSCRIPT_CONTENT',
@@ -147,4 +141,50 @@ test('checkpoint preserves snapshot and account-limit result atomically', () => 
   assert.equal(saved.configSnapshot.configuredTimeoutMs, 45000);
   assert.equal(saved.caseCount, 2);
   assert.equal(fs.existsSync(`${output}.tmp`), false);
+});
+
+test('normalization persists only safe schema diagnostics through the checkpoint', () => {
+  const secret = 'synthetic-private-output';
+  const calls = normalizeCalls([
+    {
+      modelRole: 'ROUTER',
+      model: 'test',
+      errorCode: 'STRUCTURED_COMPLETION_SCHEMA_INVALID',
+      schemaPath: '$.recommendationAction.type',
+      schemaConstraint: 'enum',
+      schemaVersion: 'router-semantic-v2',
+      rejectedValue: secret,
+      responseBody: secret,
+    },
+  ]);
+  assert.equal(calls[0].schemaPath, '$.recommendationAction.type');
+  assert.equal(calls[0].constraint, 'enum');
+  assert.equal(calls[0].schemaVersion, 'router-semantic-v2');
+  assert.ok(!JSON.stringify(calls).includes(secret));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rag-schema-'));
+  const output = path.join(dir, 'observations.json');
+  checkpointWriter(output, 'ROUTER', 'test', {})([{ id: 'generic', calls }]);
+  assert.equal(
+    JSON.parse(fs.readFileSync(output)).samples[0].calls[0].schemaConstraint,
+    'enum',
+  );
+});
+
+test('fallback timeout and model-specific output budget are explicit overrides', () => {
+  const { snapshot } = resolveExperiment(
+    {
+      ...options,
+      configFile: 'eval/rag/config/router-contract-v2.json',
+      model: '@cf/zai-org/glm-4.7-flash',
+      timeoutMs: 60000,
+      maxTokens: 2048,
+      subset: 'fallback-timeout',
+    },
+    {},
+  );
+  assert.equal(snapshot.configuredTimeoutMs, 60000);
+  assert.equal(snapshot.maxCompletionTokens, 2048);
+  assert.equal(snapshot.overrides.routerMaxCompletionTokens, 2048);
+  assert.equal(snapshot.routerFallbackMaxCompletionTokens, 2048);
+  assert.deepEqual(snapshot.caseIds, ['implicit-01', 'conversation-01']);
 });

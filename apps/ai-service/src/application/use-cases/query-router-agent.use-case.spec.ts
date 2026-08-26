@@ -101,7 +101,7 @@ describe('QueryRouterAgentUseCase', () => {
     },
   );
 
-  it('enforces canonical evidence invariants after semantic classification', async () => {
+  it('rejects contradictory evidence and discovery instead of silently rewriting them', async () => {
     const structuredLlmService = {
       generateObject: jest.fn().mockResolvedValue(
         response({
@@ -129,16 +129,13 @@ describe('QueryRouterAgentUseCase', () => {
         message: 'Inspect the shared medium.',
         hasSharedReelContext: true,
       }),
-    ).resolves.toMatchObject({
-      requiredEvidence: ['VISUAL'],
-      recommendationAction: { type: 'NONE' },
-    });
+    ).rejects.toBeInstanceOf(RouterUnavailableError);
   });
 
   it.each([
     ['CONVERSATION_MEMORY_QUESTION', ['CONVERSATION_MEMORY']],
     ['USER_MEMORY_QUESTION', ['USER_MEMORY']],
-  ])('enforces canonical evidence for %s', async (intent, requiredEvidence) => {
+  ])('rejects contradictory evidence for %s', async (intent) => {
     const structuredLlmService = {
       generateObject: jest.fn().mockResolvedValue(
         response({
@@ -154,7 +151,7 @@ describe('QueryRouterAgentUseCase', () => {
 
     await expect(
       useCase.execute({ message: 'Recall context.' }),
-    ).resolves.toMatchObject({ intent, requiredEvidence });
+    ).rejects.toBeInstanceOf(RouterUnavailableError);
   });
 
   it('keeps unrelated chat normal even when reel context exists', async () => {
@@ -189,6 +186,181 @@ describe('QueryRouterAgentUseCase', () => {
     await expect(
       useCase.execute({ message: 'Novel shared-media question.' }),
     ).rejects.toThrow('provider down');
+  });
+
+  it.each([
+    ['NORMAL_CHAT', 'NONE', 'NONE', ['NONE'], [false, true, true, false]],
+    [
+      'REEL_VIDEO_QUESTION',
+      'SHARED_REEL',
+      'TRANSCRIPT_CONTENT',
+      ['TRANSCRIPT'],
+      [true, false, true, true],
+    ],
+    [
+      'CONVERSATION_MEMORY_QUESTION',
+      'CONVERSATION',
+      'NONE',
+      ['CONVERSATION_MEMORY'],
+      [false, false, true, true],
+    ],
+    [
+      'USER_MEMORY_QUESTION',
+      'USER_MEMORY',
+      'NONE',
+      ['USER_MEMORY'],
+      [false, true, false, true],
+    ],
+    [
+      'TASK_ACTION_REQUEST',
+      'NONE',
+      'NONE',
+      ['NONE'],
+      [false, false, false, true],
+    ],
+  ])(
+    'derives mechanical flags for %s without model booleans',
+    async (
+      intent,
+      referenceTarget,
+      reelQuestionType,
+      requiredEvidence,
+      flags,
+    ) => {
+      const raw = response({
+        intent,
+        referenceTarget,
+        reelQuestionType,
+        requiredEvidence,
+      });
+      for (const key of [
+        'needsRetrieval',
+        'needsUserMemory',
+        'needsConversationSummary',
+        'needsVerification',
+      ])
+        delete (raw as Record<string, unknown>)[key];
+      const service = { generateObject: jest.fn().mockResolvedValue(raw) };
+      const result = await new QueryRouterAgentUseCase(
+        service as never,
+        config,
+      ).execute({
+        message: 'A generic semantic request.',
+        hasSharedReelContext: true,
+      });
+      expect([
+        result.needsRetrieval,
+        result.needsUserMemory,
+        result.needsConversationSummary,
+        result.needsVerification,
+      ]).toEqual(flags);
+      const input = service.generateObject.mock
+        .calls[0][0] as GenerateStructuredObjectInput;
+      expect(input.schemaVersion).toBe('router-semantic-v2');
+      expect(input.jsonSchema.required).toEqual([
+        'intent',
+        'referenceTarget',
+        'reelQuestionType',
+        'requiredEvidence',
+        'recommendationAction',
+        'reason',
+      ]);
+    },
+  );
+
+  it.each(['RECOMMEND_REELS', 'SUGGEST_QUERIES'])(
+    'keeps read-only discovery %s on normal chat',
+    async (type) => {
+      const raw = response({
+        recommendationAction: {
+          type,
+          query: 'generic topic',
+          allowPersonalizedFallback: false,
+          suggestedQueries:
+            type === 'SUGGEST_QUERIES' ? ['topic overview'] : [],
+        },
+      });
+      const service = {
+        generateObject: jest.fn().mockResolvedValue(raw),
+      };
+      await expect(
+        new QueryRouterAgentUseCase(service as never, config).execute({
+          message: 'A discovery request.',
+          hasSharedReelContext: true,
+        }),
+      ).resolves.toMatchObject({
+        intent: 'NORMAL_CHAT',
+        referenceTarget: 'NONE',
+        needsRetrieval: false,
+        recommendationAction: { type },
+      });
+    },
+  );
+
+  it.each([
+    { intent: 'NORMAL_CHAT', referenceTarget: 'SHARED_REEL' },
+    {
+      intent: 'TASK_ACTION_REQUEST',
+      recommendationAction: {
+        type: 'RECOMMEND_REELS',
+        query: 'topic',
+        allowPersonalizedFallback: false,
+        suggestedQueries: [],
+      },
+    },
+    { intent: 'NORMAL_CHAT', reelQuestionType: 'VISUAL_CONTENT' },
+    { intent: 'NORMAL_CHAT', requiredEvidence: ['USER_MEMORY'] },
+    { intent: 'unknown' },
+  ])(
+    'fails safely on semantic contradictions without fallback: %j',
+    async (overrides) => {
+      const service = {
+        generateObject: jest.fn().mockResolvedValue(response(overrides)),
+      };
+      await expect(
+        new QueryRouterAgentUseCase(service as never, config).execute({
+          message: 'A generic request.',
+          hasSharedReelContext: true,
+        }),
+      ).rejects.toMatchObject({
+        code: 'ROUTER_UNAVAILABLE',
+        causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+      });
+      expect(service.generateObject).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('performs at most one semantic repair using the configured 60s fallback budget', async () => {
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockResolvedValue(response({ referenceTarget: 'SHARED_REEL' })),
+    };
+    const bounded = {
+      ...config,
+      get: jest.fn((key: string) =>
+        key === 'AI_ROUTER_FALLBACK_MODEL' ? '@cf/test/secondary' : undefined,
+      ),
+      number: jest.fn((key: string, fallback: number) =>
+        key === 'AI_ROUTER_FALLBACK_TIMEOUT_MS'
+          ? 60000
+          : key === 'AI_ROUTER_FALLBACK_MAX_TOKENS'
+            ? 2048
+            : fallback,
+      ),
+    } as unknown as IAiApplicationConfig;
+    await expect(
+      new QueryRouterAgentUseCase(service as never, bounded).execute({
+        message: 'Generic request.',
+        hasSharedReelContext: true,
+      }),
+    ).rejects.toMatchObject({ code: 'ROUTER_UNAVAILABLE' });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+    expect(service.generateObject.mock.calls[1][0]).toMatchObject({
+      timeoutMs: 60000,
+      maxTokens: 2048,
+      attempt: 2,
+    });
   });
 
   it('uses one configured fallback only after a transient primary failure', async () => {

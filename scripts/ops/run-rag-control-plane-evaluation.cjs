@@ -63,6 +63,10 @@ function normalizeCalls(calls) {
     retryAfterMs: call.retryAfterMs,
     transient: call.transient,
     errorCode: call.errorCode,
+    schemaPath: call.schemaPath,
+    schemaConstraint: call.schemaConstraint,
+    constraint: call.schemaConstraint,
+    schemaVersion: call.schemaVersion,
     scope: 'QUERY',
   }));
 }
@@ -174,7 +178,9 @@ async function evaluateRouter(
         result.intent === fixture.expected.intent &&
         result.referenceTarget === fixture.expected.referenceTarget &&
         result.reelQuestionType === fixture.expected.reelQuestionType &&
-        sameArray(result.requiredEvidence, fixture.expected.requiredEvidence);
+        sameArray(result.requiredEvidence, fixture.expected.requiredEvidence) &&
+        result.recommendationAction.type ===
+          fixture.expected.recommendationAction;
       samples.push({
         id: fixture.id,
         success: true,
@@ -187,6 +193,8 @@ async function evaluateRouter(
         actualReelQuestionType: result.reelQuestionType,
         expectedRequiredEvidence: fixture.expected.requiredEvidence,
         actualRequiredEvidence: result.requiredEvidence,
+        expectedRecommendationAction: fixture.expected.recommendationAction,
+        actualRecommendationAction: result.recommendationAction.type,
         referencePass:
           result.referenceTarget === fixture.expected.referenceTarget,
         evidencePass: sameArray(
@@ -208,6 +216,8 @@ async function evaluateRouter(
         actualReelQuestionType: null,
         expectedRequiredEvidence: fixture.expected.requiredEvidence,
         actualRequiredEvidence: [],
+        expectedRecommendationAction: fixture.expected.recommendationAction,
+        actualRecommendationAction: null,
         latencyMs: Date.now() - startedAt,
         errorCode: error?.causeCode || error?.code || error?.name || 'ERROR',
         calls: normalizeCalls(callLog.slice(callOffset)),
@@ -461,6 +471,7 @@ async function main() {
     mode,
     model: arg('--model'),
     timeoutMs: arg('--router-timeout-ms'),
+    maxTokens: arg('--router-max-completion-tokens'),
     subset: arg('--subset'),
   });
   if (arg('--snapshot-only') === 'true') {

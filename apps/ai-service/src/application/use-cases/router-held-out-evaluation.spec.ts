@@ -22,6 +22,7 @@ const { routerCases } =
         referenceTarget: string;
         reelQuestionType: string;
         requiredEvidence: string[];
+        recommendationAction: string;
       };
     }>;
   };
@@ -72,11 +73,17 @@ describe('generic held-out semantic router corpus', () => {
           fixture.expected.intent === 'CONVERSATION_MEMORY_QUESTION',
         needsVerification: fixture.expected.intent !== 'NORMAL_CHAT',
         recommendationAction: {
-          type: 'NONE',
-          query: '',
+          type: fixture.expected.recommendationAction,
+          query:
+            fixture.expected.recommendationAction === 'NONE'
+              ? ''
+              : 'generic topic',
           minRelevantItems: 0,
           allowPersonalizedFallback: false,
-          suggestedQueries: [],
+          suggestedQueries:
+            fixture.expected.recommendationAction === 'SUGGEST_QUERIES'
+              ? ['generic topic']
+              : [],
           reason: 'No discovery attachment required.',
         },
         reason: 'Generic semantic fixture.',
@@ -91,7 +98,10 @@ describe('generic held-out semantic router corpus', () => {
           sharedReelCount: fixture.sharedReelCount,
           referentContext: fixture.referentContext,
         }),
-      ).resolves.toMatchObject(fixture.expected);
+      ).resolves.toMatchObject({
+        ...fixture.expected,
+        recommendationAction: { type: fixture.expected.recommendationAction },
+      });
     },
   );
 });

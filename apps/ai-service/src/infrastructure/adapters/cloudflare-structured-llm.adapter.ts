@@ -450,10 +450,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
         schema['additionalProperties'] === false &&
         Object.keys(record).some((key) => !(key in properties))
       )
-        throw new StructuredSchemaViolation(
-          `${path}.${Object.keys(record).find((key) => !(key in properties))}`,
-          'additionalProperties',
-        );
+        throw new StructuredSchemaViolation(path, 'additionalProperties');
       for (const [key, propertySchema] of Object.entries(properties)) {
         if (key in record)
           this.validateSchema(record[key], propertySchema, `${path}.${key}`);

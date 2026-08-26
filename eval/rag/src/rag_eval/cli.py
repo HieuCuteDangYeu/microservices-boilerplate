@@ -267,8 +267,12 @@ def parser() -> argparse.ArgumentParser:
     control_plane.add_argument("--mode", required=True)
     control_plane.add_argument("--model")
     control_plane.add_argument("--config", required=True)
-    control_plane.add_argument("--subset", choices=["harness", "latency"])
+    control_plane.add_argument(
+        "--subset",
+        choices=["harness", "latency", "fallback-timeout", "fallback-semantic", "fallback20"],
+    )
     control_plane.add_argument("--router-timeout-ms", type=int)
+    control_plane.add_argument("--router-max-completion-tokens", type=int)
     control_plane.add_argument("--env-file", default=".env.test.local")
     control_plane.add_argument("--run-id")
     return root
@@ -296,6 +300,7 @@ def main() -> None:
                 args.config,
                 args.subset,
                 args.router_timeout_ms,
+                args.router_max_completion_tokens,
             )
         )
         print(json.dumps(summary, sort_keys=True))

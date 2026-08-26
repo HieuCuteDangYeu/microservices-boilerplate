@@ -164,6 +164,63 @@ describe('CloudflareStructuredLlmAdapter', () => {
     );
   });
 
+  it('never copies an unexpected provider property name into diagnostics or logs', async () => {
+    const sentinel = 'synthetic-private-key';
+    const debug = jest
+      .spyOn(Logger.prototype, 'debug')
+      .mockImplementation(() => undefined);
+    const diagnostics = jest.fn();
+    const content = JSON.stringify({ nested: { [sentinel]: 'private-value' } });
+    const payload = {
+      choices: [{ finish_reason: 'stop', message: { content } }],
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue(payload),
+    } as never);
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('test'),
+      get: jest.fn().mockReturnValue('false'),
+    };
+    let error: unknown;
+    try {
+      await new CloudflareStructuredLlmAdapter(config as never).generateObject({
+        model: '@cf/test/structured',
+        systemPrompt: 'Return JSON.',
+        userPrompt: 'Generic control.',
+        schemaVersion: 'safe-v2',
+        onDiagnostics: diagnostics,
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            nested: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {},
+            },
+          },
+          required: ['nested'],
+        },
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(StructuredCompletionSchemaError);
+    const leaked = JSON.stringify([
+      String(error),
+      diagnostics.mock.calls,
+      debug.mock.calls,
+    ]).includes(sentinel);
+    expect(leaked).toBe(false);
+    expect(diagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaPath: '$.nested',
+        schemaConstraint: 'additionalProperties',
+      }),
+    );
+  });
+
   it.each([
     ['missing required key', '{}'],
     ['malformed array', '{"items":"not-an-array"}'],
@@ -487,3 +544,4 @@ describe('CloudflareStructuredLlmAdapter', () => {
     });
   });
 });
+import { Logger } from '@nestjs/common';
