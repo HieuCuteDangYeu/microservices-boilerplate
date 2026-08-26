@@ -71,6 +71,28 @@ function accountLimited(calls) {
   return calls.some((call) => call.providerCategory === 'ACCOUNT_LIMITED');
 }
 
+function checkpointWriter(output, mode, model) {
+  return (samples) => {
+    if (!output) return;
+    fs.writeFileSync(
+      output,
+      `${JSON.stringify(
+        {
+          mode,
+          model,
+          caseCount: samples.length,
+          samples,
+          stoppedReason: accountLimited(samples.at(-1)?.calls ?? [])
+            ? 'ACCOUNT_LIMITED'
+            : null,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  };
+}
+
 function stateForSufficiency(fixture) {
   return {
     userId: 'synthetic-evaluation-user',
@@ -125,7 +147,7 @@ function stateForVerifier(fixture) {
   };
 }
 
-async function evaluateRouter(llm, config, model, callLog) {
+async function evaluateRouter(llm, config, model, callLog, checkpoint) {
   const modelConfig = {
     model: (role) => (role === 'ROUTER' ? model : config.model(role)),
     get: (key) =>
@@ -187,6 +209,7 @@ async function evaluateRouter(llm, config, model, callLog) {
         calls: normalizeCalls(callLog.slice(callOffset)),
       });
     }
+    checkpoint(samples);
     if (accountLimited(samples.at(-1).calls)) break;
   }
   const expectedReel = samples.filter(
@@ -273,7 +296,7 @@ async function evaluateRouter(llm, config, model, callLog) {
   };
 }
 
-async function evaluateSufficiency(llm, config, callLog) {
+async function evaluateSufficiency(llm, config, callLog, checkpoint) {
   const useCase = new CheckContextSufficiencyUseCase(llm, config);
   const samples = [];
   for (const fixture of sufficiencyCases) {
@@ -318,6 +341,7 @@ async function evaluateSufficiency(llm, config, callLog) {
         calls: normalizeCalls(callLog.slice(callOffset)),
       });
     }
+    checkpoint(samples);
     if (accountLimited(samples.at(-1).calls)) break;
   }
   return {
@@ -348,7 +372,7 @@ async function evaluateSufficiency(llm, config, callLog) {
   };
 }
 
-async function evaluateVerifier(llm, config, callLog) {
+async function evaluateVerifier(llm, config, callLog, checkpoint) {
   const useCase = new VerifierAgentUseCase(llm, config);
   const samples = [];
   for (const fixture of verifierCases) {
@@ -398,6 +422,7 @@ async function evaluateVerifier(llm, config, callLog) {
         calls: normalizeCalls(callLog.slice(callOffset)),
       });
     }
+    checkpoint(samples);
     if (accountLimited(samples.at(-1).calls)) break;
   }
   const latencies = samples.map((sample) => sample.latencyMs);
@@ -427,6 +452,7 @@ async function main() {
     process.env.CLOUDFLARE_AI_GATEWAY_ENABLED = 'false';
   }
   const mode = (arg('--mode') || '').toUpperCase();
+  const output = arg('--output');
   const configService = new ConfigService(process.env);
   const config = new AiApplicationConfigAdapter(configService);
   const llm = new CloudflareStructuredLlmAdapter(configService);
@@ -440,24 +466,23 @@ async function main() {
         input.onDiagnostics?.(diagnostics);
       },
     });
+  const model =
+    mode === 'ROUTER'
+      ? arg('--model') || config.model('ROUTER')
+      : config.model(mode === 'SUFFICIENCY' ? 'CONTEXT_SUFFICIENCY' : mode);
+  const checkpoint = checkpointWriter(output, mode, model);
   const result =
     mode === 'ROUTER'
-      ? await evaluateRouter(
-          llm,
-          config,
-          arg('--model') || config.model('ROUTER'),
-          callLog,
-        )
+      ? await evaluateRouter(llm, config, model, callLog, checkpoint)
       : mode === 'SUFFICIENCY'
-        ? await evaluateSufficiency(llm, config, callLog)
+        ? await evaluateSufficiency(llm, config, callLog, checkpoint)
         : mode === 'VERIFIER'
-          ? await evaluateVerifier(llm, config, callLog)
+          ? await evaluateVerifier(llm, config, callLog, checkpoint)
           : (() => {
               throw new Error(
                 '--mode must be ROUTER, SUFFICIENCY, or VERIFIER',
               );
             })();
-  const output = arg('--output');
   if (output) fs.writeFileSync(output, `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify(result));
   if (
