@@ -6,6 +6,10 @@ from typing import Any
 
 
 def compare_summaries(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    for summary in (baseline, candidate):
+        if str(summary.get("status", "")).startswith("INVALID_"):
+            raise ValueError("Invalid experiment configuration cannot be a quality baseline")
+
     def delta(section: str, key: str) -> float | None:
         left = baseline.get(section, {}).get(key)
         right = candidate.get(section, {}).get(key)

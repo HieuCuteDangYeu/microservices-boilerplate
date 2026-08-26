@@ -66,3 +66,50 @@ The adapter uses Ragas' current factory with an OpenAI-compatible Cloudflare cli
 Each run writes one schema family: `summary.json`, `cases.jsonl`, and `summary.md`. Query, indexing, and evaluation-judge costs stay separate. End-to-end latency uses actual wall time rather than summing potentially parallel node durations; role latency comes from individual model-call diagnostics. Reports include dataset/variant metadata and per-tag slices. `compare` calculates deltas without overwriting either run.
 
 Live benchmark reconciliation remains TypeScript-owned. If a case is `IN_FLIGHT`, inspect/reconcile it through the runner; never resend it from Python. Once Workers capacity is restored, use the Ragas datasets and live command for model comparison, sufficiency/verifier gates, and a new frozen-eight run rather than returning to the legacy scorer.
+
+# Live configuration provenance and router calibration
+
+Control-plane runs require `--config` pointing to a versioned candidate JSON.
+The candidate values override the selected credential env and inherited env
+without mutating `process.env`. Runtime `AiApplicationConfigAdapter` resolves
+the same values consumed by the actual use case and Cloudflare adapter. Missing
+role timeout/model/budget is rejected before requests, not defaulted by Ragas.
+Reports and atomic per-case `observations.json` retain the effective snapshot,
+Git SHA, dataset/config hashes, candidate roles, execution overrides, and subset.
+Existing run directories are never resent automatically after interruption.
+
+The previous `router-gpt-oss-20b-20260826` and `router-glm-4-7-flash-20260826`
+runs are `INVALID_CONFIG_TIMEOUT_8000`, not model-quality baselines. Their
+credential env `.env.test.local` omitted router timeout; no inherited value was
+present, so the runtime adapter supplied its 8000 ms default. `.env` (GLM, 8s,
+no fallback) and `.env.example` (GPT20, GLM fallback, 45s/60s) were not loaded.
+Model CLI overrides were the executed model; they did not select runtime roles.
+
+Candidate `config/router-calibration-v1.json` explicitly records the tracked
+45s/60s, GPT20/GLM candidate without editing runtime env or deployed roles. Each
+comparison overrides only the executed model, disables fallback, and uses the
+direct provider (gateway disabled) for exactly one request per case. These
+transport/fallback overrides are visible and are not production-chain validation.
+
+From the repository root, after offline checks and one successful capacity check:
+
+```sh
+pnpm eval:rag:control-plane --mode ROUTER --model @cf/openai/gpt-oss-20b --config eval/rag/config/router-calibration-v1.json --subset harness --run-id UNIQUE-ID
+```
+
+Repeat with GLM on the same six versioned generic cases. Only if all calls
+complete structurally proceed to the separate ten-case `latency` subset for
+each model. Its predeclared comfort bound is p95 and max < 36000 ms (80% of
+45000 ms). These are harness/latency checks, not production timeout selection
+from six cases, and their outputs are not reused in a full comparison. Omit
+`--subset` for the 65-case comparison only after both calibration gates pass.
+`--router-timeout-ms` is an explicit, recorded override for parity tests or an
+authorized experiment. Do not increase timeout automatically after failure.
+
+`eval:rag:live` uses public backend APIs, not the local structured-LLM runner.
+Local env cannot configure a remote deployment. It therefore requires an
+operator-supplied `--runtime-config-snapshot` whose `gitSha` matches explicit
+`--production-sha`, includes the router snapshot fields and a `roles` map with
+each role's model/timeoutMs/maxCompletionTokens. This is labeled operator
+attestation, not claimed as remotely observed config. Deterministic outputs are
+saved before any optional semantic judge, which is forbidden on a failed gate.

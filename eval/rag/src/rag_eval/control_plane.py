@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from statistics import fmean
@@ -13,7 +12,7 @@ from typing import Any
 from ragas import Dataset, experiment
 
 from rag_eval.dataset import ROOT, load_dataset
-from rag_eval.metrics.cost import aggregate_costs
+from rag_eval.metrics.cost import aggregate_costs, model_call_cost
 from rag_eval.metrics.operational import percentile, reliability_metrics
 from rag_eval.pricing import load_pricing
 from rag_eval.schemas import EvaluationRow
@@ -51,6 +50,8 @@ def _schema_success(observation: dict[str, Any]) -> float:
     }
     return float(
         observation.get("success", False)
+        and bool(observation["calls"])
+        and all(call.get("providerStatus") == 200 for call in observation["calls"])
         and not any(call.get("errorCode") in schema_errors for call in observation["calls"])
     )
 
@@ -157,6 +158,7 @@ def _summary(
     model: str,
     expected_case_count: int,
     stopped_reason: str | None,
+    config_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not cases:
         raise RuntimeError(f"{mode} Ragas experiment returned zero completed case results")
@@ -168,6 +170,43 @@ def _summary(
         for case in cases
     ]
     costs = aggregate_costs(calls, load_pricing())
+    for call in calls:
+        call["costUsd"] = model_call_cost(call, load_pricing())["costUsd"]
+        call["estimatedNeurons"] = _estimated_neurons(call["costUsd"])
+    schema_codes = {
+        "STRUCTURED_COMPLETION_INVALID_JSON",
+        "STRUCTURED_COMPLETION_SCHEMA_INVALID",
+        "STRUCTURED_COMPLETION_EMPTY_CONTENT",
+        "STRUCTURED_COMPLETION_TRUNCATED",
+    }
+    timeout_count = sum(call.get("providerStatus") == "TIMEOUT" for call in calls)
+    schema_count = sum(call.get("errorCode") in schema_codes for call in calls)
+    provider_failures = sum(call.get("providerStatus") != 200 for call in calls)
+    metrics = {key: _mean(cases, key) for key in metric_names}
+    if mode == "ROUTER":
+        reel_cases = [
+            case
+            for case in cases
+            if case.get("observation", {}).get("expectedIntent") == "REEL_VIDEO_QUESTION"
+        ]
+        non_reel_cases = [
+            case
+            for case in cases
+            if case.get("observation", {}).get("expectedIntent") != "REEL_VIDEO_QUESTION"
+        ]
+        metrics["falseNormalChatRate"] = _mean(reel_cases, "falseNormalChat")
+        metrics["falseReelRate"] = _mean(non_reel_cases, "falseReel")
+    metrics.update(
+        timeoutRate=timeout_count / len(cases), providerFailureRate=provider_failures / len(cases)
+    )
+    tokens = {
+        key: (
+            sum(call[key] for call in calls)
+            if calls and all(call.get(key) is not None for call in calls)
+            else None
+        )
+        for key in ("inputTokens", "outputTokens")
+    }
     complete = len(cases) == expected_case_count
     return {
         "schemaVersion": "rag-control-plane-summary-v1",
@@ -175,11 +214,14 @@ def _summary(
         "dataset": "rag-generalization-v1",
         "mode": mode,
         "model": model,
+        "configSnapshot": config_snapshot,
         "caseCount": len(cases),
         "expectedCaseCount": expected_case_count,
         "complete": complete,
         "stoppedReason": stopped_reason,
-        "metrics": {key: _mean(cases, key) for key in metric_names},
+        "metrics": metrics,
+        "tokens": tokens,
+        "structuralCompleted": sum(case["metrics"].get("schemaSuccess") == 1 for case in cases),
         "latencyMs": {
             "p50": percentile(latencies, 0.5),
             "p90": percentile(latencies, 0.9),
@@ -188,7 +230,12 @@ def _summary(
         },
         "cost": costs,
         "runEstimatedNeurons": _estimated_neurons(costs["totalQueryCostUsd"]),
-        "reliability": reliability_metrics(executions),
+        "reliability": {
+            **reliability_metrics(executions),
+            "timeoutCount": timeout_count,
+            "schemaFailureCount": schema_count,
+            "providerFailureCount": provider_failures,
+        },
         "hardGatePassed": complete
         and stopped_reason is None
         and all(case["hardGatePassed"] for case in cases),
@@ -198,7 +245,7 @@ def _summary(
 
 def _write_report(cases: list[dict[str, Any]], summary: dict[str, Any]) -> Path:
     directory = RESULTS / summary["runId"]
-    directory.mkdir(parents=True, exist_ok=False)
+    directory.mkdir(parents=True, exist_ok=True)
     ordered = sorted(cases, key=lambda case: case["caseId"])
     (directory / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -232,40 +279,58 @@ async def run_control_plane(
     model: str,
     env_file: str,
     run_id: str | None = None,
+    config_file: str | None = None,
+    subset: str | None = None,
+    router_timeout_ms: int | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     mode = mode.upper()
     if mode not in {"ROUTER", "SUFFICIENCY", "VERIFIER"}:
         raise ValueError("mode must be ROUTER, SUFFICIENCY, or VERIFIER")
+    if subset and mode != "ROUTER":
+        raise ValueError("router calibration subsets cannot be used for another role")
     run_id = run_id or f"ragas-{mode.lower()}-{int(time.time())}"
-    with tempfile.TemporaryDirectory(prefix="rag-control-plane-") as temporary:
-        output = Path(temporary) / "observations.json"
-        command = [
-            "node",
-            "scripts/ops/run-rag-control-plane-evaluation.cjs",
-            "--mode",
-            mode,
-            "--env-file",
-            env_file,
-            "--output",
-            str(output),
-        ]
-        if mode == "ROUTER":
-            command += ["--model", model]
-        completed = subprocess.run(
-            command,
-            cwd=REPOSITORY_ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if not output.exists():
-            raise RuntimeError(
-                completed.stderr.strip() or "TypeScript evaluator produced no output"
-            )
-        payload = json.loads(output.read_text(encoding="utf-8"))
+    if not config_file:
+        raise ValueError("versioned experiment --config is required")
+    if Path(run_id).name != run_id or run_id in {".", ".."}:
+        raise ValueError("run-id must be a single directory name")
+    directory = RESULTS / run_id
+    directory.mkdir(parents=True, exist_ok=False)
+    output = directory / "observations.json"
+    command = [
+        "node",
+        "scripts/ops/run-rag-control-plane-evaluation.cjs",
+        "--mode",
+        mode,
+        "--env-file",
+        env_file,
+        "--output",
+        str(output),
+        "--config",
+        config_file,
+    ]
+    if model:
+        command += ["--model", model]
+    if subset:
+        command += ["--subset", subset]
+    if router_timeout_ms is not None:
+        command += ["--router-timeout-ms", str(router_timeout_ms)]
+    completed = subprocess.run(
+        command,
+        cwd=REPOSITORY_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if not output.exists():
+        raise RuntimeError(completed.stderr.strip() or "TypeScript evaluator produced no output")
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    snapshot = payload["configSnapshot"]
+    model = snapshot["roleModel"]
     all_rows = [
         row for row in load_dataset("rag-generalization-v1") if row.fixtureGroup == mode.lower()
     ]
+    if snapshot["caseIds"] is not None:
+        all_rows = [row for row in all_rows if row.id in snapshot["caseIds"]]
     observations = {sample["id"]: sample for sample in payload["samples"]}
     rows = [row for row in all_rows if row.id in observations]
     dataset = Dataset(
@@ -293,5 +358,6 @@ async def run_control_plane(
         model,
         len(all_rows),
         payload.get("stoppedReason"),
+        snapshot,
     )
     return _write_report(cases, summary), summary

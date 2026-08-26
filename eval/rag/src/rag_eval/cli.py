@@ -23,6 +23,7 @@ from rag_eval.adapters.runner_output import (
     load_runner_report,
 )
 from rag_eval.compare import compare_files
+from rag_eval.config_snapshot import load_runtime_snapshot
 from rag_eval.control_plane import run_control_plane
 from rag_eval.dataset import ROOT, load_dataset
 from rag_eval.experiment import rag_experiment
@@ -98,6 +99,7 @@ async def run_live(args: argparse.Namespace) -> Path:
         raise SystemExit("the current TypeScript bridge only executes rag-frozen-ami-v1")
     if not args.definitions_report:
         raise SystemExit("LIVE requires --definitions-report")
+    snapshot = load_runtime_snapshot(args.runtime_config_snapshot, args.production_sha)
     dataset = load_dataset(args.dataset)
     rows = _rows(dataset)
     run_id = args.run_id or f"ragas-live-{int(time.time())}"
@@ -111,19 +113,31 @@ async def run_live(args: argparse.Namespace) -> Path:
     missing = set(rows) - set(executions)
     if missing:
         raise RuntimeError(f"runner report omitted cases: {sorted(missing)}")
-    semantic_suite = None
-    if args.live_judge:
-        semantic_suite, _client, _model = build_live_judge()
     variant = _variant(args)
+    variant["configSnapshot"] = snapshot
+    variant["variantName"] = snapshot["variantName"]
     result = await rag_experiment.arun(
         dataset,
         name=run_id,
         execution_results=executions,
         variant=variant,
-        semantic_suite=semantic_suite,
+        semantic_suite=None,
     )
     directory = write_report(_dicts(result), run_id, RESULTS)
-    print_terminal_summary(json.loads((directory / "summary.json").read_text()))
+    summary = json.loads((directory / "summary.json").read_text())
+    print_terminal_summary(summary)
+    if args.live_judge:
+        if not summary["hardGatePassed"]:
+            raise RuntimeError("deterministic hard gate failed; saved results, no judge calls made")
+        semantic_suite, _client, _model = build_live_judge()
+        judged = await rag_experiment.arun(
+            dataset,
+            name=f"{run_id}-semantic",
+            execution_results=executions,
+            variant=variant,
+            semantic_suite=semantic_suite,
+        )
+        directory = write_report(_dicts(judged), f"{run_id}-semantic", RESULTS)
     return directory
 
 
@@ -241,6 +255,7 @@ def parser() -> argparse.ArgumentParser:
     live.add_argument("--env-file")
     live.add_argument("--trace-file")
     live.add_argument("--live-judge", action="store_true")
+    live.add_argument("--runtime-config-snapshot")
     report = commands.add_parser("report")
     report.add_argument("--run", required=True)
     compare = commands.add_parser("compare")
@@ -250,7 +265,10 @@ def parser() -> argparse.ArgumentParser:
     capacity.add_argument("--confirm-one-call", action="store_true")
     control_plane = commands.add_parser("control-plane")
     control_plane.add_argument("--mode", required=True)
-    control_plane.add_argument("--model", required=True)
+    control_plane.add_argument("--model")
+    control_plane.add_argument("--config", required=True)
+    control_plane.add_argument("--subset", choices=["harness", "latency"])
+    control_plane.add_argument("--router-timeout-ms", type=int)
     control_plane.add_argument("--env-file", default=".env.test.local")
     control_plane.add_argument("--run-id")
     return root
@@ -270,7 +288,15 @@ def main() -> None:
         asyncio.run(run_capacity_check(args))
     else:
         directory, summary = asyncio.run(
-            run_control_plane(args.mode, args.model, args.env_file, args.run_id)
+            run_control_plane(
+                args.mode,
+                args.model,
+                args.env_file,
+                args.run_id,
+                args.config,
+                args.subset,
+                args.router_timeout_ms,
+            )
         )
         print(json.dumps(summary, sort_keys=True))
         print(f"CONTROL_PLANE_RAGAS_REPORT_PATH={directory}")

@@ -2,8 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const dotenv = require('dotenv');
-const { ConfigService } = require('@nestjs/config');
+const { resolveExperiment } = require('./rag-experiment-config.cjs');
 const {
   routerCases,
   sufficiencyCases,
@@ -24,9 +23,6 @@ const { CheckContextSufficiencyUseCase } = load(
 );
 const { VerifierAgentUseCase } = load(
   'application/use-cases/verifier-agent.use-case.js',
-);
-const { AiApplicationConfigAdapter } = load(
-  'infrastructure/adapters/ai-application-config.adapter.js',
 );
 const { CloudflareStructuredLlmAdapter } = load(
   'infrastructure/adapters/cloudflare-structured-llm.adapter.js',
@@ -54,7 +50,11 @@ function normalizeCalls(calls) {
     outputTokens: call.usage?.outputTokens ?? null,
     totalTokens: call.usage?.totalTokens ?? null,
     usageSource: call.usage ? 'PROVIDER' : 'UNAVAILABLE',
+    costUsd: null,
+    estimatedNeurons: null,
     latencyMs: call.latencyMs,
+    configuredTimeoutMs: call.configuredTimeoutMs,
+    configuredMaxCompletionTokens: call.configuredMaxCompletionTokens,
     finishReason: call.finishReason,
     attempt: call.attempt ?? 1,
     providerStatus: call.providerStatus,
@@ -71,25 +71,25 @@ function accountLimited(calls) {
   return calls.some((call) => call.providerCategory === 'ACCOUNT_LIMITED');
 }
 
-function checkpointWriter(output, mode, model) {
+function writeAtomically(output, payload) {
+  const temporary = `${output}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`);
+  fs.renameSync(temporary, output);
+}
+
+function checkpointWriter(output, mode, model, configSnapshot) {
   return (samples) => {
     if (!output) return;
-    fs.writeFileSync(
-      output,
-      `${JSON.stringify(
-        {
-          mode,
-          model,
-          caseCount: samples.length,
-          samples,
-          stoppedReason: accountLimited(samples.at(-1)?.calls ?? [])
-            ? 'ACCOUNT_LIMITED'
-            : null,
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    writeAtomically(output, {
+      mode,
+      model,
+      configSnapshot,
+      caseCount: samples.length,
+      samples,
+      stoppedReason: accountLimited(samples.at(-1)?.calls ?? [])
+        ? 'ACCOUNT_LIMITED'
+        : null,
+    });
   };
 }
 
@@ -147,20 +147,24 @@ function stateForVerifier(fixture) {
   };
 }
 
-async function evaluateRouter(llm, config, model, callLog, checkpoint) {
-  const modelConfig = {
-    model: (role) => (role === 'ROUTER' ? model : config.model(role)),
-    get: (key) =>
-      key === 'AI_ROUTER_FALLBACK_MODEL' ? undefined : config.get(key),
-    timeoutMs: (role) => config.timeoutMs(role),
-    maxCompletionTokens: (role) => config.maxCompletionTokens(role),
-    number: (key, fallback, min, max) => config.number(key, fallback, min, max),
-    boolean: (key, fallback) => config.boolean(key, fallback),
-  };
-  const useCase = new QueryRouterAgentUseCase(llm, modelConfig);
+async function evaluateRouter(
+  llm,
+  config,
+  model,
+  callLog,
+  checkpoint,
+  caseIds,
+) {
+  const useCase = new QueryRouterAgentUseCase(llm, config);
   const samples = [];
   const limit = Number(arg('--limit') || routerCases.length);
-  const fixtures = routerCases.slice(0, limit);
+  const fixtures = caseIds
+    ? caseIds.map((id) => {
+        const fixture = routerCases.find((item) => item.id === id);
+        if (!fixture) throw new Error(`Unknown router case: ${id}`);
+        return fixture;
+      })
+    : routerCases.slice(0, limit);
   for (const fixture of fixtures) {
     const startedAt = Date.now();
     const callOffset = callLog.length;
@@ -445,17 +449,27 @@ async function evaluateVerifier(llm, config, callLog, checkpoint) {
 }
 
 async function main() {
-  dotenv.config({
-    path: arg('--env-file') || path.join(ROOT, '.env.test.local'),
-  });
-  if (!process.env.CLOUDFLARE_AI_GATEWAY_ID?.trim()) {
-    process.env.CLOUDFLARE_AI_GATEWAY_ENABLED = 'false';
-  }
   const mode = (arg('--mode') || '').toUpperCase();
+  if (!['ROUTER', 'SUFFICIENCY', 'VERIFIER'].includes(mode))
+    throw new Error('Invalid mode');
+  if (!arg('--config'))
+    throw new Error('--config versioned candidate is required');
   const output = arg('--output');
-  const configService = new ConfigService(process.env);
-  const config = new AiApplicationConfigAdapter(configService);
-  const llm = new CloudflareStructuredLlmAdapter(configService);
+  const { service, config, snapshot, caseIds } = resolveExperiment({
+    envFile: arg('--env-file') || '.env.test.local',
+    configFile: arg('--config'),
+    mode,
+    model: arg('--model'),
+    timeoutMs: arg('--router-timeout-ms'),
+    subset: arg('--subset'),
+  });
+  if (arg('--snapshot-only') === 'true') {
+    console.log(JSON.stringify(snapshot));
+    return;
+  }
+  if (output && fs.existsSync(output))
+    throw new Error('Observations already exist; do not resend');
+  const llm = new CloudflareStructuredLlmAdapter(service);
   const callLog = [];
   const generateObject = llm.generateObject.bind(llm);
   llm.generateObject = async (input) =>
@@ -466,14 +480,12 @@ async function main() {
         input.onDiagnostics?.(diagnostics);
       },
     });
-  const model =
-    mode === 'ROUTER'
-      ? arg('--model') || config.model('ROUTER')
-      : config.model(mode === 'SUFFICIENCY' ? 'CONTEXT_SUFFICIENCY' : mode);
-  const checkpoint = checkpointWriter(output, mode, model);
+  const model = snapshot.roleModel;
+  const checkpoint = checkpointWriter(output, mode, model, snapshot);
+  checkpoint([]);
   const result =
     mode === 'ROUTER'
-      ? await evaluateRouter(llm, config, model, callLog, checkpoint)
+      ? await evaluateRouter(llm, config, model, callLog, checkpoint, caseIds)
       : mode === 'SUFFICIENCY'
         ? await evaluateSufficiency(llm, config, callLog, checkpoint)
         : mode === 'VERIFIER'
@@ -483,17 +495,23 @@ async function main() {
                 '--mode must be ROUTER, SUFFICIENCY, or VERIFIER',
               );
             })();
-  if (output) fs.writeFileSync(output, `${JSON.stringify(result, null, 2)}\n`);
+  result.configSnapshot = snapshot;
+  if (output) writeAtomically(output, result);
   console.log(JSON.stringify(result));
   if (
-    (mode === 'ROUTER' && !arg('--limit') && result.caseCount < 50) ||
+    (mode === 'ROUTER' &&
+      !arg('--limit') &&
+      !caseIds &&
+      result.caseCount < 50) ||
     (mode !== 'ROUTER' && result.passed !== result.caseCount)
   ) {
     process.exitCode = 1;
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+module.exports = { evaluateRouter, checkpointWriter, normalizeCalls };
+if (require.main === module)
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
