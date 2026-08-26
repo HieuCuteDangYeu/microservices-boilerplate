@@ -177,14 +177,10 @@ def _summary(
     for call in calls:
         call["costUsd"] = model_call_cost(call, load_pricing())["costUsd"]
         call["estimatedNeurons"] = _estimated_neurons(call["costUsd"])
-    schema_codes = {
-        "STRUCTURED_COMPLETION_INVALID_JSON",
-        "STRUCTURED_COMPLETION_SCHEMA_INVALID",
-        "STRUCTURED_COMPLETION_EMPTY_CONTENT",
-        "STRUCTURED_COMPLETION_TRUNCATED",
-    }
     timeout_count = sum(call.get("providerStatus") == "TIMEOUT" for call in calls)
-    schema_count = sum(call.get("errorCode") in schema_codes for call in calls)
+    schema_count = sum(
+        call.get("errorCode") == "STRUCTURED_COMPLETION_SCHEMA_INVALID" for call in calls
+    )
     provider_failures = sum(call.get("providerStatus") != 200 for call in calls)
     metrics = {key: _mean(cases, key) for key in metric_names}
     if mode == "ROUTER":
@@ -238,6 +234,15 @@ def _summary(
             **reliability_metrics(executions),
             "timeoutCount": timeout_count,
             "schemaFailureCount": schema_count,
+            "truncationCount": sum(
+                call.get("errorCode") == "STRUCTURED_COMPLETION_TRUNCATED" for call in calls
+            ),
+            "invalidJsonCount": sum(
+                call.get("errorCode") == "STRUCTURED_COMPLETION_INVALID_JSON" for call in calls
+            ),
+            "emptyContentCount": sum(
+                call.get("errorCode") == "STRUCTURED_COMPLETION_EMPTY_CONTENT" for call in calls
+            ),
             "providerFailureCount": provider_failures,
         },
         "hardGatePassed": complete

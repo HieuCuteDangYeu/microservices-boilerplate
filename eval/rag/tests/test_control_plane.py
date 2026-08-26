@@ -118,3 +118,28 @@ def test_partial_account_limited_summary_fails_closed():
 
 def test_neuron_estimate_uses_workers_ai_neuron_price():
     assert _estimated_neurons(0.011) == 1_000
+
+
+def test_truncation_is_reported_separately_from_schema_and_timeout():
+    call = {
+        "modelRole": "ROUTER",
+        "model": "@cf/openai/gpt-oss-20b",
+        "providerStatus": 200,
+        "errorCode": "STRUCTURED_COMPLETION_TRUNCATED",
+        "inputTokens": 100,
+        "outputTokens": 768,
+    }
+    cases = [
+        {
+            "caseId": "generic",
+            "metrics": {"schemaSuccess": 0},
+            "latencyMs": 10,
+            "modelCalls": [call],
+            "hardGatePassed": False,
+        }
+    ]
+    summary = _summary(cases, "run", "ROUTER", call["model"], 1, None)
+    assert summary["reliability"]["truncationCount"] == 1
+    assert summary["reliability"]["schemaFailureCount"] == 0
+    assert summary["reliability"]["timeoutCount"] == 0
+    assert summary["hardGatePassed"] is False

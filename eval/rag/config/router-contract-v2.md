@@ -57,3 +57,18 @@ a boolean-only assertion. Synthetic failure checks show environment values no
 longer enter assertion diagnostics. Credential rotation cannot be inferred from
 source; authenticated GitHub operations and deployment remain blocked until the
 exposed credential is verifiably revoked or rotated.
+
+## Bounded live outcome (2026-08-26)
+
+The GPT six-case harness passed all five deterministic dimensions. The additional
+ten-case GPT run completed nine valid responses; one exhausted 768 tokens and was
+rejected as truncated. Thus 768 is not a production-validated budget; retain the
+existing runtime token default pending a separately bounded budget experiment.
+No 65-case primary gate or downstream evaluation was executed.
+
+At the actual 60000-ms ceiling GLM returned both HTTP responses, but one exhausted
+2048 tokens and was rejected as truncated. This is an output-budget/structural
+failure, not a 60-second timeout failure. Stop GLM expansion; `.env.example`
+disables the semantic fallback. Ignored local env and deployment are unchanged.
+The experimental JSON preserves the exact pre-run candidate and overrides rather
+than retroactively rewriting the tested snapshot.
