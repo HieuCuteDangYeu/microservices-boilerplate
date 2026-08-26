@@ -147,6 +147,12 @@ function resolveExperiment(
     ),
     structuredReasoningEffort: values.CLOUDFLARE_STRUCTURED_REASONING_EFFORT,
     aiGatewayEnabled: config.boolean('CLOUDFLARE_AI_GATEWAY_ENABLED', true),
+    aiGatewayMaxAttempts: config.number(
+      'CLOUDFLARE_AI_GATEWAY_MAX_ATTEMPTS',
+      1,
+      1,
+      3,
+    ),
     role,
     roleModel: config.model(role),
     configuredTimeoutMs: config.timeoutMs(role),

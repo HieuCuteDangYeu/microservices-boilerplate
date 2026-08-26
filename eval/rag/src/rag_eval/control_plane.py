@@ -182,7 +182,13 @@ def _summary(
         call.get("errorCode") == "STRUCTURED_COMPLETION_SCHEMA_INVALID" for call in calls
     )
     provider_failures = sum(call.get("providerStatus") != 200 for call in calls)
+    truncation_count = sum(
+        call.get("errorCode") == "STRUCTURED_COMPLETION_TRUNCATED" for call in calls
+    )
     metrics = {key: _mean(cases, key) for key in metric_names}
+    denominators = {
+        key: sum(case["metrics"].get(key) is not None for case in cases) for key in metric_names
+    }
     if mode == "ROUTER":
         reel_cases = [
             case
@@ -196,9 +202,19 @@ def _summary(
         ]
         metrics["falseNormalChatRate"] = _mean(reel_cases, "falseNormalChat")
         metrics["falseReelRate"] = _mean(non_reel_cases, "falseReel")
+        denominators.update(falseNormalChatRate=len(reel_cases), falseReelRate=len(non_reel_cases))
     metrics.update(
-        timeoutRate=timeout_count / len(cases), providerFailureRate=provider_failures / len(cases)
+        timeoutRate=timeout_count / len(cases),
+        truncationRate=truncation_count / len(cases),
+        providerFailureRate=provider_failures / len(cases),
     )
+    denominators.update(
+        timeoutRate=len(cases), truncationRate=len(cases), providerFailureRate=len(cases)
+    )
+    completion_tokens = [
+        call["outputTokens"] for call in calls if call.get("outputTokens") is not None
+    ]
+    complete_usage = bool(calls) and len(completion_tokens) == len(calls)
     tokens = {
         key: (
             sum(call[key] for call in calls)
@@ -220,7 +236,18 @@ def _summary(
         "complete": complete,
         "stoppedReason": stopped_reason,
         "metrics": metrics,
+        "metricDenominators": denominators,
         "tokens": tokens,
+        "completionTokens": {
+            **{
+                f"p{p}": percentile(completion_tokens, p / 100) if complete_usage else None
+                for p in (50, 90, 95)
+            },
+            "max": max(completion_tokens) if complete_usage else None,
+            "observedCalls": len(completion_tokens),
+            "expectedCalls": len(calls),
+        },
+        "reasoningTokenBreakdown": "UNAVAILABLE",
         "structuralCompleted": sum(case["metrics"].get("schemaSuccess") == 1 for case in cases),
         "latencyMs": {
             "p50": percentile(latencies, 0.5),
@@ -234,9 +261,7 @@ def _summary(
             **reliability_metrics(executions),
             "timeoutCount": timeout_count,
             "schemaFailureCount": schema_count,
-            "truncationCount": sum(
-                call.get("errorCode") == "STRUCTURED_COMPLETION_TRUNCATED" for call in calls
-            ),
+            "truncationCount": truncation_count,
             "invalidJsonCount": sum(
                 call.get("errorCode") == "STRUCTURED_COMPLETION_INVALID_JSON" for call in calls
             ),

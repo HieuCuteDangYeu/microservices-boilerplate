@@ -76,6 +76,7 @@ def test_network_failure_is_not_timeout_and_unknown_usage_stays_null():
     assert summary["reliability"]["timeoutCount"] == 0
     assert summary["cost"]["totalQueryCostUsd"] is None
     assert summary["tokens"]["inputTokens"] is None
+    assert summary["completionTokens"]["p95"] is None
     assert call["costUsd"] is None and call["estimatedNeurons"] is None
 
 
@@ -143,3 +144,42 @@ def test_truncation_is_reported_separately_from_schema_and_timeout():
     assert summary["reliability"]["schemaFailureCount"] == 0
     assert summary["reliability"]["timeoutCount"] == 0
     assert summary["hardGatePassed"] is False
+    assert summary["metrics"]["truncationRate"] == 1
+    assert summary["metricDenominators"]["truncationRate"] == 1
+    assert summary["completionTokens"]["max"] == 768
+    assert summary["reasoningTokenBreakdown"] == "UNAVAILABLE"
+
+
+def test_completion_token_percentiles_and_reel_denominators():
+    cases = [
+        {
+            "caseId": str(index),
+            "metrics": {"schemaSuccess": 1, "falseNormalChat": 0, "falseReel": 0},
+            "observation": {
+                "expectedIntent": "REEL_VIDEO_QUESTION" if index == 0 else "NORMAL_CHAT"
+            },
+            "latencyMs": 10,
+            "modelCalls": [
+                {
+                    "modelRole": "ROUTER",
+                    "model": "@cf/openai/gpt-oss-20b",
+                    "providerStatus": 200,
+                    "inputTokens": 100,
+                    "outputTokens": tokens,
+                }
+            ],
+            "hardGatePassed": True,
+        }
+        for index, tokens in enumerate([100, 200, 300, 400])
+    ]
+    summary = _summary(cases, "run", "ROUTER", "@cf/openai/gpt-oss-20b", 4, None)
+    assert summary["completionTokens"] == {
+        "p50": 250,
+        "p90": 370,
+        "p95": 385,
+        "max": 400,
+        "observedCalls": 4,
+        "expectedCalls": 4,
+    }
+    assert summary["metricDenominators"]["falseNormalChatRate"] == 1
+    assert summary["metricDenominators"]["falseReelRate"] == 3

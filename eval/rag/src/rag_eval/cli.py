@@ -269,7 +269,14 @@ def parser() -> argparse.ArgumentParser:
     control_plane.add_argument("--config", required=True)
     control_plane.add_argument(
         "--subset",
-        choices=["harness", "latency", "fallback-timeout", "fallback-semantic", "fallback20"],
+        choices=[
+            "harness",
+            "latency",
+            "fallback-timeout",
+            "fallback-semantic",
+            "fallback20",
+            "stress",
+        ],
     )
     control_plane.add_argument("--router-timeout-ms", type=int)
     control_plane.add_argument("--router-max-completion-tokens", type=int)

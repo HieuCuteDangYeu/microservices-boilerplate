@@ -75,6 +75,17 @@ function accountLimited(calls) {
   return calls.some((call) => call.providerCategory === 'ACCOUNT_LIMITED');
 }
 
+function routerStopReason(samples, stopOnTruncation) {
+  const calls = samples.flatMap((sample) => sample.calls ?? []);
+  if (accountLimited(calls)) return 'ACCOUNT_LIMITED';
+  if (
+    stopOnTruncation &&
+    calls.some((call) => call.errorCode === 'STRUCTURED_COMPLETION_TRUNCATED')
+  )
+    return 'STRUCTURED_COMPLETION_TRUNCATED';
+  return null;
+}
+
 function writeAtomically(output, payload) {
   const temporary = `${output}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`);
@@ -90,9 +101,10 @@ function checkpointWriter(output, mode, model, configSnapshot) {
       configSnapshot,
       caseCount: samples.length,
       samples,
-      stoppedReason: accountLimited(samples.at(-1)?.calls ?? [])
-        ? 'ACCOUNT_LIMITED'
-        : null,
+      stoppedReason: routerStopReason(
+        samples,
+        mode === 'ROUTER' && configSnapshot.overrides?.stopOnTruncation,
+      ),
     });
   };
 }
@@ -158,6 +170,7 @@ async function evaluateRouter(
   callLog,
   checkpoint,
   caseIds,
+  stopOnTruncation = false,
 ) {
   const useCase = new QueryRouterAgentUseCase(llm, config);
   const samples = [];
@@ -224,7 +237,7 @@ async function evaluateRouter(
       });
     }
     checkpoint(samples);
-    if (accountLimited(samples.at(-1).calls)) break;
+    if (routerStopReason(samples, stopOnTruncation)) break;
   }
   const expectedReel = samples.filter(
     (sample) => sample.expectedIntent === 'REEL_VIDEO_QUESTION',
@@ -496,7 +509,15 @@ async function main() {
   checkpoint([]);
   const result =
     mode === 'ROUTER'
-      ? await evaluateRouter(llm, config, model, callLog, checkpoint, caseIds)
+      ? await evaluateRouter(
+          llm,
+          config,
+          model,
+          callLog,
+          checkpoint,
+          caseIds,
+          snapshot.overrides.stopOnTruncation,
+        )
       : mode === 'SUFFICIENCY'
         ? await evaluateSufficiency(llm, config, callLog, checkpoint)
         : mode === 'VERIFIER'
@@ -507,6 +528,11 @@ async function main() {
               );
             })();
   result.configSnapshot = snapshot;
+  if (mode === 'ROUTER')
+    result.stoppedReason = routerStopReason(
+      result.samples,
+      snapshot.overrides.stopOnTruncation,
+    );
   if (output) writeAtomically(output, result);
   console.log(JSON.stringify(result));
   if (

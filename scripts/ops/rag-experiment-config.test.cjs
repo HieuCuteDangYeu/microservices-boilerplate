@@ -20,6 +20,83 @@ const options = {
   subset: 'harness',
 };
 
+test('locked GPT 2048 candidate is exact despite stale inherited configuration', () => {
+  const { config, snapshot, caseIds } = resolveExperiment(
+    {
+      ...options,
+      configFile: 'eval/rag/config/router-gpt2048-v3.json',
+      subset: 'stress',
+    },
+    {
+      AI_ROUTER_MODEL: 'stale-model',
+      AI_ROUTER_FALLBACK_MODEL: 'stale-fallback',
+      AI_ROUTER_TIMEOUT_MS: '8000',
+      AI_ROUTER_MAX_TOKENS: '768',
+      CLOUDFLARE_STRUCTURED_REASONING_EFFORT: 'high',
+    },
+  );
+  assert.equal(config.model('ROUTER'), '@cf/openai/gpt-oss-20b');
+  assert.equal(config.get('AI_ROUTER_FALLBACK_MODEL'), '');
+  assert.equal(config.timeoutMs('ROUTER'), 45000);
+  assert.equal(config.maxCompletionTokens('ROUTER'), 2048);
+  assert.equal(snapshot.candidateRouterFallbackModel, null);
+  assert.equal(snapshot.routerFallbackModel, null);
+  assert.equal(snapshot.roleModel, '@cf/openai/gpt-oss-20b');
+  assert.equal(snapshot.configuredTimeoutMs, 45000);
+  assert.equal(snapshot.maxCompletionTokens, 2048);
+  assert.equal(snapshot.structuredReasoningEffort, 'low');
+  assert.equal(snapshot.aiGatewayEnabled, false);
+  assert.equal(snapshot.aiGatewayMaxAttempts, 1);
+  assert.equal(snapshot.overrides.stopOnTruncation, true);
+  assert.equal(snapshot.calibrationReuseInFullComparison, false);
+  assert.equal(caseIds.length, 12);
+  assert.ok(
+    Object.values(snapshot.valueSources).every(
+      (source) => source === 'VERSIONED_CANDIDATE',
+    ),
+  );
+});
+
+test('locked router stops and checkpoints immediately after truncation', async () => {
+  const { config, snapshot } = resolveExperiment(
+    {
+      ...options,
+      configFile: 'eval/rag/config/router-gpt2048-v3.json',
+      subset: 'stress',
+    },
+    {},
+  );
+  const calls = [];
+  const llm = {
+    async generateObject() {
+      calls.push({
+        errorCode: 'STRUCTURED_COMPLETION_TRUNCATED',
+        providerStatus: 200,
+      });
+      throw Object.assign(new Error('Truncated'), {
+        code: 'STRUCTURED_COMPLETION_TRUNCATED',
+      });
+    },
+  };
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rag-truncation-'));
+  const output = path.join(directory, 'observations.json');
+  const result = await evaluateRouter(
+    llm,
+    config,
+    snapshot.roleModel,
+    calls,
+    checkpointWriter(output, 'ROUTER', snapshot.roleModel, snapshot),
+    ['task-01', 'explicit-01'],
+    true,
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(result.samples.length, 1);
+  assert.equal(
+    JSON.parse(fs.readFileSync(output)).stoppedReason,
+    'STRUCTURED_COMPLETION_TRUNCATED',
+  );
+});
+
 for (const timeoutMs of [8000, 20000, 45000, 60000]) {
   test(`explicit ${timeoutMs} timeout reaches router, HTTP abort timer, and diagnostics`, async (t) => {
     const { service, config, snapshot } = resolveExperiment(
