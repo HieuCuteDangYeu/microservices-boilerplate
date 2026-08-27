@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   make \
   openssl \
   python3 \
+  python3-pip \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
@@ -12,6 +13,8 @@ RUN corepack enable
 RUN corepack prepare pnpm@9.15.0 --activate
 
 COPY . .
+
+ENV MEDIASOUP_MAX_CORES=2
 
 RUN pnpm install --frozen-lockfile
 
@@ -25,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   make \
   openssl \
   python3 \
+  python3-pip \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
