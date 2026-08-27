@@ -254,7 +254,7 @@ jobs:
             cd /var/www/microservices
 
             if [ ! -d ".git" ]; then
-              git clone https://github.com/HieuCuteDangYeu/microservices-boilerplate.git .
+              git clone https://github.com/HieuCuteDangYeu/velora-backend.git .
             fi
 
             echo "Syncing production checkout to ${DEPLOY_SHA}..."
