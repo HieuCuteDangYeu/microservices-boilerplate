@@ -1,4 +1,4 @@
-# Microservices Boilerplate
+# Velora Backend
 
 A production-ready microservices architecture built with NestJS, featuring authentication, user management, media uploads, payments, and email notifications.
 
