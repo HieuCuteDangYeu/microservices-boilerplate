@@ -257,6 +257,8 @@ jobs:
               git clone https://github.com/HieuCuteDangYeu/velora-backend.git .
             fi
 
+            git remote set-url origin https://github.com/HieuCuteDangYeu/velora-backend.git
+
             echo "Syncing production checkout to ${DEPLOY_SHA}..."
             git status --short
             git fetch --prune origin master
