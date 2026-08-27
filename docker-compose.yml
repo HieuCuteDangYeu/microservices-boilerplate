@@ -9,7 +9,6 @@ services:
       - '3000:3000'
     env_file:
       - .env
-      - /opt/velora/secrets/notification-gateway.env
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -21,6 +20,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/user-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     env_file:
       - .env
@@ -35,6 +36,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/friend-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     env_file:
       - .env
@@ -49,6 +52,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/auth-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     env_file:
       - .env
@@ -63,6 +68,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/media-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     env_file:
       - .env
@@ -139,6 +146,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/content-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     env_file:
       - .env
@@ -153,6 +162,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/payment-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     ports:
       - '3006:3000'
@@ -183,6 +194,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/conversation-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     ports:
       - '3005:3005'
@@ -218,6 +231,8 @@ services:
     build:
       context: .
       dockerfile: ./apps/monitoring-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     env_file:
       - .env
@@ -234,10 +249,11 @@ services:
     build:
       context: .
       dockerfile: ./apps/notification-service/Dockerfile
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     env_file:
       - .env
-      - /opt/velora/secrets/notification-gateway.env
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -1,6 +1,11 @@
 FROM node:20-alpine AS builder
 
-RUN apk add --no-cache openssl
+ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+
+RUN sed -i \
+  "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" \
+  /etc/apk/repositories \
+  && apk add --no-cache openssl
 
 WORKDIR /usr/src/app
 RUN corepack enable
@@ -21,7 +26,12 @@ RUN pnpm run build conversation-service
 
 FROM node:20-alpine AS production
 
-RUN apk add --no-cache openssl
+ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+
+RUN sed -i \
+  "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" \
+  /etc/apk/repositories \
+  && apk add --no-cache openssl
 
 WORKDIR /usr/src/app
 COPY --from=builder --chown=node:node /usr/src/app/node_modules ./node_modules
