@@ -20,6 +20,191 @@ const options = {
   subset: 'harness',
 };
 
+test('provider contract variants share cases, prompt, schema, budget and strict semantic validation', async (t) => {
+  const requests = [];
+  const raw = {
+    intent: 'TASK_ACTION_REQUEST',
+    referenceTarget: 'NONE',
+    reelQuestionType: 'NONE',
+    requiredEvidence: ['NONE'],
+    recommendationAction: {
+      type: 'NONE',
+      query: '',
+      allowPersonalizedFallback: false,
+      suggestedQueries: [],
+    },
+    reason: 'External task request',
+  };
+  t.mock.method(global, 'fetch', async (_url, request) => {
+    const body = JSON.parse(request.body);
+    requests.push(body);
+    const message = body.tools
+      ? {
+          tool_calls: [
+            {
+              type: 'function',
+              function: {
+                name: 'route_message',
+                arguments: JSON.stringify(raw),
+              },
+            },
+          ],
+        }
+      : { content: JSON.stringify(raw) };
+    return new Response(
+      JSON.stringify({
+        choices: [
+          { finish_reason: body.tools ? 'tool_calls' : 'stop', message },
+        ],
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 100,
+          total_tokens: 200,
+        },
+      }),
+      { status: 200 },
+    );
+  });
+  for (const variant of ['chat-json-schema', 'tool-call']) {
+    const variantOptions = {
+      ...options,
+      configFile: `eval/rag/config/router-contract-${variant}-v1.json`,
+      subset: 'contract-diagnostic',
+    };
+    const { service, config, snapshot, caseIds } = resolveExperiment(
+      variantOptions,
+      {},
+    );
+    assert.deepEqual(caseIds, [
+      'task-01',
+      'implicit-01',
+      'discovery-01',
+      'memory-02',
+    ]);
+    assert.equal(snapshot.maxCompletionTokens, 2048);
+    assert.equal(snapshot.configuredTimeoutMs, 45000);
+    assert.equal(snapshot.overrides.stopOnStructuralFailure, false);
+    assert.equal(snapshot.routerFallbackModel, null);
+    const adapter = new CloudflareStructuredLlmAdapter(service);
+    const calls = [];
+    const generate = adapter.generateObject.bind(adapter);
+    adapter.generateObject = (input) =>
+      generate({ ...input, onDiagnostics: (d) => calls.push(d) });
+    const result = await evaluateRouter(
+      adapter,
+      config,
+      snapshot.roleModel,
+      calls,
+      () => {},
+      ['task-01'],
+    );
+    assert.equal(result.samples[0].strictPass, true);
+    assert.equal(
+      normalizeCalls(calls)[0].endpointContract,
+      snapshot.endpointContract,
+    );
+    const followup = resolveExperiment(
+      { ...variantOptions, subset: 'contract-additional' },
+      {},
+    );
+    assert.equal(followup.snapshot.overrides.stopOnStructuralFailure, true);
+    assert.equal(followup.caseIds.length, 8);
+    assert.equal(
+      followup.caseIds.some((id) => caseIds.includes(id)),
+      false,
+    );
+    assert.throws(
+      () => resolveExperiment({ ...variantOptions, maxTokens: 4096 }, {}),
+      /locked/,
+    );
+    assert.throws(
+      () => resolveExperiment({ ...variantOptions, timeoutMs: 60000 }, {}),
+      /locked/,
+    );
+  }
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0].messages, requests[1].messages);
+  assert.deepEqual(
+    requests[0].response_format.json_schema,
+    requests[1].tools[0].function.parameters,
+  );
+  assert.equal(
+    requests.every(
+      (r) => r.max_completion_tokens === 2048 && r.reasoning_effort === 'low',
+    ),
+    true,
+  );
+  assert.equal(
+    requests.some((r) => 'tool_choice' in r),
+    false,
+  );
+});
+
+test('normalization retains safe type/truncation metadata and reasoning count only', () => {
+  const calls = normalizeCalls([
+    {
+      model: 'test',
+      endpointContract: 'CHAT_TOOL_CALL',
+      responseContentType: 'null',
+      contentPresent: false,
+      toolCallsPresent: true,
+      expectedType: 'array',
+      actualJsonType: 'string',
+      usage: { inputTokens: 1, outputTokens: 2, reasoningTokens: 1 },
+      responseBody: 'private-content',
+      reasoningContent: 'private-content',
+      arguments: 'private-content',
+    },
+  ]);
+  assert.equal(calls[0].reasoningTokens, 1);
+  assert.equal(calls[0].expectedType, 'array');
+  assert.equal(calls[0].actualJsonType, 'string');
+  assert.equal(calls[0].contentPresent, false);
+  assert.equal(calls[0].toolCallsPresent, true);
+  assert.ok(!JSON.stringify(calls).includes('private-content'));
+});
+
+test('post-selection contract runs checkpoint and stop at first structural failure', async () => {
+  const { config, snapshot } = resolveExperiment(
+    {
+      ...options,
+      configFile: 'eval/rag/config/router-contract-tool-call-v1.json',
+      subset: 'contract-additional',
+    },
+    {},
+  );
+  const calls = [];
+  const llm = {
+    async generateObject() {
+      calls.push({
+        errorCode: 'STRUCTURED_COMPLETION_SCHEMA_INVALID',
+        providerStatus: 200,
+      });
+      throw Object.assign(new Error('Schema invalid'), {
+        code: 'STRUCTURED_COMPLETION_SCHEMA_INVALID',
+      });
+    },
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rag-contract-stop-'));
+  const output = path.join(dir, 'observations.json');
+  const result = await evaluateRouter(
+    llm,
+    config,
+    snapshot.roleModel,
+    calls,
+    checkpointWriter(output, 'ROUTER', snapshot.roleModel, snapshot),
+    ['explicit-01', 'explicit-02'],
+    false,
+    true,
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(result.samples.length, 1);
+  assert.equal(
+    JSON.parse(fs.readFileSync(output)).stoppedReason,
+    'STRUCTURAL_FAILURE',
+  );
+});
+
 test('locked GPT 2048 candidate is exact despite stale inherited configuration', () => {
   const { config, snapshot, caseIds } = resolveExperiment(
     {

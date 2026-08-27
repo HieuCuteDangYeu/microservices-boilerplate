@@ -221,7 +221,7 @@ def _summary(
             if calls and all(call.get(key) is not None for call in calls)
             else None
         )
-        for key in ("inputTokens", "outputTokens")
+        for key in ("inputTokens", "outputTokens", "reasoningTokens")
     }
     complete = len(cases) == expected_case_count
     return {
@@ -247,7 +247,13 @@ def _summary(
             "observedCalls": len(completion_tokens),
             "expectedCalls": len(calls),
         },
-        "reasoningTokenBreakdown": "UNAVAILABLE",
+        "reasoningTokenBreakdown": (
+            "AVAILABLE"
+            if tokens["reasoningTokens"] is not None
+            else "PARTIAL"
+            if any(call.get("reasoningTokens") is not None for call in calls)
+            else "UNAVAILABLE"
+        ),
         "structuralCompleted": sum(case["metrics"].get("schemaSuccess") == 1 for case in cases),
         "latencyMs": {
             "p50": percentile(latencies, 0.5),

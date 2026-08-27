@@ -183,3 +183,12 @@ def test_completion_token_percentiles_and_reel_denominators():
     }
     assert summary["metricDenominators"]["falseNormalChatRate"] == 1
     assert summary["metricDenominators"]["falseReelRate"] == 3
+    for case in cases:
+        case["modelCalls"][0]["reasoningTokens"] = 50
+    summary = _summary(cases, "run", "ROUTER", "@cf/openai/gpt-oss-20b", 4, None)
+    assert summary["reasoningTokenBreakdown"] == "AVAILABLE"
+    assert summary["tokens"]["reasoningTokens"] == 200
+    del cases[0]["modelCalls"][0]["reasoningTokens"]
+    summary = _summary(cases, "run", "ROUTER", "@cf/openai/gpt-oss-20b", 4, None)
+    assert summary["reasoningTokenBreakdown"] == "PARTIAL"
+    assert summary["tokens"]["reasoningTokens"] is None

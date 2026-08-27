@@ -276,6 +276,8 @@ def parser() -> argparse.ArgumentParser:
             "fallback-semantic",
             "fallback20",
             "stress",
+            "contract-diagnostic",
+            "contract-additional",
         ],
     )
     control_plane.add_argument("--router-timeout-ms", type=int)

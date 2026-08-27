@@ -15,7 +15,7 @@ const { AiApplicationConfigAdapter } = require(
   ),
 );
 const SAFE_KEY =
-  /^(AI_[A-Z_]+_(MODEL|TIMEOUT_MS|MAX_TOKENS)|CLOUDFLARE_STRUCTURED_REASONING_EFFORT|CLOUDFLARE_AI_GATEWAY_(ENABLED|MAX_ATTEMPTS))$/;
+  /^(AI_[A-Z_]+_(MODEL|TIMEOUT_MS|MAX_TOKENS)|CLOUDFLARE_ROUTER_OUTPUT_CONTRACT|CLOUDFLARE_STRUCTURED_REASONING_EFFORT|CLOUDFLARE_AI_GATEWAY_(ENABLED|MAX_ATTEMPTS))$/;
 
 function resolveExperiment(
   { envFile, configFile, model, timeoutMs, maxTokens, mode, subset },
@@ -41,6 +41,25 @@ function resolveExperiment(
     Object.keys(candidate.env).map((key) => [key, 'VERSIONED_CANDIDATE']),
   );
   const overrides = { ...candidate.experimentOverrides };
+  if (candidate.providerContractInvestigation) {
+    if (
+      !['CHAT_JSON_SCHEMA', 'CHAT_TOOL_CALL'].includes(
+        candidate.env.CLOUDFLARE_ROUTER_OUTPUT_CONTRACT,
+      ) ||
+      candidate.env.AI_ROUTER_MODEL !== '@cf/openai/gpt-oss-20b' ||
+      (model && model !== '@cf/openai/gpt-oss-20b') ||
+      mode !== 'ROUTER' ||
+      Number(maxTokens ?? candidate.env.AI_ROUTER_MAX_TOKENS) !== 2048 ||
+      Number(timeoutMs ?? candidate.env.AI_ROUTER_TIMEOUT_MS) !== 45000 ||
+      candidate.env.AI_ROUTER_FALLBACK_MODEL !== '' ||
+      candidate.env.CLOUDFLARE_AI_GATEWAY_ENABLED !== 'false' ||
+      candidate.env.CLOUDFLARE_AI_GATEWAY_MAX_ATTEMPTS !== '1'
+    )
+      throw new Error(
+        'Provider contract investigation must retain locked model, budget, timeout and no retries/fallback',
+      );
+    overrides.stopOnStructuralFailure = subset !== 'contract-diagnostic';
+  }
   if (timeoutMs !== undefined) {
     values.AI_ROUTER_TIMEOUT_MS = String(timeoutMs);
     sources.AI_ROUTER_TIMEOUT_MS = 'CLI_OVERRIDE';
@@ -119,6 +138,8 @@ function resolveExperiment(
       .update(fs.readFileSync(datasetPath))
       .digest('hex'),
     variantName: candidate.variantName,
+    endpointContract:
+      values.CLOUDFLARE_ROUTER_OUTPUT_CONTRACT || 'CHAT_JSON_SCHEMA',
     candidateConfigSha256: crypto
       .createHash('sha256')
       .update(candidateText)

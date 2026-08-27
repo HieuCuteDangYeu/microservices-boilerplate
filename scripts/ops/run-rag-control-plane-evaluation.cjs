@@ -49,6 +49,7 @@ function normalizeCalls(calls) {
     inputTokens: call.usage?.inputTokens ?? null,
     outputTokens: call.usage?.outputTokens ?? null,
     totalTokens: call.usage?.totalTokens ?? null,
+    reasoningTokens: call.usage?.reasoningTokens ?? null,
     usageSource: call.usage ? 'PROVIDER' : 'UNAVAILABLE',
     costUsd: null,
     estimatedNeurons: null,
@@ -56,6 +57,10 @@ function normalizeCalls(calls) {
     configuredTimeoutMs: call.configuredTimeoutMs,
     configuredMaxCompletionTokens: call.configuredMaxCompletionTokens,
     finishReason: call.finishReason,
+    endpointContract: call.endpointContract,
+    responseContentType: call.responseContentType,
+    contentPresent: call.contentPresent,
+    toolCallsPresent: call.toolCallsPresent,
     attempt: call.attempt ?? 1,
     providerStatus: call.providerStatus,
     providerCode: call.providerCode,
@@ -67,6 +72,8 @@ function normalizeCalls(calls) {
     schemaConstraint: call.schemaConstraint,
     constraint: call.schemaConstraint,
     schemaVersion: call.schemaVersion,
+    expectedType: call.expectedType,
+    actualJsonType: call.actualJsonType,
     scope: 'QUERY',
   }));
 }
@@ -75,7 +82,11 @@ function accountLimited(calls) {
   return calls.some((call) => call.providerCategory === 'ACCOUNT_LIMITED');
 }
 
-function routerStopReason(samples, stopOnTruncation) {
+function routerStopReason(
+  samples,
+  stopOnTruncation,
+  stopOnStructuralFailure = false,
+) {
   const calls = samples.flatMap((sample) => sample.calls ?? []);
   if (accountLimited(calls)) return 'ACCOUNT_LIMITED';
   if (
@@ -83,6 +94,8 @@ function routerStopReason(samples, stopOnTruncation) {
     calls.some((call) => call.errorCode === 'STRUCTURED_COMPLETION_TRUNCATED')
   )
     return 'STRUCTURED_COMPLETION_TRUNCATED';
+  if (stopOnStructuralFailure && samples.some((sample) => !sample.success))
+    return 'STRUCTURAL_FAILURE';
   return null;
 }
 
@@ -104,6 +117,7 @@ function checkpointWriter(output, mode, model, configSnapshot) {
       stoppedReason: routerStopReason(
         samples,
         mode === 'ROUTER' && configSnapshot.overrides?.stopOnTruncation,
+        mode === 'ROUTER' && configSnapshot.overrides?.stopOnStructuralFailure,
       ),
     });
   };
@@ -171,6 +185,7 @@ async function evaluateRouter(
   checkpoint,
   caseIds,
   stopOnTruncation = false,
+  stopOnStructuralFailure = false,
 ) {
   const useCase = new QueryRouterAgentUseCase(llm, config);
   const samples = [];
@@ -237,7 +252,8 @@ async function evaluateRouter(
       });
     }
     checkpoint(samples);
-    if (routerStopReason(samples, stopOnTruncation)) break;
+    if (routerStopReason(samples, stopOnTruncation, stopOnStructuralFailure))
+      break;
   }
   const expectedReel = samples.filter(
     (sample) => sample.expectedIntent === 'REEL_VIDEO_QUESTION',
@@ -517,6 +533,7 @@ async function main() {
           checkpoint,
           caseIds,
           snapshot.overrides.stopOnTruncation,
+          snapshot.overrides.stopOnStructuralFailure,
         )
       : mode === 'SUFFICIENCY'
         ? await evaluateSufficiency(llm, config, callLog, checkpoint)
@@ -532,6 +549,7 @@ async function main() {
     result.stoppedReason = routerStopReason(
       result.samples,
       snapshot.overrides.stopOnTruncation,
+      snapshot.overrides.stopOnStructuralFailure,
     );
   if (output) writeAtomically(output, result);
   console.log(JSON.stringify(result));

@@ -12,6 +12,15 @@ export type StructuredProviderFailureCategory =
   | 'TRANSIENT_PROVIDER_FAILURE'
   | 'UNKNOWN_PROVIDER_FAILURE';
 
+export type StructuredJsonType =
+  | 'string'
+  | 'array'
+  | 'object'
+  | 'number'
+  | 'boolean'
+  | 'null'
+  | 'absent';
+
 export interface StructuredLlmCallDiagnostics {
   modelRole?: string;
   model: string;
@@ -20,11 +29,16 @@ export interface StructuredLlmCallDiagnostics {
   configuredTimeoutMs: number;
   configuredMaxCompletionTokens: number;
   finishReason?: string;
+  endpointContract?: string;
+  responseContentType?: StructuredJsonType;
+  contentPresent?: boolean;
+  toolCallsPresent?: boolean;
   attempt: number;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
+    reasoningTokens?: number;
   };
   errorCode?: string;
   providerCode?: number;
@@ -35,6 +49,8 @@ export interface StructuredLlmCallDiagnostics {
   schemaPath?: string;
   schemaConstraint?: string;
   schemaVersion?: string;
+  expectedType?: StructuredJsonType;
+  actualJsonType?: StructuredJsonType;
 }
 
 export interface GenerateStructuredObjectInput {
