@@ -313,8 +313,6 @@ pnpm studio:payment
 
 ### Heroku (CI/CD)
 
-The project includes a GitHub Actions workflow for automatic deployment to Heroku:
-
 1. Create Heroku apps for each service
 2. Add `HEROKU_API_KEY` to GitHub secrets
 3. Push to `main` branch to trigger deployment
