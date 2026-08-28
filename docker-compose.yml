@@ -178,7 +178,7 @@ services:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
     ports:
-      - '3006:3000'
+      - '3006:3006'
     env_file:
       - .env
     depends_on:
@@ -209,8 +209,8 @@ services:
       args:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
-    ports:
-      - '3005:3005'
+    expose:
+      - '3005'
     env_file:
       - .env
     depends_on:
@@ -225,8 +225,9 @@ services:
       context: .
       dockerfile: ./apps/call-service/Dockerfile
     restart: always
+    expose:
+      - '3007'
     ports:
-      - '3007:3007'
       - '40000-40100:40000-40100/udp'
     environment:
       NODE_ENV: production
