@@ -177,8 +177,8 @@ services:
       args:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: always
-    ports:
-      - '3006:3006'
+    expose:
+      - '3006'
     env_file:
       - .env
     depends_on:
