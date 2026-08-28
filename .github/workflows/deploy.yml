@@ -1,340 +1,463 @@
-name: Deploy Microservices to DigitalOcean
+name: Homelab CI/CD
 
 on:
+  pull_request:
+    branches:
+      - master
   push:
     branches:
       - master
   workflow_dispatch:
+    inputs:
+      build_all:
+        description: Build every application Docker image instead of only affected images
+        required: false
+        default: false
+        type: boolean
 
-# Production uses mutable :latest image tags and a single Docker/containerd
-# store on one VPS. Queue the entire workflow so a newer build cannot overwrite
-# :latest while an older deployment is still pulling images.
+# Jobs inherit read-only repository access. Only the promotion job needs write
+# access to move the machine-managed homelab-deploy branch.
+permissions:
+  contents: read
+
+# Production runs publish mutable :latest tags and move the deployment branch,
+# so they must run in order. PRs have independent, cancelable validation queues.
 concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  group: homelab-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   detect-changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
-      build_services_json: ${{ steps.detect.outputs.build_services_json }}
+      build_matrix_json: ${{ steps.detect.outputs.build_matrix_json }}
       build_services_list: ${{ steps.detect.outputs.build_services_list }}
-      deploy_services_json: ${{ steps.detect.outputs.deploy_services_json }}
-      deploy_services_list: ${{ steps.detect.outputs.deploy_services_list }}
+      call_regression_required: ${{ steps.detect.outputs.call_regression_required }}
+      comparison_base: ${{ steps.detect.outputs.comparison_base }}
+      checkout_sha: ${{ steps.detect.outputs.checkout_sha }}
+      is_production: ${{ steps.detect.outputs.is_production }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - name: Detect affected services
+      - name: Detect affected application images
         id: detect
         shell: bash
         run: |
           set -euo pipefail
 
+          # These are the application services that own a Docker build in
+          # docker-compose.yml. The two *-long worker services intentionally do
+          # not appear here: they have no build stanza and share the image of
+          # media-processing-service or reel-indexing-service respectively.
           all_services=(
             api-gateway
             user-service
             friend-service
             auth-service
             media-service
+            media-processing-service
+            reel-indexing-service
+            content-service
             payment-service
             mail-service
             conversation-service
-            content-service
-            media-processing-service
-            reel-indexing-service
-            ai-service
             call-service
             monitoring-service
             notification-service
+            ai-service
           )
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            changed_files="__BUILD_ALL__"
-          else
-            before_sha="${{ github.event.before }}"
-            head_sha="${{ github.sha }}"
-
-            if [ "$before_sha" = "0000000000000000000000000000000000000000" ]; then
-              changed_files="__BUILD_ALL__"
-            else
-              git fetch --no-tags --depth=1 origin "$before_sha"
-              changed_files="$(git diff --name-only "$before_sha" "$head_sha")"
-            fi
-          fi
-
-          echo "Changed files:"
-          printf '%s\n' "$changed_files"
-
+          event_name='${{ github.event_name }}'
+          head_sha="$(git rev-parse HEAD)"
+          comparison_base=''
           build_all=false
-          deploy_all=false
-          if printf '%s\n' "$changed_files" | grep -qx '__BUILD_ALL__'; then
-            build_all=true
-            deploy_all=true
-          fi
+          is_production=false
 
-          if printf '%s\n' "$changed_files" | grep -Eq '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|tsconfig\.build\.json|nest-cli\.json)'; then
-            build_all=true
-            deploy_all=true
-          fi
+          resolve_deployment_base() {
+            # Check the remote explicitly so a missing deployment branch is
+            # distinguishable from a transient remote/authentication failure.
+            if git ls-remote --exit-code --heads origin refs/heads/homelab-deploy >/dev/null; then
+              git fetch --no-tags origin \
+                '+refs/heads/homelab-deploy:refs/remotes/origin/homelab-deploy'
+              comparison_base="$(git rev-parse refs/remotes/origin/homelab-deploy)"
 
-          if printf '%s\n' "$changed_files" | grep -Eq '^docker-compose\.yml'; then
-            deploy_all=true
-          fi
-
-          if printf '%s\n' "$changed_files" | grep -Eq '^\.github/workflows/deploy\.yml$'; then
-            deploy_all=true
-          fi
-
-          build_services=()
-          deploy_services=()
-
-          add_build_service() {
-            local candidate="$1"
-
-            for service in "${build_services[@]}"; do
-              if [ "$service" = "$candidate" ]; then
-                return
+              if git merge-base --is-ancestor "$comparison_base" "$head_sha"; then
+                :
+              elif git merge-base --is-ancestor "$head_sha" "$comparison_base"; then
+                echo "Candidate $head_sha is older than already promoted homelab-deploy $comparison_base; refusing stale production run." >&2
+                exit 1
+              else
+                echo "Candidate $head_sha and already promoted homelab-deploy $comparison_base have diverged; refusing production run until deliberate recovery." >&2
+                exit 1
               fi
-            done
-
-            build_services+=("$candidate")
+            else
+              remote_status=$?
+              if [ "$remote_status" -eq 2 ]; then
+                echo 'origin/homelab-deploy does not exist; treating this as the initial production build.'
+                comparison_base=''
+                build_all=true
+              else
+                echo 'Unable to query origin/homelab-deploy; refusing to choose an incremental production build base.' >&2
+                exit "$remote_status"
+              fi
+            fi
           }
 
-          add_services_importing_common_file() {
-            local common_file="$1"
-            local import_path="${common_file#libs/common/src/}"
-            local matched=false
+          if [ "$event_name" = 'workflow_dispatch' ] && [ "$GITHUB_REF" != 'refs/heads/master' ]; then
+            echo 'workflow_dispatch is a production path and must be started from master.' >&2
+            exit 1
+          fi
 
-            import_path="@common/${import_path%.ts}"
-            echo "Resolving common file ${common_file} as import ${import_path}"
-
-            for service in "${all_services[@]}"; do
-              if grep -R -q -F --include='*.ts' "$import_path" "apps/${service}/src"; then
-                echo "Common file ${common_file} affects ${service}"
-                add_build_service "$service"
-                matched=true
+          case "$event_name" in
+            pull_request)
+              comparison_base='${{ github.event.pull_request.base.sha }}'
+              ;;
+            push)
+              is_production=true
+              resolve_deployment_base
+              ;;
+            workflow_dispatch)
+              is_production=true
+              if [ '${{ inputs.build_all }}' = 'true' ]; then
+                build_all=true
               fi
-            done
+              resolve_deployment_base
+              ;;
+            *)
+              echo "Unsupported event: $event_name" >&2
+              exit 1
+              ;;
+          esac
 
-            [ "$matched" = true ]
+          if [ -n "$comparison_base" ]; then
+            if ! git cat-file -e "${comparison_base}^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$comparison_base"
+            fi
+            changed_files="$(git diff --name-only "$comparison_base" "$head_sha")"
+          else
+            changed_files='__BUILD_ALL__'
+            build_all=true
+          fi
+
+          echo 'Changed files:'
+          printf '%s\n' "$changed_files"
+
+          build_services=()
+          build_service_count=0
+          add_build_service() {
+            local candidate="$1"
+            for service in "${build_services[@]:-}"; do
+              [ "$service" = "$candidate" ] && return
+            done
+            build_services+=("$candidate")
+            build_service_count=$((build_service_count + 1))
           }
 
           if [ "$build_all" != true ]; then
-            while IFS= read -r common_file; do
-              if [ -z "$common_file" ]; then
-                continue
-              fi
+            while IFS= read -r changed_file; do
+              [ -z "$changed_file" ] && continue
 
-              if ! add_services_importing_common_file "$common_file"; then
+              # Runtime configuration and documentation still go through the
+              # validation/promotion gate, but do not change an app image.
+              case "$changed_file" in
+                docker-compose.yml|docker-compose.yaml|docker-compose.*.yml|docker-compose.*.yaml|compose.yml|compose.yaml|infra/nginx/*|.env.example|.github/*|docs/*|README.md|QWEN.md|CLAUDE.md|LICENSE*|*.md|.gitignore|.prettierrc|eslint.config.mjs|jest.config.cjs|.vscode/*)
+                  continue
+                  ;;
+              esac
+
+              # All Dockerfiles copy the monorepo root. These inputs can alter
+              # dependency installation or compilation for every application.
+              case "$changed_file" in
+                package.json|pnpm-lock.yaml|pnpm-workspace.yaml|nest-cli.json|tsconfig.json|tsconfig.build.json|.npmrc|.dockerignore|libs/*|scripts/*|Dockerfile|Dockerfile.*|docker/*|infra/docker/*)
+                  build_all=true
+                  break
+                  ;;
+              esac
+
+              matched_service=false
+              for service in "${all_services[@]}"; do
+                if [[ "$changed_file" == "apps/${service}/"* ]]; then
+                  add_build_service "$service"
+                  matched_service=true
+                  break
+                fi
+              done
+
+              # Unknown tracked files are conservative: build every image
+              # rather than risk missing a shared build dependency.
+              if [ "$matched_service" = false ]; then
                 build_all=true
-                deploy_all=true
                 break
               fi
-            done < <(printf '%s\n' "$changed_files" | grep -E '^libs/common/src/.*\.ts$' || true)
-          fi
-
-          shared_library_changes="$(printf '%s\n' "$changed_files" | grep -E '^libs/' | grep -Ev '^libs/common/src/.*\.ts$' || true)"
-          if [ -n "$shared_library_changes" ]; then
-            build_all=true
-            deploy_all=true
+            done <<< "$changed_files"
           fi
 
           if [ "$build_all" = true ]; then
             build_services=("${all_services[@]}")
-            deploy_services=("${all_services[@]}")
-          else
-            for service in "${all_services[@]}"; do
-              if printf '%s\n' "$changed_files" | grep -Eq "^apps/${service}/"; then
-                add_build_service "$service"
-              fi
-            done
-
-            if [ "$deploy_all" = true ]; then
-              deploy_services=("${all_services[@]}")
-            else
-              deploy_services=("${build_services[@]}")
-            fi
+            build_service_count="${#all_services[@]}"
           fi
 
-          for service in "${deploy_services[@]}"; do
-            if [ "$service" = "media-processing-service" ]; then
-              deploy_services+=("media-processing-long-service")
-              break
-            fi
-          done
+          # Resolve Dockerfile, build context, and image repository from the
+          # actual Compose model. The placeholder is safe and is never logged;
+          # --no-env-resolution prevents service env_file values from being read.
+          dockerhub_placeholder='ci-placeholder'
+          compose_build_matrix="$(
+            COMPOSE_DISABLE_ENV_FILE=1 \
+              DOCKERHUB_USERNAME="$dockerhub_placeholder" \
+              RABBITMQ_USER=ci \
+              RABBITMQ_PASSWORD=ci \
+              docker compose config --no-env-resolution --no-path-resolution --format json \
+                | jq -ce --arg prefix "${dockerhub_placeholder}/" '
+                    [
+                      .services
+                      | to_entries[]
+                      | select(.value.build != null)
+                      | {
+                          service: .key,
+                          context: .value.build.context,
+                          dockerfile: .value.build.dockerfile,
+                          image: (
+                            .value.image
+                            | if startswith($prefix) and endswith(":latest") then
+                                ltrimstr($prefix) | rtrimstr(":latest")
+                              else
+                                error("compose build image must use the CI Docker Hub namespace and :latest")
+                              end
+                          )
+                        }
+                    ]
+                    | sort_by(.service)
+                  '
+          )"
 
-          for service in "${deploy_services[@]}"; do
-            if [ "$service" = "reel-indexing-service" ]; then
-              deploy_services+=("reel-indexing-long-service")
-              break
-            fi
-          done
+          expected_services_json="$(printf '%s\n' "${all_services[@]}" | jq -R . | jq -cs 'sort')"
+          actual_services_json="$(jq -c '[.[].service] | sort' <<< "$compose_build_matrix")"
+          if [ "$expected_services_json" != "$actual_services_json" ]; then
+            echo 'The explicit application service list does not match Compose build services.' >&2
+            exit 1
+          fi
 
-          if [ "${#build_services[@]}" -eq 0 ]; then
-            build_services_json='[]'
+          while IFS=$'\t' read -r service context dockerfile image; do
+            if [ "$context" != '.' ]; then
+              echo "${service} uses unsupported build context ${context}; update this workflow intentionally." >&2
+              exit 1
+            fi
+            if [ ! -f "$dockerfile" ]; then
+              echo "${service} Dockerfile does not exist: ${dockerfile}" >&2
+              exit 1
+            fi
+            if [ -z "$image" ]; then
+              echo "${service} has no Docker Hub repository name." >&2
+              exit 1
+            fi
+          done < <(jq -r '.[] | [.service, .context, .dockerfile, .image] | @tsv' <<< "$compose_build_matrix")
+
+          if [ "$build_service_count" -eq 0 ]; then
+            build_matrix_json='[]'
             build_services_list=''
           else
-            build_services_json="$(printf '%s\n' "${build_services[@]}" | jq -R . | jq -cs .)"
-            build_services_list="${build_services[*]}"
+            requested_services_json="$(printf '%s\n' "${build_services[@]}" | jq -R . | jq -cs .)"
+            build_matrix_json="$(jq -c --argjson requested "$requested_services_json" '[.[] | select(.service as $service | $requested | index($service))]' <<< "$compose_build_matrix")"
+            build_services_list="$(jq -r '[.[].service] | join(" ")' <<< "$build_matrix_json")"
           fi
 
-          if [ "${#deploy_services[@]}" -eq 0 ]; then
-            deploy_services_json='[]'
-            deploy_services_list=''
-          else
-            deploy_services_json="$(printf '%s\n' "${deploy_services[@]}" | jq -R . | jq -cs .)"
-            deploy_services_list="${deploy_services[*]}"
+          call_regression_required=false
+          if [ "$build_all" = true ] || printf '%s\n' "$changed_files" | grep -Eq '^(apps/(call-service|notification-service|api-gateway|monitoring-service)/|libs/common/src/calls/|infra/nginx/|docker-compose\.ya?ml$)'; then
+            call_regression_required=true
           fi
 
           echo "Build services: ${build_services_list:-none}"
-          echo "Deploy services: ${deploy_services_list:-none}"
-          echo "build_services_json=$build_services_json" >> "$GITHUB_OUTPUT"
-          echo "build_services_list=$build_services_list" >> "$GITHUB_OUTPUT"
-          echo "deploy_services_json=$deploy_services_json" >> "$GITHUB_OUTPUT"
-          echo "deploy_services_list=$deploy_services_list" >> "$GITHUB_OUTPUT"
+          echo "Call regression required: $call_regression_required"
+          {
+            printf 'build_matrix_json=%s\n' "$build_matrix_json"
+            printf 'build_services_list=%s\n' "$build_services_list"
+            printf 'call_regression_required=%s\n' "$call_regression_required"
+            printf 'comparison_base=%s\n' "$comparison_base"
+            printf 'checkout_sha=%s\n' "$head_sha"
+            printf 'is_production=%s\n' "$is_production"
+          } >> "$GITHUB_OUTPUT"
 
-  build-and-push:
+  validate:
     needs: detect-changes
-    if: needs.detect-changes.outputs.build_services_json != '[]'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: ${{ fromJson(needs.detect-changes.outputs.build_services_json) }}
-
+    runs-on: ubuntu-24.04
+    env:
+      # CI-only syntactically valid values for Prisma generation. They do not
+      # point at a real database and are never written to a repository file.
+      AI_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ai?schema=public
+      AUTH_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/auth?schema=public
+      CONTENT_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/content?schema=public
+      CONVERSATION_DATABASE_URL: mongodb://127.0.0.1:27017/conversation
+      FRIEND_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/friend?schema=public
+      MONITORING_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/monitoring?schema=public
+      NOTIFICATION_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/notification?schema=public
+      PAYMENT_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/payment?schema=public
+      RABBITMQ_URL: amqp://127.0.0.1:5672
+      REEL_INDEXING_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/reel_indexing?schema=public
+      USER_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/user?schema=public
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.detect-changes.outputs.checkout_sha }}
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Check whitespace errors
+        env:
+          COMPARISON_BASE: ${{ needs.detect-changes.outputs.comparison_base }}
+          COMPARISON_HEAD: ${{ needs.detect-changes.outputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [ -n "$COMPARISON_BASE" ]; then
+            if ! git cat-file -e "${COMPARISON_BASE}^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$COMPARISON_BASE"
+            fi
+            git diff --check "$COMPARISON_BASE" "$COMPARISON_HEAD"
+          fi
+
+      - name: Validate Docker Compose without a production env file
+        run: |
+          COMPOSE_DISABLE_ENV_FILE=1 \
+            DOCKERHUB_USERNAME=ci-placeholder \
+            RABBITMQ_USER=ci \
+            RABBITMQ_PASSWORD=ci \
+            docker compose config --no-env-resolution --quiet
+
+      - name: Validate Nginx configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:alpine nginx -t
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build mediasoup worker for call regression
+        if: needs.detect-changes.outputs.call_regression_required == 'true'
+        run: pnpm rebuild mediasoup
+
+      - name: Generate Prisma clients
+        run: pnpm run prisma:generate:all
+
+      - name: Build all Nest applications
+        run: pnpm run build:all
+
+      - name: Run call unit regression tests
+        if: needs.detect-changes.outputs.call_regression_required == 'true'
+        run: pnpm exec jest --runInBand apps/call-service/test/unit/application
+
+      - name: Run call E2E regression test
+        if: needs.detect-changes.outputs.call_regression_required == 'true'
+        run: pnpm exec jest --runInBand apps/call-service/test/e2e/call-flow.e2e.spec.ts
+
+  build-images:
+    needs: [detect-changes, validate]
+    if: >-
+      needs.detect-changes.outputs.build_matrix_json != '[]' &&
+      needs.detect-changes.outputs.is_production != 'true'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include: ${{ fromJson(needs.detect-changes.outputs.build_matrix_json) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect-changes.outputs.checkout_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ARM64 image without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}-arm64
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}-arm64
+
+  build-and-push-images:
+    needs: [detect-changes, validate]
+    if: >-
+      needs.detect-changes.outputs.build_matrix_json != '[]' &&
+      needs.detect-changes.outputs.is_production == 'true'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include: ${{ fromJson(needs.detect-changes.outputs.build_matrix_json) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect-changes.outputs.checkout_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker images
-        uses: docker/build-push-action@v5
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v7
         with:
-          context: .
-          file: ./apps/${{ matrix.service }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/arm64
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}:${{ needs.detect-changes.outputs.checkout_sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}-arm64
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}-arm64
 
-  deploy:
-    if: always() && (needs.detect-changes.outputs.deploy_services_json == '[]' || needs.detect-changes.outputs.build_services_json == '[]' || needs.build-and-push.result == 'success')
-    needs: [detect-changes, build-and-push]
-    runs-on: ubuntu-latest
+  promote-homelab:
+    needs: [detect-changes, validate, build-and-push-images]
+    if: >-
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.is_production == 'true' &&
+      needs.validate.result == 'success' &&
+      (needs.build-and-push-images.result == 'success' || needs.build-and-push-images.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - name: Deploy via SSH
-        if: needs.detect-changes.outputs.deploy_services_json != '[]'
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout approved commit
+        uses: actions/checkout@v4
         with:
-          host: ${{ secrets.DROPLET_IP }}
-          username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 60m
-          script: |
-            set -e
+          ref: ${{ needs.detect-changes.outputs.checkout_sha }}
+          fetch-depth: 0
+          persist-credentials: true
 
-            DEPLOY_SHA="${{ github.sha }}"
-
-            echo "Checking server..."
-            whoami
-            pwd
-            docker --version
-            docker compose version
-            df -h
-
-            mkdir -p /var/www/microservices
-            cd /var/www/microservices
-
-            if [ ! -d ".git" ]; then
-              git clone https://github.com/HieuCuteDangYeu/microservices-boilerplate.git .
-            fi
-
-            echo "Syncing production checkout to ${DEPLOY_SHA}..."
-            git status --short
-            git fetch --prune origin master
-
-            if ! git cat-file -e "${DEPLOY_SHA}^{commit}" 2>/dev/null; then
-              git fetch --prune origin "${DEPLOY_SHA}"
-            fi
-
-            # Production is a deployment checkout, not a development branch.
-            # Reset tracked changes/local commits but intentionally preserve
-            # untracked operational artifacts such as artifacts/.
-            git reset --hard
-            git checkout -B master "${DEPLOY_SHA}"
-            git reset --hard "${DEPLOY_SHA}"
-
-            CHECKED_OUT_SHA="$(git rev-parse HEAD)"
-            if [ "${CHECKED_OUT_SHA}" != "${DEPLOY_SHA}" ]; then
-              echo "Expected deployment SHA ${DEPLOY_SHA}, got ${CHECKED_OUT_SHA}"
-              exit 1
-            fi
-
-            echo "Production checkout: ${CHECKED_OUT_SHA}"
-            git status --short
-
-            export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
-            echo "DOCKERHUB_USERNAME is set"
-            BUILD_SERVICES="${{ needs.detect-changes.outputs.build_services_list }}"
-            DEPLOY_SERVICES="${{ needs.detect-changes.outputs.deploy_services_list }}"
-            echo "Build services: ${BUILD_SERVICES:-none}"
-            echo "Deploy services: ${DEPLOY_SERVICES}"
-
-            # Validate compose without printing resolved environment values.
-            echo "Validating Compose config..."
-            docker compose config --quiet
-
-            PULL_SERVICES="${BUILD_SERVICES}"
-            if [ -z "${PULL_SERVICES}" ]; then
-              PULL_SERVICES="${DEPLOY_SERVICES}"
-            fi
-
-            if [ -n "${PULL_SERVICES}" ]; then
-              echo "Pulling deploy images sequentially: ${PULL_SERVICES}"
-
-              # Pull one service at a time. The production VPS uses one
-              # containerd content store and parallel pulls can contend on
-              # shared layers/manifests.
-              for service in ${PULL_SERVICES}; do
-                pull_ok=false
-
-                for attempt in 1 2 3; do
-                  echo "Pulling ${service} (attempt ${attempt}/3)..."
-                  if docker compose pull "${service}"; then
-                    pull_ok=true
-                    break
-                  fi
-
-                  if [ "$attempt" -lt 3 ]; then
-                    sleep $((attempt * 5))
-                  fi
-                done
-
-                if [ "$pull_ok" != true ]; then
-                  echo "Failed to pull ${service} after 3 attempts."
-                  exit 1
-                fi
-              done
-            else
-              echo "No deploy images to pull."
-            fi
-
-            echo "Starting deploy services..."
-            docker compose up -d --remove-orphans ${DEPLOY_SERVICES}
-
-            echo "Cleaning old images..."
-            docker image prune -f
-
-            echo "Deploy complete"
-
-      - name: Skip deploy
-        if: needs.detect-changes.outputs.deploy_services_json == '[]'
-        run: echo "No service changes detected. Skipping deploy."
+      - name: Promote approved commit to homelab-deploy
+        env:
+          APPROVED_SHA: ${{ needs.detect-changes.outputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          # This creates the branch on its first run and otherwise only
+          # fast-forwards it to the approved commit; it never creates a deploy commit.
+          git push origin "${APPROVED_SHA}:refs/heads/homelab-deploy"
