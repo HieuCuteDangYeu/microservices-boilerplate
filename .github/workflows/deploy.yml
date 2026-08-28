@@ -204,6 +204,16 @@ jobs:
           # Resolve Dockerfile, build context, and image repository from the
           # actual Compose model. The placeholder is safe and is never logged;
           # --no-env-resolution prevents service env_file values from being read.
+          # Compose still checks that service-level env_file paths exist, so
+          # provide an empty, runner-local file without touching real config.
+          temporary_env_file='.env'
+          if [ -e "$temporary_env_file" ]; then
+            echo "Refusing to overwrite existing $temporary_env_file in CI workspace." >&2
+            exit 1
+          fi
+          install -m 600 /dev/null "$temporary_env_file"
+          trap 'rm -f -- "$temporary_env_file"' EXIT
+
           dockerhub_placeholder='ci-placeholder'
           compose_build_matrix="$(
             COMPOSE_DISABLE_ENV_FILE=1 \
@@ -332,6 +342,15 @@ jobs:
 
       - name: Validate Docker Compose without a production env file
         run: |
+          set -euo pipefail
+          temporary_env_file='.env'
+          if [ -e "$temporary_env_file" ]; then
+            echo "Refusing to overwrite existing $temporary_env_file in CI workspace." >&2
+            exit 1
+          fi
+          install -m 600 /dev/null "$temporary_env_file"
+          trap 'rm -f -- "$temporary_env_file"' EXIT
+
           COMPOSE_DISABLE_ENV_FILE=1 \
             DOCKERHUB_USERNAME=ci-placeholder \
             RABBITMQ_USER=ci \
