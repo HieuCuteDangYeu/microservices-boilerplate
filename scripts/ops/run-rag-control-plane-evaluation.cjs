@@ -177,6 +177,15 @@ function stateForVerifier(fixture) {
   };
 }
 
+function selectFixtures(fixtures, caseIds, label) {
+  if (!caseIds) return fixtures;
+  return caseIds.map((id) => {
+    const fixture = fixtures.find((item) => item.id === id);
+    if (!fixture) throw new Error(`Unknown ${label} case: ${id}`);
+    return fixture;
+  });
+}
+
 async function evaluateRouter(
   llm,
   config,
@@ -339,10 +348,14 @@ async function evaluateRouter(
   };
 }
 
-async function evaluateSufficiency(llm, config, callLog, checkpoint) {
+async function evaluateSufficiency(llm, config, callLog, checkpoint, caseIds) {
   const useCase = new CheckContextSufficiencyUseCase(llm, config);
   const samples = [];
-  for (const fixture of sufficiencyCases) {
+  for (const fixture of selectFixtures(
+    sufficiencyCases,
+    caseIds,
+    'sufficiency',
+  )) {
     const startedAt = Date.now();
     const callOffset = callLog.length;
     try {
@@ -415,10 +428,10 @@ async function evaluateSufficiency(llm, config, callLog, checkpoint) {
   };
 }
 
-async function evaluateVerifier(llm, config, callLog, checkpoint) {
+async function evaluateVerifier(llm, config, callLog, checkpoint, caseIds) {
   const useCase = new VerifierAgentUseCase(llm, config);
   const samples = [];
-  for (const fixture of verifierCases) {
+  for (const fixture of selectFixtures(verifierCases, caseIds, 'verifier')) {
     const startedAt = Date.now();
     const callOffset = callLog.length;
     try {
@@ -536,9 +549,9 @@ async function main() {
           snapshot.overrides.stopOnStructuralFailure,
         )
       : mode === 'SUFFICIENCY'
-        ? await evaluateSufficiency(llm, config, callLog, checkpoint)
+        ? await evaluateSufficiency(llm, config, callLog, checkpoint, caseIds)
         : mode === 'VERIFIER'
-          ? await evaluateVerifier(llm, config, callLog, checkpoint)
+          ? await evaluateVerifier(llm, config, callLog, checkpoint, caseIds)
           : (() => {
               throw new Error(
                 '--mode must be ROUTER, SUFFICIENCY, or VERIFIER',
@@ -564,7 +577,13 @@ async function main() {
   }
 }
 
-module.exports = { evaluateRouter, checkpointWriter, normalizeCalls };
+module.exports = {
+  evaluateRouter,
+  evaluateSufficiency,
+  evaluateVerifier,
+  checkpointWriter,
+  normalizeCalls,
+};
 if (require.main === module)
   main().catch((error) => {
     console.error(error.stack || error.message);

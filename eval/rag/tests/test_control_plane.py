@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from rag_eval import control_plane
-from rag_eval.control_plane import _estimated_neurons, _summary
+from rag_eval.control_plane import _estimated_neurons, _precision, _recall, _summary
 
 
 @pytest.mark.parametrize("timeout", [8000, 20000, 45000, 60000])
@@ -53,6 +53,63 @@ async def test_python_bridge_forwards_explicit_config_and_persists_snapshot(
         await control_plane.run_control_plane(
             "ROUTER", "test-model", "test.env", f"test-{timeout}", "candidate.json"
         )
+
+
+async def test_python_bridge_allows_downstream_subset_and_preserves_role_snapshot(
+    tmp_path, monkeypatch
+):
+    snapshot = {
+        "role": "CONTEXT_SUFFICIENCY",
+        "roleModel": "test-sufficiency-model",
+        "caseIds": ["sufficiency-01"],
+        "configuredTimeoutMs": 30_000,
+        "maxCompletionTokens": 512,
+        "structuredReasoningEffort": None,
+        "structuredMaxTokensParameter": "max_tokens",
+        "aiGatewayEnabled": False,
+    }
+
+    def fake_run(command, **kwargs):
+        assert command[command.index("--mode") + 1] == "SUFFICIENCY"
+        assert command[command.index("--subset") + 1] == "sufficiency-bounded"
+        output = control_plane.Path(command[command.index("--output") + 1])
+        output.write_text(
+            json.dumps(
+                {
+                    "configSnapshot": snapshot,
+                    "samples": [{"id": "sufficiency-01"}],
+                }
+            )
+        )
+        return SimpleNamespace(returncode=0, stderr="")
+
+    async def fake_experiment(*args, **kwargs):
+        return [
+            {
+                "caseId": "sufficiency-01",
+                "metrics": {"schemaSuccess": 1},
+                "latencyMs": 1,
+                "modelCalls": [],
+                "hardGatePassed": True,
+            }
+        ]
+
+    monkeypatch.setattr(control_plane, "RESULTS", tmp_path)
+    monkeypatch.setattr(control_plane.subprocess, "run", fake_run)
+    monkeypatch.setattr(control_plane.control_plane_experiment, "arun", fake_experiment)
+
+    directory, summary = await control_plane.run_control_plane(
+        "SUFFICIENCY",
+        "test-sufficiency-model",
+        "test.env",
+        "downstream-subset",
+        "candidate.json",
+        "sufficiency-bounded",
+    )
+
+    assert summary["expectedCaseCount"] == 1
+    assert summary["configSnapshot"] == snapshot
+    assert (directory / "summary.json").exists()
 
 
 def test_network_failure_is_not_timeout_and_unknown_usage_stays_null():
@@ -192,3 +249,50 @@ def test_completion_token_percentiles_and_reel_denominators():
     summary = _summary(cases, "run", "ROUTER", "@cf/openai/gpt-oss-20b", 4, None)
     assert summary["reasoningTokenBreakdown"] == "PARTIAL"
     assert summary["tokens"]["reasoningTokens"] is None
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "precision", "recall"),
+    [
+        (["e0"], ["e0"], 1, 1),
+        (["e0", "e1"], ["e0"], 0.5, 1),
+        (["e9"], ["e0"], 0, 0),
+        ([], [], 1, 1),
+        ([], ["e0"], 0, 0),
+        (["e0"], [], 0, 1),
+        (["e0", "e0"], ["e0"], 1, 1),
+        (["e0", "unknown"], ["e0"], 0.5, 1),
+    ],
+)
+def test_supported_evidence_precision_and_recall_contract(actual, expected, precision, recall):
+    assert _precision(actual, expected) == precision
+    assert _recall(actual, expected) == recall
+
+
+def test_downstream_failure_denominator_counts_failed_case_as_decision_failure():
+    cases = [
+        {
+            "caseId": "timeout",
+            "metrics": {
+                "expectedSufficientAccuracy": 0,
+                "supportedEvidencePrecision": 0,
+                "supportedEvidenceRecall": 0,
+                "recommendedActionAccuracy": 0,
+                "schemaSuccess": 0,
+            },
+            "latencyMs": 12_000,
+            "modelCalls": [
+                {
+                    "providerStatus": "TIMEOUT",
+                    "providerCategory": "TRANSIENT_PROVIDER_FAILURE",
+                    "errorCode": "STRUCTURED_COMPLETION_TIMEOUT",
+                }
+            ],
+            "hardGatePassed": False,
+        }
+    ]
+    summary = _summary(cases, "downstream", "SUFFICIENCY", "test-model", 1, None)
+    assert summary["metrics"]["expectedSufficientAccuracy"] == 0
+    assert summary["metricDenominators"]["expectedSufficientAccuracy"] == 1
+    assert summary["reliability"]["timeoutCount"] == 1
+    assert summary["reliability"]["providerFailureCount"] == 1

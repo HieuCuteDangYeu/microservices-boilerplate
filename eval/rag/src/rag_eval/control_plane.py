@@ -327,8 +327,6 @@ async def run_control_plane(
     mode = mode.upper()
     if mode not in {"ROUTER", "SUFFICIENCY", "VERIFIER"}:
         raise ValueError("mode must be ROUTER, SUFFICIENCY, or VERIFIER")
-    if subset and mode != "ROUTER":
-        raise ValueError("router calibration subsets cannot be used for another role")
     run_id = run_id or f"ragas-{mode.lower()}-{int(time.time())}"
     if not config_file:
         raise ValueError("versioned experiment --config is required")
