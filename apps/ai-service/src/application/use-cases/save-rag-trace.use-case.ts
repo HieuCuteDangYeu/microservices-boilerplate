@@ -81,7 +81,14 @@ export class SaveRagTraceUseCase {
             groundedRevision: input.state.groundedRevision,
             answerClaims: input.state.answerClaims?.slice(0, 12),
             answerCalls: input.state.answerDiagnostics,
-            verification: input.state.verification?.diagnostics,
+            verification: input.state.verification?.diagnostics
+              ? {
+                  ...input.state.verification.diagnostics,
+                  supportedClaimMappings:
+                    input.state.verification.supportedClaimMappings ?? [],
+                  contradictions: input.state.verification.contradictions ?? [],
+                }
+              : undefined,
             citationAttempts: input.state.citationAttempts,
             finalFailureSource: input.state.finalFailureSource,
           },

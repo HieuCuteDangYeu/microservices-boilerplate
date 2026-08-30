@@ -2,6 +2,7 @@ import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-
 import type {
   RagChatWorkflowState,
   RagVerificationResult,
+  RagSupportedClaimMapping,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type {
   IStructuredLlmService,
@@ -38,6 +39,8 @@ export class VerifierAgentUseCase {
         confidence: 1,
         issues: [],
         requiresRevision: false,
+        supportedClaimMappings: [],
+        contradictions: [],
         diagnostics: {
           providerStatus: 'NOT_CALLED',
           decisionSource: 'NOT_REQUIRED',
@@ -139,6 +142,8 @@ export class VerifierAgentUseCase {
           'Semantic verifier unavailable; answer accepted only as an exact source span.',
         ],
         requiresRevision: false,
+        supportedClaimMappings: [],
+        contradictions: [],
         diagnostics: {
           providerStatus: 'ERROR',
           decisionSource: 'EXACT_PROVENANCE',
@@ -157,6 +162,8 @@ export class VerifierAgentUseCase {
       confidence: 0,
       issues: ['Required semantic answer verification was unavailable.'],
       requiresRevision: false,
+      supportedClaimMappings: [],
+      contradictions: [],
       diagnostics: {
         providerStatus: 'ERROR',
         decisionSource: 'FAIL_CLOSED',
@@ -230,6 +237,8 @@ export class VerifierAgentUseCase {
         issues: result.issues,
         requiresRevision: result.requiresRevision,
         revisedInstruction: result.revisedInstruction,
+        supportedClaimMappings: result.supportedClaimMappings ?? [],
+        contradictions: result.contradictions ?? [],
         exactProvenance: this.exactProvenance(input.state),
       },
     };
@@ -326,14 +335,33 @@ Return only compact JSON matching the schema. Keep issues, contradictions, claim
     const rawMappings = Array.isArray(raw.supportedClaimMappings)
       ? raw.supportedClaimMappings
       : [];
-    const hasUnknownEvidenceId = rawMappings.some((mapping) => {
-      if (!mapping || typeof mapping !== 'object') return true;
-      const ids = (mapping as Record<string, unknown>)['evidenceIds'];
-      return (
-        !Array.isArray(ids) ||
-        ids.some((id) => typeof id !== 'string' || !allowedIds.has(id))
-      );
-    });
+    let hasUnknownEvidenceId = false;
+    const supportedClaimMappings: RagSupportedClaimMapping[] = [];
+    for (const mapping of rawMappings) {
+      if (!mapping || typeof mapping !== 'object') {
+        hasUnknownEvidenceId = true;
+        continue;
+      }
+      const candidate = mapping as Record<string, unknown>;
+      const claim = candidate['claim'];
+      const ids = candidate['evidenceIds'];
+      if (typeof claim !== 'string' || !claim.trim() || !Array.isArray(ids)) {
+        hasUnknownEvidenceId = true;
+        continue;
+      }
+      const normalizedIds = [
+        ...new Set(
+          ids.filter(
+            (id): id is string => typeof id === 'string' && allowedIds.has(id),
+          ),
+        ),
+      ];
+      if (normalizedIds.length !== ids.length) hasUnknownEvidenceId = true;
+      supportedClaimMappings.push({
+        claim: claim.trim(),
+        evidenceIds: normalizedIds,
+      });
+    }
     const issues = Array.isArray(raw.issues)
       ? raw.issues.filter((item): item is string => typeof item === 'string')
       : [];
@@ -368,6 +396,8 @@ Return only compact JSON matching the schema. Keep issues, contradictions, claim
         raw.revisedInstruction.trim()
           ? raw.revisedInstruction.trim()
           : undefined,
+      supportedClaimMappings,
+      contradictions,
     };
   }
 

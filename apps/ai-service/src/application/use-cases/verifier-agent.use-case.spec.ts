@@ -83,10 +83,16 @@ describe('VerifierAgentUseCase', () => {
     ).resolves.toMatchObject({
       passed: true,
       confidence: 0.95,
+      supportedClaimMappings: [
+        { claim: 'The zorb is linked to the quasar.', evidenceIds: ['e0'] },
+      ],
       diagnostics: {
         decisionSource: 'LLM_PRIMARY',
         modelRole: 'VERIFIER',
         escalated: false,
+        supportedClaimMappings: [
+          { claim: 'The zorb is linked to the quasar.', evidenceIds: ['e0'] },
+        ],
       },
     });
     expect(service.generateObject).toHaveBeenCalledWith(
@@ -330,6 +336,38 @@ describe('VerifierAgentUseCase', () => {
       useCase.execute(state({ evidenceText: 'Authorized evidence.' })),
     ).resolves.toMatchObject({
       passed: false,
+      issues: ['Verifier returned unknown evidence ID.'],
+    });
+  });
+
+  it('preserves valid mappings while failing closed on a mixed unknown mapping', async () => {
+    const service = {
+      generateObject: jest.fn().mockResolvedValue(
+        result({
+          supportedClaimMappings: [
+            { claim: 'Authorized mapping.', evidenceIds: ['e0'] },
+            { claim: 'Invalid mapping.', evidenceIds: ['e99'] },
+          ],
+        }),
+      ),
+    };
+    const noEscalationConfig = {
+      ...config,
+      boolean: jest.fn(() => false),
+    } as unknown as IAiApplicationConfig;
+    const useCase = new VerifierAgentUseCase(
+      service as never,
+      noEscalationConfig,
+    );
+
+    await expect(
+      useCase.execute(state({ evidenceText: 'Authorized evidence.' })),
+    ).resolves.toMatchObject({
+      passed: false,
+      supportedClaimMappings: [
+        { claim: 'Authorized mapping.', evidenceIds: ['e0'] },
+        { claim: 'Invalid mapping.', evidenceIds: [] },
+      ],
       issues: ['Verifier returned unknown evidence ID.'],
     });
   });

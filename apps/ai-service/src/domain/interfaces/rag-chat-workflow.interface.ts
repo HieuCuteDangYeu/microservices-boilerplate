@@ -122,7 +122,14 @@ export interface RagVerificationResult {
   issues: string[];
   requiresRevision: boolean;
   revisedInstruction?: string;
+  supportedClaimMappings?: RagSupportedClaimMapping[];
+  contradictions?: string[];
   diagnostics?: RagVerificationDiagnostics;
+}
+
+export interface RagSupportedClaimMapping {
+  claim: string;
+  evidenceIds: string[];
 }
 
 export interface RagVerificationDiagnostics {
@@ -143,6 +150,8 @@ export interface RagVerificationDiagnostics {
   issues: string[];
   requiresRevision: boolean;
   revisedInstruction?: string;
+  supportedClaimMappings?: RagSupportedClaimMapping[];
+  contradictions?: string[];
   exactProvenance: {
     supported: boolean;
     supportingEvidenceIndexes: number[];
