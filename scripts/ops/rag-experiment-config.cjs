@@ -15,7 +15,7 @@ const { AiApplicationConfigAdapter } = require(
   ),
 );
 const SAFE_KEY =
-  /^(AI_[A-Z_]+_(MODEL|TIMEOUT_MS|MAX_TOKENS)|CLOUDFLARE_ROUTER_OUTPUT_CONTRACT|CLOUDFLARE_STRUCTURED_REASONING_EFFORT|CLOUDFLARE_AI_GATEWAY_(ENABLED|MAX_ATTEMPTS))$/;
+  /^(AI_[A-Z_]+_(MODEL|TIMEOUT_MS|MAX_TOKENS)|CLOUDFLARE_ROUTER_OUTPUT_CONTRACT|CLOUDFLARE_STRUCTURED_REASONING_EFFORT|CLOUDFLARE_STRUCTURED_MAX_TOKENS_PARAMETER|CLOUDFLARE_AI_GATEWAY_(ENABLED|MAX_ATTEMPTS))$/;
 
 function resolveExperiment(
   { envFile, configFile, model, timeoutMs, maxTokens, mode, subset },
@@ -41,6 +41,10 @@ function resolveExperiment(
     Object.keys(candidate.env).map((key) => [key, 'VERSIONED_CANDIDATE']),
   );
   const overrides = { ...candidate.experimentOverrides };
+  if (subset === 'harness') {
+    overrides.stopOnTruncation = false;
+    overrides.stopOnStructuralFailure = false;
+  }
   if (candidate.providerContractInvestigation) {
     if (
       !['CHAT_JSON_SCHEMA', 'CHAT_TOOL_CALL'].includes(
@@ -86,20 +90,23 @@ function resolveExperiment(
     `AI_${role}_MAX_TOKENS`,
   );
   for (const key of new Set(required)) {
-    if (
-      values[key] === undefined ||
-      (values[key] === '' && key !== 'AI_ROUTER_FALLBACK_MODEL')
-    )
+    const emptyValueAllowed =
+      key === 'AI_ROUTER_FALLBACK_MODEL' ||
+      key === 'CLOUDFLARE_STRUCTURED_REASONING_EFFORT';
+    if (values[key] === undefined || (values[key] === '' && !emptyValueAllowed))
       throw new Error(`Explicit candidate config required: ${key}`);
     sources[key] ??=
       inherited[key] !== undefined ? 'INHERITED_ENV' : 'ENV_FILE';
   }
-  if (
-    !['low', 'medium', 'high'].includes(
-      values.CLOUDFLARE_STRUCTURED_REASONING_EFFORT,
-    )
-  )
+  const reasoningEffort =
+    values.CLOUDFLARE_STRUCTURED_REASONING_EFFORT?.trim().toLowerCase() ?? '';
+  if (reasoningEffort && !['low', 'medium', 'high'].includes(reasoningEffort))
     throw new Error('Explicit structured reasoning effort required');
+  const maxTokensParameter =
+    values.CLOUDFLARE_STRUCTURED_MAX_TOKENS_PARAMETER?.trim().toLowerCase() ||
+    'max_completion_tokens';
+  if (!['max_tokens', 'max_completion_tokens'].includes(maxTokensParameter))
+    throw new Error('Invalid structured max-token parameter');
   if (!['true', 'false'].includes(values.CLOUDFLARE_AI_GATEWAY_ENABLED))
     throw new Error('Explicit gateway boolean required');
   const service = new ConfigService(values);
@@ -166,7 +173,18 @@ function resolveExperiment(
       128,
       4096,
     ),
-    structuredReasoningEffort: values.CLOUDFLARE_STRUCTURED_REASONING_EFFORT,
+    structuredReasoningEffort: reasoningEffort || null,
+    structuredMaxTokensParameter: maxTokensParameter,
+    pricingVersion: candidate.pricingVersion || null,
+    providerMetadata: {
+      providerContract:
+        values.CLOUDFLARE_ROUTER_OUTPUT_CONTRACT || 'CHAT_JSON_SCHEMA',
+      endpoint:
+        'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions',
+      model: config.model(role),
+      schemaVersion: 'router-semantic-v2',
+      pricingVersion: candidate.pricingVersion || null,
+    },
     aiGatewayEnabled: config.boolean('CLOUDFLARE_AI_GATEWAY_ENABLED', true),
     aiGatewayMaxAttempts: config.number(
       'CLOUDFLARE_AI_GATEWAY_MAX_ATTEMPTS',

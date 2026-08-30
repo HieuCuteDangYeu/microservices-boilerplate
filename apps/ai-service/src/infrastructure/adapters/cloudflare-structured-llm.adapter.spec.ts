@@ -543,5 +543,46 @@ describe('CloudflareStructuredLlmAdapter', () => {
       'cf-aig-backoff': 'exponential',
     });
   });
+
+  it('uses the documented max_tokens field and omits disabled reasoning effort', async () => {
+    const config = {
+      getOrThrow: jest.fn().mockReturnValue('value'),
+      get: jest.fn(
+        (key: string) =>
+          ({
+            CLOUDFLARE_AI_GATEWAY_ENABLED: 'false',
+            CLOUDFLARE_STRUCTURED_MAX_TOKENS_PARAMETER: 'max_tokens',
+          })[key],
+      ),
+    };
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        choices: [
+          { finish_reason: 'stop', message: { content: '{"ok":true}' } },
+        ],
+      }),
+    } as never);
+    const adapter = new CloudflareStructuredLlmAdapter(config as never);
+
+    await adapter.generateObject({
+      systemPrompt: 'Return JSON.',
+      userPrompt: 'Return ok.',
+      model: '@cf/meta/llama-3.1-8b-instruct-fast',
+      maxTokens: 512,
+      jsonSchema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' } },
+        required: ['ok'],
+      },
+    });
+
+    const requestBody = fetchMock.mock.calls[0]?.[1]?.body;
+    const body = JSON.parse(requestBody as string) as Record<string, unknown>;
+    expect(body).toMatchObject({ max_tokens: 512 });
+    expect(body).not.toHaveProperty('max_completion_tokens');
+    expect(body).not.toHaveProperty('reasoning_effort');
+  });
 });
 import { Logger } from '@nestjs/common';

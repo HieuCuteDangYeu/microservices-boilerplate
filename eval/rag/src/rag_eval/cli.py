@@ -27,6 +27,7 @@ from rag_eval.config_snapshot import load_runtime_snapshot
 from rag_eval.control_plane import run_control_plane
 from rag_eval.dataset import ROOT, load_dataset
 from rag_eval.experiment import rag_experiment
+from rag_eval.pricing import load_pricing
 from rag_eval.reports import build_summary, load_cases, write_report
 from rag_eval.schemas import EvaluationRow
 
@@ -60,7 +61,7 @@ def _variant(args: argparse.Namespace) -> dict[str, Any]:
         "gitSha": git_sha,
         "productionSha": args.production_sha,
         "datasetVersion": args.dataset,
-        "pricingVersion": "cloudflare-workers-ai-2026-08-18-v1",
+        "pricingVersion": load_pricing()["version"],
         "embeddingModel": args.embedding_model,
         "routerModel": args.router_model,
         "plannerModel": args.planner_model,

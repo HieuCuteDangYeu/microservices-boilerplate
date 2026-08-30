@@ -286,7 +286,7 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
               content: input.userPrompt,
             },
           ],
-          max_completion_tokens: maxTokens,
+          [this.maxTokensParameter()]: maxTokens,
           temperature: input.temperature ?? 0.1,
           ...this.reasoningEffort(),
           ...this.outputContract(input),
@@ -493,6 +493,14 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
     return value === 'low' || value === 'medium' || value === 'high'
       ? { reasoning_effort: value }
       : {};
+  }
+
+  private maxTokensParameter(): 'max_tokens' | 'max_completion_tokens' {
+    const value = this.configService
+      .get<string>('CLOUDFLARE_STRUCTURED_MAX_TOKENS_PARAMETER')
+      ?.trim()
+      .toLowerCase();
+    return value === 'max_tokens' ? 'max_tokens' : 'max_completion_tokens';
   }
 
   private endpointContract(
