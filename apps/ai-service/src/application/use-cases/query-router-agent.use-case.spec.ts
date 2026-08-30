@@ -63,6 +63,11 @@ describe('QueryRouterAgentUseCase', () => {
       'GENERAL_REEL_SUMMARY',
       ['TRANSCRIPT', 'METADATA'],
     ],
+    [
+      'Who is listed as the author of the shared recording?',
+      'REEL_METADATA',
+      ['METADATA'],
+    ],
   ])(
     'uses semantic output for novel wording: %s',
     async (message, reelQuestionType, requiredEvidence) => {
@@ -100,6 +105,66 @@ describe('QueryRouterAgentUseCase', () => {
       );
     },
   );
+
+  it('states a general boundary between specific relations and overall summaries', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue(
+        response({
+          intent: 'REEL_VIDEO_QUESTION',
+          reelQuestionType: 'TRANSCRIPT_CONTENT',
+          requiredEvidence: ['TRANSCRIPT'],
+        }),
+      ),
+    };
+    const useCase = new QueryRouterAgentUseCase(
+      structuredLlmService as never,
+      config,
+    );
+
+    await expect(
+      useCase.execute({
+        message:
+          'Compare the two approaches described in the shared recording.',
+        hasSharedReelContext: true,
+      }),
+    ).resolves.toMatchObject({
+      reelQuestionType: 'TRANSCRIPT_CONTENT',
+      requiredEvidence: ['TRANSCRIPT'],
+    });
+
+    const request = structuredLlmService.generateObject.mock.calls[0][0];
+    expect(request.systemPrompt).toContain(
+      'specific spoken or textual reel content',
+    );
+    expect(request.systemPrompt).toContain('not an overall summary request');
+    expect(request.systemPrompt).toContain('comparative');
+  });
+
+  it('retains independent modality choices for an ambiguous reel request', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue(
+        response({
+          intent: 'REEL_VIDEO_QUESTION',
+          reelQuestionType: 'AMBIGUOUS_REEL_REFERENCE',
+          requiredEvidence: ['TRANSCRIPT', 'VISUAL'],
+        }),
+      ),
+    };
+    const useCase = new QueryRouterAgentUseCase(
+      structuredLlmService as never,
+      config,
+    );
+
+    await expect(
+      useCase.execute({
+        message: 'What should I inspect in the shared recording?',
+        hasSharedReelContext: true,
+      }),
+    ).resolves.toMatchObject({
+      reelQuestionType: 'AMBIGUOUS_REEL_REFERENCE',
+      requiredEvidence: ['TRANSCRIPT', 'VISUAL'],
+    });
+  });
 
   it('rejects contradictory evidence and discovery instead of silently rewriting them', async () => {
     const structuredLlmService = {
@@ -256,7 +321,7 @@ describe('QueryRouterAgentUseCase', () => {
       ]).toEqual(flags);
       const input = service.generateObject.mock
         .calls[0][0] as GenerateStructuredObjectInput;
-      expect(input.schemaVersion).toBe('router-semantic-v2');
+      expect(input.schemaVersion).toBe('router-semantic-v3');
       expect(input.jsonSchema.required).toEqual([
         'intent',
         'referenceTarget',

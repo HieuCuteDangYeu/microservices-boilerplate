@@ -260,7 +260,7 @@ export class QueryRouterAgentUseCase {
       userPrompt: this.buildUserPrompt(input.input),
       jsonSchema: this.getJsonSchema(),
       maxTokens: input.maxTokens ?? this.config.maxCompletionTokens('ROUTER'),
-      schemaVersion: 'router-semantic-v2',
+      schemaVersion: 'router-semantic-v3',
       temperature: 0,
       model: input.model,
       modelRole: 'ROUTER',
@@ -307,9 +307,9 @@ Reference target meanings:
 
 Reel question type meanings:
 - NONE: not a question about a shared reel/video.
-- TRANSCRIPT_CONTENT: asks what the shared reel says, explains, discusses, mentions, captions, quotes, or teaches.
+- TRANSCRIPT_CONTENT: asks for specific spoken or textual reel content, including a fact, quantity, cause, relation, comparison, sequence, explanation, claim, quote, or what someone says, explains, discusses, mentions, captions, or teaches. It is not an overall summary request.
 - VISUAL_CONTENT: asks about visual appearance, objects, people, colors, text on screen, layout, or what is seen.
-- GENERAL_REEL_SUMMARY: asks for the shared reel's overall meaning, summary, topic, main point, or what it is about.
+- GENERAL_REEL_SUMMARY: asks for the shared reel's overall meaning, summary, topic, main point, takeaway, or what it is about. Do not use it for one specific fact, relation, comparison, cause, quantity, sequence, or other detail.
 - REEL_METADATA: asks about title, description, caption, hashtags, tags, author, upload/share metadata.
 - AMBIGUOUS_REEL_REFERENCE: refers to a shared reel/video but the requested information is unclear.
 
@@ -334,6 +334,7 @@ Invariants:
 - Conversation memory is for prior conversation context; user memory is only for stable preferences/profile.
 - RECOMMEND_REELS is only for explicit content discovery. Use a clean topic query; broad discovery may allow personalized fallback, topic-specific discovery may not.
 - SUGGEST_QUERIES is only for requested search terms. Otherwise recommendationAction is NONE.
+- Specific factual, quantitative, causal, relational, comparative, or sequence questions about the reel use TRANSCRIPT_CONTENT unless the user explicitly asks about visual appearance, on-screen text/layout, or metadata.
 - Both discovery actions require intent=NORMAL_CHAT, referenceTarget=NONE, reelQuestionType=NONE, requiredEvidence=[NONE]. Internal search is not an external task. For NONE use query="", allowPersonalizedFallback=false and suggestedQueries=[]. For RECOMMEND_REELS use suggestedQueries=[]; for SUGGEST_QUERIES provide suggestions and allowPersonalizedFallback=false.
 - Evidence is minimal for the classified question: TRANSCRIPT_CONTENT=[TRANSCRIPT], VISUAL_CONTENT=[VISUAL], REEL_METADATA=[METADATA], GENERAL_REEL_SUMMARY=[TRANSCRIPT,METADATA]. Non-reel routes use their own memory evidence or [NONE], never reel modalities.
 - Do not invent context or use keyword/regex routing.
@@ -402,6 +403,8 @@ Classify the current user message.
         },
         reelQuestionType: {
           type: 'string',
+          description:
+            'Classify the requested reel information: specific spoken/textual content, visual content, overall summary, metadata, or an unclear reel request.',
           enum: [
             'NONE',
             'TRANSCRIPT_CONTENT',
@@ -413,6 +416,8 @@ Classify the current user message.
         },
         requiredEvidence: {
           type: 'array',
+          description:
+            'Return the minimal evidence modalities needed for the semantic request; this may be an independent set for an ambiguous reel request.',
           minItems: 1,
           maxItems: 4,
           items: {

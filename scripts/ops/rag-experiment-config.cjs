@@ -176,13 +176,14 @@ function resolveExperiment(
     structuredReasoningEffort: reasoningEffort || null,
     structuredMaxTokensParameter: maxTokensParameter,
     pricingVersion: candidate.pricingVersion || null,
+    routerSchemaVersion: candidate.routerSchemaVersion || 'router-semantic-v2',
     providerMetadata: {
       providerContract:
         values.CLOUDFLARE_ROUTER_OUTPUT_CONTRACT || 'CHAT_JSON_SCHEMA',
       endpoint:
         'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions',
       model: config.model(role),
-      schemaVersion: 'router-semantic-v2',
+      schemaVersion: candidate.routerSchemaVersion || 'router-semantic-v2',
       pricingVersion: candidate.pricingVersion || null,
     },
     aiGatewayEnabled: config.boolean('CLOUDFLARE_AI_GATEWAY_ENABLED', true),
