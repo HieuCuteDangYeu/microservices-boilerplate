@@ -260,7 +260,7 @@ export class QueryRouterAgentUseCase {
       userPrompt: this.buildUserPrompt(input.input),
       jsonSchema: this.getJsonSchema(),
       maxTokens: input.maxTokens ?? this.config.maxCompletionTokens('ROUTER'),
-      schemaVersion: 'router-semantic-v3',
+      schemaVersion: 'router-semantic-v4',
       temperature: 0,
       model: input.model,
       modelRole: 'ROUTER',
@@ -291,6 +291,7 @@ export class QueryRouterAgentUseCase {
     return `
 You route Velora AI messages by meaning. Return only schema-valid JSON and never answer the user.
 Output exactly these top-level fields and no others: intent, referenceTarget, reelQuestionType, requiredEvidence, recommendationAction, reason. recommendationAction contains exactly: type, query, allowPersonalizedFallback, suggestedQueries. The application derives retrieval/memory/verification flags and result-count policy; do not output those fields.
+Apply every definition by semantic meaning regardless of the language used in the user message, recent history, or reel. Emit only the canonical enum values in this schema; never translate enum values into natural-language labels.
 
 Intent meanings:
 - NORMAL_CHAT: general conversation, coding help, app discussion, clarification, recommendation/discovery requests, or normal assistant chat.
@@ -339,6 +340,7 @@ Invariants:
 - Evidence is minimal for the classified question: TRANSCRIPT_CONTENT=[TRANSCRIPT], VISUAL_CONTENT=[VISUAL], REEL_METADATA=[METADATA], GENERAL_REEL_SUMMARY=[TRANSCRIPT,METADATA]. Non-reel routes use their own memory evidence or [NONE], never reel modalities.
 - Do not invent context or use keyword/regex routing.
 - Structural event metadata says what happened, not what the current message means. A recent reel share is evidence for resolving an implicit referent, but unrelated chat remains NORMAL_CHAT with referenceTarget=NONE.
+- Treat language as presentation context, not as a change to the taxonomy: equivalent meanings in different languages use the same intent, reference, reel type, evidence, and recommendation enums.
 - referenceTarget=SHARED_REEL requires intent=REEL_VIDEO_QUESTION. CONVERSATION requires CONVERSATION_MEMORY_QUESTION. USER_MEMORY requires USER_MEMORY_QUESTION. All other routes use NONE.
 `.trim();
   }

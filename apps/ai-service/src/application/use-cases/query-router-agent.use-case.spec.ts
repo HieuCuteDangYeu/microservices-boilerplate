@@ -166,6 +166,63 @@ describe('QueryRouterAgentUseCase', () => {
     });
   });
 
+  it('fails closed on an invalid semantic tuple without relying on fixture wording', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue(
+        response({
+          intent: 'REEL_VIDEO_QUESTION',
+          referenceTarget: 'NONE',
+          reelQuestionType: 'TRANSCRIPT_CONTENT',
+          requiredEvidence: ['TRANSCRIPT'],
+        }),
+      ),
+    };
+
+    await expect(
+      new QueryRouterAgentUseCase(
+        structuredLlmService as never,
+        config,
+      ).execute({
+        message: 'A generic multilingual semantic request.',
+        hasSharedReelContext: true,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ROUTER_UNAVAILABLE',
+      causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+    });
+  });
+
+  it('keeps canonical enums language-invariant for a generic equivalent tuple', async () => {
+    const structuredLlmService = {
+      generateObject: jest.fn().mockResolvedValue(
+        response({
+          intent: 'REEL_VIDEO_QUESTION',
+          reelQuestionType: 'TRANSCRIPT_CONTENT',
+          requiredEvidence: ['TRANSCRIPT'],
+        }),
+      ),
+    };
+
+    await expect(
+      new QueryRouterAgentUseCase(
+        structuredLlmService as never,
+        config,
+      ).execute({
+        message: 'Demande sémantique générique.',
+        hasSharedReelContext: true,
+      }),
+    ).resolves.toMatchObject({
+      intent: 'REEL_VIDEO_QUESTION',
+      referenceTarget: 'SHARED_REEL',
+      reelQuestionType: 'TRANSCRIPT_CONTENT',
+      requiredEvidence: ['TRANSCRIPT'],
+    });
+
+    const request = structuredLlmService.generateObject.mock.calls[0][0];
+    expect(request.systemPrompt).toContain('regardless of the language used');
+    expect(request.systemPrompt).toContain('canonical enum values');
+  });
+
   it('rejects contradictory evidence and discovery instead of silently rewriting them', async () => {
     const structuredLlmService = {
       generateObject: jest.fn().mockResolvedValue(
@@ -321,7 +378,7 @@ describe('QueryRouterAgentUseCase', () => {
       ]).toEqual(flags);
       const input = service.generateObject.mock
         .calls[0][0] as GenerateStructuredObjectInput;
-      expect(input.schemaVersion).toBe('router-semantic-v3');
+      expect(input.schemaVersion).toBe('router-semantic-v4');
       expect(input.jsonSchema.required).toEqual([
         'intent',
         'referenceTarget',
