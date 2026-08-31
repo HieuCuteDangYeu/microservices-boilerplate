@@ -19,6 +19,12 @@ from rag_eval.schemas import EvaluationRow
 
 REPOSITORY_ROOT = ROOT.parents[1]
 RESULTS = ROOT / "results"
+SCHEMA_ERRORS = {
+    "STRUCTURED_COMPLETION_INVALID_JSON",
+    "STRUCTURED_COMPLETION_SCHEMA_INVALID",
+    "STRUCTURED_COMPLETION_EMPTY_CONTENT",
+    "STRUCTURED_COMPLETION_TRUNCATED",
+}
 
 
 def _exact(left: Any, right: Any) -> float:
@@ -42,18 +48,36 @@ def _recall(actual: list[str], expected: list[str]) -> float:
 
 
 def _schema_success(observation: dict[str, Any]) -> float:
-    schema_errors = {
-        "STRUCTURED_COMPLETION_INVALID_JSON",
-        "STRUCTURED_COMPLETION_SCHEMA_INVALID",
-        "STRUCTURED_COMPLETION_EMPTY_CONTENT",
-        "STRUCTURED_COMPLETION_TRUNCATED",
-    }
     return float(
         observation.get("success", False)
         and bool(observation["calls"])
         and all(call.get("providerStatus") == 200 for call in observation["calls"])
-        and not any(call.get("errorCode") in schema_errors for call in observation["calls"])
+        and not any(call.get("errorCode") in SCHEMA_ERRORS for call in observation["calls"])
     )
+
+
+def _end_to_end_structural_success(observation: dict[str, Any]) -> float:
+    if not observation.get("success", False):
+        return 0.0
+    calls = observation.get("calls") or []
+    if not calls:
+        return float(observation.get("providerStatus") == "NOT_CALLED")
+    return float(
+        all(call.get("providerStatus") == 200 for call in calls)
+        and not any(call.get("errorCode") in SCHEMA_ERRORS for call in calls)
+    )
+
+
+def _action_matches(observation: dict[str, Any]) -> float:
+    expected = observation.get("expectedRecommendedActions")
+    if not isinstance(expected, list) or not expected:
+        if observation.get("expectedSufficient") is True:
+            expected = ["ANSWER"]
+        elif not observation.get("calls"):
+            expected = ["REFUSE_NO_CONTEXT"]
+        else:
+            expected = ["REFUSE_NO_CONTEXT", "REWRITE_AND_RETRY"]
+    return float(observation.get("actualRecommendedAction") in expected)
 
 
 @experiment(name_prefix="rag-control-plane")
@@ -105,11 +129,9 @@ async def control_plane_experiment(
             ),
             "supportedEvidencePrecision": _precision(actual_ids, expected_ids),
             "supportedEvidenceRecall": _recall(actual_ids, expected_ids),
-            "recommendedActionAccuracy": _exact(
-                observation.get("actualRecommendedAction"),
-                observation["expectedRecommendedAction"],
-            ),
+            "recommendedActionAccuracy": _action_matches(observation),
             "schemaSuccess": _schema_success(observation),
+            "endToEndStructuralSuccess": _end_to_end_structural_success(observation),
         }
     else:
         actual_ids = observation.get("actualSupportedEvidenceIds") or []
@@ -126,6 +148,11 @@ async def control_plane_experiment(
             ),
             "schemaSuccess": _schema_success(observation),
         }
+    gate_metrics = metrics
+    if mode == "SUFFICIENCY":
+        # A deterministic no-call path has no provider schema to validate, but
+        # it can still be a valid end-to-end structured application result.
+        gate_metrics = {key: value for key, value in metrics.items() if key != "schemaSuccess"}
     return {
         "caseId": row.id,
         "datasetVersion": row.datasetVersion,
@@ -140,7 +167,7 @@ async def control_plane_experiment(
         "hardGatePassed": bool(observation.get("success", False))
         and all(
             value == (0 if key in {"falseNormalChat", "falseReel"} else 1)
-            for key, value in metrics.items()
+            for key, value in gate_metrics.items()
         ),
     }
 
@@ -254,7 +281,11 @@ def _summary(
             if any(call.get("reasoningTokens") is not None for call in calls)
             else "UNAVAILABLE"
         ),
-        "structuralCompleted": sum(case["metrics"].get("schemaSuccess") == 1 for case in cases),
+        "structuralCompleted": sum(
+            case["metrics"].get("endToEndStructuralSuccess", case["metrics"].get("schemaSuccess"))
+            == 1
+            for case in cases
+        ),
         "latencyMs": {
             "p50": percentile(latencies, 0.5),
             "p90": percentile(latencies, 0.9),

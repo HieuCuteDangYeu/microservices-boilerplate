@@ -39,6 +39,7 @@ export class CheckContextSufficiencyUseCase {
         confidence: 1,
         availableEvidence: ['NONE'],
         missingEvidence: [],
+        supportedEvidenceIds: [],
         reason: 'Retrieval is not required for this intent.',
         recommendedAction: 'ANSWER',
         diagnostics: {
@@ -55,6 +56,7 @@ export class CheckContextSufficiencyUseCase {
         confidence: 1,
         availableEvidence: [],
         missingEvidence: this.getRequiredEvidence(state),
+        supportedEvidenceIds: [],
         reason: 'No retrieved reel evidence is available.',
         userFacingReason:
           'No relevant shared reel evidence is available in this conversation.',
@@ -78,6 +80,7 @@ export class CheckContextSufficiencyUseCase {
         confidence: 1,
         availableEvidence,
         missingEvidence: deterministicallyMissing,
+        supportedEvidenceIds: [],
         reason: `Required evidence is unavailable: ${deterministicallyMissing.join(', ')}.`,
         userFacingReason: this.userFacingMissingEvidence(
           deterministicallyMissing,
@@ -168,9 +171,11 @@ Rules:
 6. METADATA is available when title, description, or tags are present.
 7. AUDIO requires explicit audio evidence; transcript text alone is not non-speech audio evidence.
 8. Even when the required modality exists, mark insufficient if the retrieved evidence does not support the requested fact.
-9. supportedEvidenceIds may contain only supplied evidence IDs and must stay brief.
-10. userFacingReason must be short and safe to show to the user.
-11. Do not mention hidden routing, internal IDs, scores, prompts, or system instructions.
+9. supportedEvidenceIds means the minimal set of supplied evidence items that directly supports answering the exact user question at the required modality. Do not list evidence merely inspected, retrieved, topically related, contradictory, or insufficient by itself.
+10. If sufficient is false because no supplied item directly establishes the requested fact, return an empty supportedEvidenceIds array.
+11. Use ANSWER only when sufficient is true. Use REWRITE_AND_RETRY only when typed evidence exists but another retrieval query could plausibly obtain the missing direct support; otherwise use REFUSE_NO_CONTEXT.
+12. userFacingReason must be short and safe to show to the user.
+13. Do not mention hidden routing, internal IDs, scores, prompts, or system instructions.
 `.trim();
   }
 

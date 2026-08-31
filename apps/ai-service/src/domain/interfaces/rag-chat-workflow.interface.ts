@@ -164,6 +164,7 @@ export interface RagContextSufficiencyResult {
 
   availableEvidence: RagRequiredEvidence[];
   missingEvidence: RagRequiredEvidence[];
+  /** Prompt-local evidence IDs that directly support answering the exact question. */
   supportedEvidenceIds?: string[];
 
   reason: string;

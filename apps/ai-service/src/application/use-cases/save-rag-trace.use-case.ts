@@ -75,6 +75,8 @@ export class SaveRagTraceUseCase {
                     input.state.contextSufficiency.availableEvidence,
                   missingEvidence:
                     input.state.contextSufficiency.missingEvidence,
+                  supportedEvidenceIds:
+                    input.state.contextSufficiency.supportedEvidenceIds ?? [],
                 }
               : undefined,
             draftHistory: input.state.draftHistory,

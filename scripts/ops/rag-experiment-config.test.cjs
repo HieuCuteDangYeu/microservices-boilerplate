@@ -9,7 +9,9 @@ const {
   evaluateRouter,
   checkpointWriter,
   normalizeCalls,
+  expectedRecommendedActions,
 } = require('./run-rag-control-plane-evaluation.cjs');
+const { sufficiencyCases } = require('./rag-control-plane-fixtures.cjs');
 const {
   CloudflareStructuredLlmAdapter,
 } = require('../../dist/apps/ai-service/apps/ai-service/src/infrastructure/adapters/cloudflare-structured-llm.adapter.js');
@@ -162,6 +164,24 @@ test('normalization retains safe type/truncation metadata and reasoning count on
   assert.equal(calls[0].contentPresent, false);
   assert.equal(calls[0].toolCallsPresent, true);
   assert.ok(!JSON.stringify(calls).includes('private-content'));
+});
+
+test('downstream action expectations follow typed evidence state', () => {
+  const fixture = (id) => sufficiencyCases.find((item) => item.id === id);
+
+  assert.deepEqual(expectedRecommendedActions(fixture('sufficiency-01')), [
+    'ANSWER',
+  ]);
+  assert.deepEqual(expectedRecommendedActions(fixture('sufficiency-04')), [
+    'REFUSE_NO_CONTEXT',
+    'REWRITE_AND_RETRY',
+  ]);
+  assert.deepEqual(expectedRecommendedActions(fixture('sufficiency-19')), [
+    'REFUSE_NO_CONTEXT',
+  ]);
+  assert.deepEqual(expectedRecommendedActions(fixture('sufficiency-20')), [
+    'REFUSE_NO_CONTEXT',
+  ]);
 });
 
 test('post-selection contract runs checkpoint and stop at first structural failure', async () => {

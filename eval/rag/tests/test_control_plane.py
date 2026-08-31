@@ -4,7 +4,14 @@ from types import SimpleNamespace
 import pytest
 
 from rag_eval import control_plane
-from rag_eval.control_plane import _estimated_neurons, _precision, _recall, _summary
+from rag_eval.control_plane import (
+    _action_matches,
+    _end_to_end_structural_success,
+    _estimated_neurons,
+    _precision,
+    _recall,
+    _summary,
+)
 
 
 @pytest.mark.parametrize("timeout", [8000, 20000, 45000, 60000])
@@ -296,3 +303,88 @@ def test_downstream_failure_denominator_counts_failed_case_as_decision_failure()
     assert summary["metricDenominators"]["expectedSufficientAccuracy"] == 1
     assert summary["reliability"]["timeoutCount"] == 1
     assert summary["reliability"]["providerFailureCount"] == 1
+
+
+@pytest.mark.parametrize(
+    ("observation", "expected"),
+    [
+        ({"success": True, "providerStatus": "NOT_CALLED", "calls": []}, 1),
+        ({"success": False, "providerStatus": "NOT_CALLED", "calls": []}, 0),
+        (
+            {
+                "success": True,
+                "calls": [{"providerStatus": 200, "errorCode": None}],
+            },
+            1,
+        ),
+        (
+            {
+                "success": True,
+                "calls": [
+                    {
+                        "providerStatus": 200,
+                        "errorCode": "STRUCTURED_COMPLETION_TRUNCATED",
+                    }
+                ],
+            },
+            0,
+        ),
+        (
+            {
+                "success": True,
+                "calls": [{"providerStatus": "TIMEOUT"}],
+            },
+            0,
+        ),
+    ],
+)
+def test_end_to_end_structural_accounting_distinguishes_provider_and_no_call(observation, expected):
+    assert _end_to_end_structural_success(observation) == expected
+
+
+def test_action_metric_accepts_only_domain_valid_actions():
+    assert (
+        _action_matches(
+            {
+                "actualRecommendedAction": "REWRITE_AND_RETRY",
+                "expectedRecommendedAction": "REFUSE_NO_CONTEXT",
+                "expectedRecommendedActions": [
+                    "REFUSE_NO_CONTEXT",
+                    "REWRITE_AND_RETRY",
+                ],
+            }
+        )
+        == 1
+    )
+    assert (
+        _action_matches(
+            {
+                "actualRecommendedAction": "REWRITE_AND_RETRY",
+                "expectedRecommendedAction": "REFUSE_NO_CONTEXT",
+                "expectedRecommendedActions": ["REFUSE_NO_CONTEXT"],
+            }
+        )
+        == 0
+    )
+    assert (
+        _action_matches(
+            {
+                "actualRecommendedAction": "REWRITE_AND_RETRY",
+                "expectedRecommendedAction": "REFUSE_NO_CONTEXT",
+                "expectedSufficient": False,
+                "calls": [{"providerStatus": "SUCCESS"}],
+            }
+        )
+        == 1
+    )
+    assert (
+        _action_matches(
+            {
+                "actualRecommendedAction": "REWRITE_AND_RETRY",
+                "expectedRecommendedAction": "REFUSE_NO_CONTEXT",
+                "expectedSufficient": False,
+                "calls": [],
+            }
+        )
+        == 0
+    )

@@ -42,6 +42,7 @@ describe('CheckContextSufficiencyUseCase', () => {
     await expect(useCase.execute(state({}))).resolves.toMatchObject({
       sufficient: false,
       missingEvidence: ['TRANSCRIPT'],
+      supportedEvidenceIds: [],
       recommendedAction: 'REFUSE_NO_CONTEXT',
       diagnostics: { decisionSource: 'DETERMINISTIC_NO_CONTEXT' },
     });
@@ -66,6 +67,7 @@ describe('CheckContextSufficiencyUseCase', () => {
     ).resolves.toMatchObject({
       sufficient: false,
       missingEvidence: ['VISUAL'],
+      supportedEvidenceIds: [],
       diagnostics: { decisionSource: 'DETERMINISTIC_REQUIRED_MODALITY' },
     });
     expect(service.generateObject).not.toHaveBeenCalled();
@@ -121,6 +123,12 @@ describe('CheckContextSufficiencyUseCase', () => {
         reason: { maxLength: 400 },
         userFacingReason: { maxLength: 300 },
       });
+      expect(service.generateObject.mock.calls[0][0].systemPrompt).toContain(
+        'minimal set of supplied evidence items that directly supports answering the exact user question',
+      );
+      expect(service.generateObject.mock.calls[0][0].systemPrompt).toContain(
+        'Use REWRITE_AND_RETRY only when typed evidence exists',
+      );
     },
   );
 
@@ -145,6 +153,45 @@ describe('CheckContextSufficiencyUseCase', () => {
     await expect(
       useCase.execute(state({ evidenceText: 'Authorized evidence.' })),
     ).resolves.toMatchObject({ supportedEvidenceIds: ['e0'] });
+  });
+
+  it('preserves multiple valid support IDs while deduplicating them', async () => {
+    const service = {
+      generateObject: jest.fn().mockResolvedValue({
+        sufficient: true,
+        confidence: 0.9,
+        supportedEvidenceIds: ['e0', 'e1', 'e0'],
+        reason: 'Both supplied items directly support the relation.',
+        userFacingReason: '',
+        recommendedAction: 'ANSWER',
+      }),
+    };
+    const useCase = new CheckContextSufficiencyUseCase(
+      service as never,
+      config,
+    );
+    const multiEvidenceState = {
+      ...state({ evidenceText: 'First support.' }),
+      rerankedChunks: [
+        {
+          evidenceType: 'TRANSCRIPT',
+          evidenceText: 'First support.',
+          chunkText: 'First support.',
+          tags: [],
+        },
+        {
+          evidenceType: 'TRANSCRIPT',
+          evidenceText: 'Second support.',
+          chunkText: 'Second support.',
+          tags: [],
+        },
+      ],
+    } as RagChatWorkflowState;
+
+    await expect(useCase.execute(multiEvidenceState)).resolves.toMatchObject({
+      sufficient: true,
+      supportedEvidenceIds: ['e0', 'e1'],
+    });
   });
 
   it('fails closed when the semantic provider is unavailable', async () => {

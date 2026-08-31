@@ -186,6 +186,35 @@ function selectFixtures(fixtures, caseIds, label) {
   });
 }
 
+function hasText(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function fixtureHasRequiredEvidence(fixture) {
+  return (fixture.requiredEvidence ?? []).every((required) => {
+    if (required === 'NONE') return true;
+    return fixture.evidence.some((item) => {
+      if (item.evidenceType !== required) return false;
+      if (required === 'METADATA') {
+        return (
+          hasText(item.title) ||
+          hasText(item.description) ||
+          (Array.isArray(item.tags) && item.tags.some(hasText))
+        );
+      }
+      return hasText(item.evidenceText);
+    });
+  });
+}
+
+function expectedRecommendedActions(fixture) {
+  if (fixture.expectedSufficient) return ['ANSWER'];
+  if (fixture.evidence.length === 0 || !fixtureHasRequiredEvidence(fixture)) {
+    return ['REFUSE_NO_CONTEXT'];
+  }
+  return ['REFUSE_NO_CONTEXT', 'REWRITE_AND_RETRY'];
+}
+
 async function evaluateRouter(
   llm,
   config,
@@ -360,6 +389,7 @@ async function evaluateSufficiency(llm, config, callLog, checkpoint, caseIds) {
     const callOffset = callLog.length;
     try {
       const result = await useCase.execute(stateForSufficiency(fixture));
+      const expectedActions = expectedRecommendedActions(fixture);
       samples.push({
         id: fixture.id,
         success: true,
@@ -371,15 +401,15 @@ async function evaluateSufficiency(llm, config, callLog, checkpoint, caseIds) {
             ? ['e0']
             : [],
         actualSupportedEvidenceIds: result.supportedEvidenceIds ?? [],
-        expectedRecommendedAction: fixture.expectedSufficient
-          ? 'ANSWER'
-          : 'REFUSE_NO_CONTEXT',
+        expectedRecommendedAction: expectedActions[0],
+        expectedRecommendedActions: expectedActions,
         actualRecommendedAction: result.recommendedAction,
         providerStatus: result.diagnostics?.providerStatus,
         latencyMs: Date.now() - startedAt,
         calls: normalizeCalls(callLog.slice(callOffset)),
       });
     } catch (error) {
+      const expectedActions = expectedRecommendedActions(fixture);
       samples.push({
         id: fixture.id,
         success: false,
@@ -388,9 +418,8 @@ async function evaluateSufficiency(llm, config, callLog, checkpoint, caseIds) {
         actualSufficient: null,
         expectedSupportedEvidenceIds: [],
         actualSupportedEvidenceIds: [],
-        expectedRecommendedAction: fixture.expectedSufficient
-          ? 'ANSWER'
-          : 'REFUSE_NO_CONTEXT',
+        expectedRecommendedAction: expectedActions[0],
+        expectedRecommendedActions: expectedActions,
         actualRecommendedAction: null,
         errorCode: error?.code || error?.name || 'ERROR',
         latencyMs: Date.now() - startedAt,
@@ -581,6 +610,7 @@ module.exports = {
   evaluateRouter,
   evaluateSufficiency,
   evaluateVerifier,
+  expectedRecommendedActions,
   checkpointWriter,
   normalizeCalls,
 };

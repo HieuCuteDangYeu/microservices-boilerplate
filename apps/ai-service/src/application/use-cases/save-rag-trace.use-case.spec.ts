@@ -53,6 +53,7 @@ describe('SaveRagTraceUseCase', () => {
         missingEvidence: [],
         reason: 'supported',
         recommendedAction: 'ANSWER',
+        supportedEvidenceIds: ['e0'],
         diagnostics: {
           providerStatus: 'NOT_CALLED',
           decisionSource: 'LLM',
@@ -101,6 +102,9 @@ describe('SaveRagTraceUseCase', () => {
             retrievalPlan: state.retrievalPlan?.diagnostics,
             retrievalCounts: { retrieved: 0, reranked: 0 },
             answerClaims: state.answerClaims,
+            contextSufficiency: expect.objectContaining({
+              supportedEvidenceIds: ['e0'],
+            }),
             verification: expect.objectContaining({
               supportedClaimMappings: [
                 { claim: 'answer', evidenceIds: ['e0'] },
