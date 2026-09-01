@@ -203,25 +203,22 @@ export class AuthController {
     let logoutResult: LogoutResponse | null = null;
     const pushTokens = this.getLogoutPushTokens(dto);
 
-    if (!refreshToken && pushTokens.length > 0) {
-      throw new HttpException(
-        'No refresh token found for push token cleanup',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
-
     if (pushTokens.length > 0) {
-      const cleanupUser = await this.resolvePushTokenCleanupUser(request);
+      try {
+        const cleanupUser = await this.resolvePushTokenCleanupUser(request);
 
-      await Promise.all(
-        pushTokens.map((pushToken) =>
-          this.forwardToNotificationService({
-            path: '/notifications/push-tokens/deactivate',
-            userId: cleanupUser.id,
-            body: pushToken,
-          }),
-        ),
-      );
+        await Promise.all(
+          pushTokens.map((pushToken) =>
+            this.forwardToNotificationService({
+              path: '/notifications/push-tokens/deactivate',
+              userId: cleanupUser.id,
+              body: pushToken,
+            }),
+          ),
+        );
+      } catch {
+        // Sign-out must not be blocked by notification token cleanup.
+      }
     }
 
     if (refreshToken) {
