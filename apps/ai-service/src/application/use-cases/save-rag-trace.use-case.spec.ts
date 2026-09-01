@@ -4,7 +4,7 @@ import { SaveRagTraceUseCase } from './save-rag-trace.use-case';
 describe('SaveRagTraceUseCase', () => {
   it('persists bounded graph diagnostics under existing workflow metrics', async () => {
     const create = jest.fn().mockResolvedValue(undefined);
-    const useCase = new SaveRagTraceUseCase({ create } as never);
+    const useCase = new SaveRagTraceUseCase({ create });
     const state = {
       userId: 'u',
       conversationId: 'c',
@@ -53,6 +53,7 @@ describe('SaveRagTraceUseCase', () => {
         missingEvidence: [],
         reason: 'supported',
         recommendedAction: 'ANSWER',
+        supportedEvidenceIds: ['e0'],
         diagnostics: {
           providerStatus: 'NOT_CALLED',
           decisionSource: 'LLM',
@@ -65,6 +66,8 @@ describe('SaveRagTraceUseCase', () => {
         confidence: 1,
         issues: [],
         requiresRevision: false,
+        supportedClaimMappings: [{ claim: 'answer', evidenceIds: ['e0'] }],
+        contradictions: [],
         diagnostics: {
           providerStatus: 'ERROR',
           decisionSource: 'EXACT_PROVENANCE',
@@ -99,6 +102,15 @@ describe('SaveRagTraceUseCase', () => {
             retrievalPlan: state.retrievalPlan?.diagnostics,
             retrievalCounts: { retrieved: 0, reranked: 0 },
             answerClaims: state.answerClaims,
+            contextSufficiency: expect.objectContaining({
+              supportedEvidenceIds: ['e0'],
+            }),
+            verification: expect.objectContaining({
+              supportedClaimMappings: [
+                { claim: 'answer', evidenceIds: ['e0'] },
+              ],
+              contradictions: [],
+            }),
           }),
         }),
       }),

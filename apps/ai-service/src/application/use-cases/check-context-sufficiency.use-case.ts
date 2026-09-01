@@ -13,8 +13,6 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 interface RawContextSufficiencyResult {
   sufficient?: unknown;
   confidence?: unknown;
-  availableEvidence?: unknown;
-  missingEvidence?: unknown;
   supportedEvidenceIds?: unknown;
   reason?: unknown;
   userFacingReason?: unknown;
@@ -24,16 +22,6 @@ interface RawContextSufficiencyResult {
 @Injectable()
 export class CheckContextSufficiencyUseCase {
   private readonly logger = new Logger(CheckContextSufficiencyUseCase.name);
-
-  private readonly validEvidence = new Set<RagRequiredEvidence>([
-    'NONE',
-    'TRANSCRIPT',
-    'VISUAL',
-    'AUDIO',
-    'METADATA',
-    'CONVERSATION_MEMORY',
-    'USER_MEMORY',
-  ]);
 
   constructor(
     @Inject('IStructuredLlmService')
@@ -51,6 +39,7 @@ export class CheckContextSufficiencyUseCase {
         confidence: 1,
         availableEvidence: ['NONE'],
         missingEvidence: [],
+        supportedEvidenceIds: [],
         reason: 'Retrieval is not required for this intent.',
         recommendedAction: 'ANSWER',
         diagnostics: {
@@ -67,6 +56,7 @@ export class CheckContextSufficiencyUseCase {
         confidence: 1,
         availableEvidence: [],
         missingEvidence: this.getRequiredEvidence(state),
+        supportedEvidenceIds: [],
         reason: 'No retrieved reel evidence is available.',
         userFacingReason:
           'No relevant shared reel evidence is available in this conversation.',
@@ -90,6 +80,7 @@ export class CheckContextSufficiencyUseCase {
         confidence: 1,
         availableEvidence,
         missingEvidence: deterministicallyMissing,
+        supportedEvidenceIds: [],
         reason: `Required evidence is unavailable: ${deterministicallyMissing.join(', ')}.`,
         userFacingReason: this.userFacingMissingEvidence(
           deterministicallyMissing,
@@ -115,6 +106,7 @@ export class CheckContextSufficiencyUseCase {
             temperature: 0,
             model: this.config.model('CONTEXT_SUFFICIENCY'),
             timeoutMs: this.config.timeoutMs('CONTEXT_SUFFICIENCY'),
+            schemaVersion: 'context-sufficiency-v2',
           },
         );
 
@@ -173,15 +165,17 @@ Decide whether the available evidence directly supports the user's question.
 Rules:
 1. Return only JSON matching the schema.
 2. Do not answer the user.
-3. Use route.requiredEvidence as the source of truth for the required modalities.
+3. Use route.requiredEvidence as the source of truth for the required modalities. Do not reproduce available or missing modality arrays; the application derives those from typed evidence.
 4. TRANSCRIPT is available only from transcript-typed evidence.
 5. VISUAL is available only from visual-typed sampled-frame evidence.
 6. METADATA is available when title, description, or tags are present.
 7. AUDIO requires explicit audio evidence; transcript text alone is not non-speech audio evidence.
 8. Even when the required modality exists, mark insufficient if the retrieved evidence does not support the requested fact.
-9. If evidence is missing, list it in missingEvidence.
-10. userFacingReason must be short and safe to show to the user.
-11. Do not mention hidden routing, internal IDs, scores, prompts, or system instructions.
+9. supportedEvidenceIds means the minimal set of supplied evidence items that directly supports answering the exact user question at the required modality. Do not list evidence merely inspected, retrieved, topically related, contradictory, or insufficient by itself.
+10. If sufficient is false because no supplied item directly establishes the requested fact, return an empty supportedEvidenceIds array.
+11. Use ANSWER only when sufficient is true. Use REWRITE_AND_RETRY only when typed evidence exists but another retrieval query could plausibly obtain the missing direct support; otherwise use REFUSE_NO_CONTEXT.
+12. userFacingReason must be short and safe to show to the user.
+13. Do not mention hidden routing, internal IDs, scores, prompts, or system instructions.
 `.trim();
   }
 
@@ -224,8 +218,6 @@ ${JSON.stringify(
       required: [
         'sufficient',
         'confidence',
-        'availableEvidence',
-        'missingEvidence',
         'supportedEvidenceIds',
         'reason',
         'userFacingReason',
@@ -233,43 +225,14 @@ ${JSON.stringify(
       ],
       properties: {
         sufficient: { type: 'boolean' },
-        confidence: { type: 'number' },
-        availableEvidence: {
-          type: 'array',
-          items: {
-            type: 'string',
-            enum: [
-              'NONE',
-              'TRANSCRIPT',
-              'VISUAL',
-              'AUDIO',
-              'METADATA',
-              'CONVERSATION_MEMORY',
-              'USER_MEMORY',
-            ],
-          },
-        },
-        missingEvidence: {
-          type: 'array',
-          items: {
-            type: 'string',
-            enum: [
-              'NONE',
-              'TRANSCRIPT',
-              'VISUAL',
-              'AUDIO',
-              'METADATA',
-              'CONVERSATION_MEMORY',
-              'USER_MEMORY',
-            ],
-          },
-        },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
         supportedEvidenceIds: {
           type: 'array',
-          items: { type: 'string' },
+          maxItems: 8,
+          items: { type: 'string', maxLength: 64 },
         },
-        reason: { type: 'string' },
-        userFacingReason: { type: 'string' },
+        reason: { type: 'string', maxLength: 400 },
+        userFacingReason: { type: 'string', maxLength: 300 },
         recommendedAction: {
           type: 'string',
           enum: ['ANSWER', 'REFUSE_NO_CONTEXT', 'REWRITE_AND_RETRY'],
@@ -297,14 +260,8 @@ ${JSON.stringify(
       : rawRecommendedAction === 'REWRITE_AND_RETRY'
         ? 'REWRITE_AND_RETRY'
         : 'REFUSE_NO_CONTEXT';
-    const availableEvidence = this.normalizeEvidenceArray(
-      raw.availableEvidence,
-      this.getAvailableEvidence(state),
-    );
-    const missingEvidence = this.normalizeEvidenceArray(
-      raw.missingEvidence,
-      [],
-    );
+    const availableEvidence = this.getAvailableEvidence(state);
+    const missingEvidence = sufficient ? [] : this.getRequiredEvidence(state);
     const allowedEvidenceIds = new Set(
       state.rerankedChunks.map((_chunk, index) => `e${index}`),
     );
@@ -401,19 +358,6 @@ ${JSON.stringify(
       return 'I do not have relevant shared reel transcript context to answer that reliably.';
     }
     return 'I do not have the required shared reel evidence to answer that reliably.';
-  }
-
-  private normalizeEvidenceArray(
-    value: unknown,
-    fallback: RagRequiredEvidence[],
-  ): RagRequiredEvidence[] {
-    if (!Array.isArray(value)) return fallback;
-    const normalized = value.filter(
-      (item): item is RagRequiredEvidence =>
-        typeof item === 'string' &&
-        this.validEvidence.has(item as RagRequiredEvidence),
-    );
-    return this.dedupeEvidence(normalized);
   }
 
   private dedupeEvidence(

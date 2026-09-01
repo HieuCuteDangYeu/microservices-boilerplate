@@ -32,6 +32,20 @@ export type RagRequiredEvidence =
   | 'CONVERSATION_MEMORY'
   | 'USER_MEMORY';
 
+export type RagReferenceTarget =
+  | 'NONE'
+  | 'SHARED_REEL'
+  | 'CONVERSATION'
+  | 'USER_MEMORY';
+
+export interface RagRouterReferentContext {
+  conversationHasSharedReelContext: boolean;
+  accessibleSharedReelCount: number;
+  recentShareEvent: boolean;
+  turnsSinceRecentShare?: number;
+  recentEventTypes: Array<'TEXT' | 'REEL_SHARE'>;
+}
+
 export type RagRecommendationAction =
   | {
       type: 'NONE';
@@ -53,6 +67,7 @@ export type RagRecommendationAction =
 
 export interface RagChatRouteDecision {
   intent: RagChatIntent;
+  referenceTarget: RagReferenceTarget;
   needsRetrieval: boolean;
   needsUserMemory: boolean;
   needsConversationSummary: boolean;
@@ -70,6 +85,7 @@ export interface RagChatRouteDecision {
     providerStatus: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
     decisionSource: 'LLM' | 'LLM_FALLBACK' | 'FAIL_SAFE' | 'STRUCTURAL';
     semanticCalls?: StructuredLlmCallDiagnostics[];
+    fallbackReason?: string;
   };
 }
 
@@ -106,7 +122,14 @@ export interface RagVerificationResult {
   issues: string[];
   requiresRevision: boolean;
   revisedInstruction?: string;
+  supportedClaimMappings?: RagSupportedClaimMapping[];
+  contradictions?: string[];
   diagnostics?: RagVerificationDiagnostics;
+}
+
+export interface RagSupportedClaimMapping {
+  claim: string;
+  evidenceIds: string[];
 }
 
 export interface RagVerificationDiagnostics {
@@ -127,6 +150,8 @@ export interface RagVerificationDiagnostics {
   issues: string[];
   requiresRevision: boolean;
   revisedInstruction?: string;
+  supportedClaimMappings?: RagSupportedClaimMapping[];
+  contradictions?: string[];
   exactProvenance: {
     supported: boolean;
     supportingEvidenceIndexes: number[];
@@ -139,6 +164,7 @@ export interface RagContextSufficiencyResult {
 
   availableEvidence: RagRequiredEvidence[];
   missingEvidence: RagRequiredEvidence[];
+  /** Prompt-local evidence IDs that directly support answering the exact question. */
   supportedEvidenceIds?: string[];
 
   reason: string;

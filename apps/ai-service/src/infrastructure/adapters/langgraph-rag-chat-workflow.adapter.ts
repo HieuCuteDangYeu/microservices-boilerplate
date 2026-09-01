@@ -252,6 +252,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
           recentHistory: this.formatRecentHistory(state),
           hasSharedReelContext: state.hasSharedReelContext,
           sharedReelCount: state.accessibleReelIds?.length ?? 0,
+          referentContext: this.buildRouterReferentContext(state),
         }),
       );
 
@@ -858,6 +859,29 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     return messages
       .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
       .join('\n');
+  }
+
+  private buildRouterReferentContext(state: RagChatWorkflowState) {
+    const eventTypes = (state.memory?.recentMessages ?? [])
+      .map((message) => message.eventType)
+      .filter(
+        (eventType): eventType is 'TEXT' | 'REEL_SHARE' =>
+          eventType === 'TEXT' || eventType === 'REEL_SHARE',
+      );
+    const recentShareIndex = eventTypes.lastIndexOf('REEL_SHARE');
+    const turnsSinceRecentShare =
+      recentShareIndex < 0
+        ? undefined
+        : eventTypes.length - recentShareIndex - 1;
+
+    return {
+      conversationHasSharedReelContext: state.hasSharedReelContext ?? false,
+      accessibleSharedReelCount: state.accessibleReelIds?.length ?? 0,
+      recentShareEvent:
+        turnsSinceRecentShare !== undefined && turnsSinceRecentShare <= 2,
+      turnsSinceRecentShare,
+      recentEventTypes: eventTypes,
+    };
   }
 
   private number(

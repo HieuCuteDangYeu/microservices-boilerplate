@@ -42,6 +42,7 @@ test('fresh eight cases transition through persisted in-flight state exactly onc
     IN_FLIGHT: 0,
     COMPLETED: 8,
     FAILED: 0,
+    FAILED_RECONCILED: 0,
   });
 });
 
@@ -104,4 +105,76 @@ test('failed executor remains in-flight and is never marked completed', () => {
   runner.markCaseInFlight(state, 'case-1', () => {});
   assert.equal(state.cases['case-1'].status, 'IN_FLIGHT');
   assert.notEqual(state.cases['case-1'].status, 'COMPLETED');
+});
+
+test('reconciliation records objective no-resend evidence after the quiet period', () => {
+  const evidence = runner.buildReconciliationEvidence({
+    runLockAcquired: true,
+    progress: { status: 'IN_FLIGHT' },
+    primaryMessages: [{ id: 'request-1' }],
+    botMessages: [],
+    traces: [{ createdAt: '2026-08-25T00:00:00.000Z', hasAnswer: false }],
+    nowMs: Date.parse('2026-08-25T00:05:00.000Z'),
+    minimumQuietMs: 120_000,
+  });
+  assert.deepEqual(evidence, {
+    primaryRequestCount: 1,
+    botResponseCount: 0,
+    traceEvidenceCount: 1,
+    latestTraceAt: '2026-08-25T00:00:00.000Z',
+    activeRunLockBeforeReconciliation: false,
+    workflowTerminalEvidence: 'RAG_TRACE_PERSISTED_AFTER_GRAPH_EXIT',
+  });
+});
+
+test('reconciliation refuses a bot response, duplicate request, or active quiet period', () => {
+  const base = {
+    runLockAcquired: true,
+    progress: { status: 'IN_FLIGHT' },
+    primaryMessages: [{ id: 'request-1' }],
+    botMessages: [],
+    traces: [{ createdAt: '2026-08-25T00:00:00.000Z', hasAnswer: false }],
+    nowMs: Date.parse('2026-08-25T00:05:00.000Z'),
+    minimumQuietMs: 120_000,
+  };
+  assert.throws(
+    () => runner.buildReconciliationEvidence({ ...base, botMessages: [{}] }),
+    /bot response exists/,
+  );
+  assert.throws(
+    () =>
+      runner.buildReconciliationEvidence({
+        ...base,
+        primaryMessages: [{}, {}],
+      }),
+    /exactly one primary request/,
+  );
+  assert.throws(
+    () =>
+      runner.buildReconciliationEvidence({
+        ...base,
+        nowMs: Date.parse('2026-08-25T00:01:00.000Z'),
+      }),
+    /quiet period/,
+  );
+  assert.throws(
+    () =>
+      runner.buildReconciliationEvidence({
+        ...base,
+        runLockAcquired: false,
+      }),
+    /exclusive benchmark run lock/,
+  );
+});
+
+test('reconciliation normalizes the Mongo pool option without changing credentials', () => {
+  const normalized = new URL(
+    runner.normalizeMongoConnectionUrl(
+      'mongodb+srv://user:pass@example.test/db?connection_limit=1',
+    ),
+  );
+  assert.equal(normalized.username, 'user');
+  assert.equal(normalized.password, 'pass');
+  assert.equal(normalized.searchParams.has('connection_limit'), false);
+  assert.equal(normalized.searchParams.get('maxPoolSize'), '1');
 });

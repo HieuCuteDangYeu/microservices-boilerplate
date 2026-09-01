@@ -39,6 +39,10 @@ export class BuildBotMemoryContextUseCase {
           role,
           content: this.toMemoryContent(message),
           createdAt: message.createdAt.toISOString(),
+          eventType:
+            message.type === 'reel'
+              ? ('REEL_SHARE' as const)
+              : ('TEXT' as const),
         };
       })
       .filter((message) => message.content.length > 0)

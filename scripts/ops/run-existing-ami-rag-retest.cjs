@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const dotenv = require('dotenv');
+const { normalizeCase } = require('./normalize-existing-ami-rag-retest.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const REPORT_DIR = path.join(ROOT, 'test-data/reel-integration/ami/reports');
@@ -55,7 +56,13 @@ function formatStatus(runId, state) {
       result[status] = (result[status] || 0) + 1;
       return result;
     },
-    { PENDING: 0, IN_FLIGHT: 0, COMPLETED: 0, FAILED: 0 },
+    {
+      PENDING: 0,
+      IN_FLIGHT: 0,
+      COMPLETED: 0,
+      FAILED: 0,
+      FAILED_RECONCILED: 0,
+    },
   );
   return {
     benchmarkRunId: runId,
@@ -101,6 +108,134 @@ function completeCase(state, caseId, result, persist) {
   persist(state);
 }
 
+function normalizeMongoConnectionUrl(value) {
+  if (!value) return value;
+  const parsed = new URL(value);
+  parsed.searchParams.delete('connection_limit');
+  if (!parsed.searchParams.has('maxPoolSize')) {
+    parsed.searchParams.set('maxPoolSize', '1');
+  }
+  return parsed.toString();
+}
+
+function buildReconciliationEvidence(input) {
+  if (input.runLockAcquired !== true)
+    fail('exclusive benchmark run lock was not acquired');
+  if (input.progress?.status !== 'IN_FLIGHT')
+    fail(`case is ${input.progress?.status || 'UNKNOWN'}, not IN_FLIGHT`);
+  if (input.primaryMessages.length !== 1)
+    fail(
+      `expected exactly one primary request, found ${input.primaryMessages.length}`,
+    );
+  if (input.botMessages.length !== 0)
+    fail(`bot response exists; no-resend reconciliation refused`);
+  if (input.traces.length === 0)
+    fail('no persisted trace proves that the workflow ended');
+  if (input.traces.some((trace) => trace.hasAnswer))
+    fail('a trace contains an answer; no-resend reconciliation refused');
+  const latestTraceAt = Math.max(
+    ...input.traces.map((trace) => new Date(trace.createdAt).getTime()),
+  );
+  if (!Number.isFinite(latestTraceAt)) fail('trace timestamp is invalid');
+  if (input.nowMs - latestTraceAt < input.minimumQuietMs)
+    fail('trace is still inside the configured quiet period');
+
+  return {
+    primaryRequestCount: 1,
+    botResponseCount: 0,
+    traceEvidenceCount: input.traces.length,
+    latestTraceAt: new Date(latestTraceAt).toISOString(),
+    activeRunLockBeforeReconciliation: false,
+    workflowTerminalEvidence: 'RAG_TRACE_PERSISTED_AFTER_GRAPH_EXIT',
+  };
+}
+
+async function reconcileInFlight(runId) {
+  const caseId = arg('--case-id');
+  const conversationId = arg('--conversation-id');
+  const userMessageId = arg('--user-message-id');
+  if (!caseId || !conversationId || !userMessageId)
+    fail('--case-id, --conversation-id, and --user-message-id are required');
+  const minimumQuietMs = Number(arg('--minimum-quiet-ms') || 180_000);
+  if (!Number.isFinite(minimumQuietMs) || minimumQuietMs < 120_000)
+    fail('--minimum-quiet-ms must be at least 120000');
+
+  const releaseLock = lockRun(runId);
+  const state = readState(runId);
+  try {
+    dotenv.config({
+      path: arg('--env-file') || path.join(ROOT, '.env.test.local'),
+    });
+    process.env.CONVERSATION_DATABASE_URL = normalizeMongoConnectionUrl(
+      process.env.CONVERSATION_DATABASE_URL,
+    );
+    const {
+      PrismaClient: ConversationClient,
+    } = require('@prisma/conversation-client');
+    const { PrismaClient: AiClient } = require('@prisma/ai-client');
+    const conversation = new ConversationClient();
+    const ai = new AiClient();
+    try {
+      const progress = state.cases?.[caseId];
+      const [message, botMessages, traces] = await Promise.all([
+        conversation.message.findFirst({
+          where: { id: userMessageId, conversationId },
+          select: { id: true, clientMessageId: true, createdAt: true },
+        }),
+        conversation.message.findMany({
+          where: {
+            conversationId,
+            senderId: BOT_USER_ID,
+            createdAt: { gte: new Date(progress?.requestStartedAt || 0) },
+          },
+          select: { id: true },
+        }),
+        ai.ragTrace.findMany({
+          where: { conversationId },
+          select: { id: true, createdAt: true, answer: true },
+        }),
+      ]);
+      const primaryMessages =
+        message && message.clientMessageId.startsWith(`ami-rag-${caseId}-`)
+          ? [message]
+          : [];
+      const evidence = buildReconciliationEvidence({
+        runLockAcquired: true,
+        progress,
+        primaryMessages,
+        botMessages,
+        traces: traces.map((trace) => ({
+          createdAt: trace.createdAt,
+          hasAnswer: Boolean(trace.answer),
+        })),
+        nowMs: Date.now(),
+        minimumQuietMs,
+      });
+      state.cases[caseId] = {
+        ...progress,
+        status: 'FAILED_RECONCILED',
+        reconciledAt: new Date().toISOString(),
+        reconciliationReason: 'WORKFLOW_ENDED_WITHOUT_BOT_RESPONSE',
+        conversationId,
+        userMessageId,
+        ...evidence,
+      };
+      writeJsonAtomically(statePath(runId), state);
+      console.log(
+        JSON.stringify(
+          { benchmarkRunId: runId, caseId, ...state.cases[caseId] },
+          null,
+          2,
+        ),
+      );
+    } finally {
+      await Promise.allSettled([conversation.$disconnect(), ai.$disconnect()]);
+    }
+  } finally {
+    releaseLock();
+  }
+}
+
 function lockRun(runId) {
   const file = path.join(STATE_DIR, `${runId}.lock`);
   fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -138,6 +273,11 @@ async function retry(operation, description) {
 }
 
 async function main() {
+  const reconcileRunId = arg('--reconcile-in-flight');
+  if (reconcileRunId) {
+    await reconcileInFlight(reconcileRunId);
+    return;
+  }
   const statusRunId = arg('--status');
   if (statusRunId) {
     const state = readState(statusRunId);
@@ -261,6 +401,11 @@ async function main() {
       const conversationId = created?.id;
       if (!conversationId)
         fail(`conversation create returned no id for ${definition.caseId}`);
+      state.cases[definition.caseId] = {
+        ...state.cases[definition.caseId],
+        conversationId,
+      };
+      writeJsonAtomically(statePath(benchmarkRunId), state);
       for (const reelId of REEL_IDS) {
         await retry(
           () =>
@@ -303,6 +448,12 @@ async function main() {
           signalType: 0,
         },
       );
+      state.cases[definition.caseId] = {
+        ...state.cases[definition.caseId],
+        requestStartedAt,
+        userMessageId: userMessage.id,
+      };
+      writeJsonAtomically(statePath(benchmarkRunId), state);
       let assistantMessage;
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -339,6 +490,12 @@ async function main() {
           assistantMessage.citations ??
           [],
       };
+      result.normalized = normalizeCase(
+        definition,
+        result,
+        null,
+        benchmarkRunId,
+      );
       resultCases.push(result);
       completeCase(
         state,
@@ -390,6 +547,8 @@ async function main() {
 
 module.exports = {
   formatStatus,
+  buildReconciliationEvidence,
+  normalizeMongoConnectionUrl,
   completeCase,
   lockRun,
   markCaseInFlight,

@@ -5,6 +5,7 @@ export const AiChatMessageContextSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string().min(1),
   createdAt: z.string(),
+  eventType: z.enum(['TEXT', 'REEL_SHARE']).optional(),
 });
 
 export const AiChatMemoryContextSchema = z.object({

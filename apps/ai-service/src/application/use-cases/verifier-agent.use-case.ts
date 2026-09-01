@@ -2,6 +2,7 @@ import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-
 import type {
   RagChatWorkflowState,
   RagVerificationResult,
+  RagSupportedClaimMapping,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type {
   IStructuredLlmService,
@@ -38,6 +39,8 @@ export class VerifierAgentUseCase {
         confidence: 1,
         issues: [],
         requiresRevision: false,
+        supportedClaimMappings: [],
+        contradictions: [],
         diagnostics: {
           providerStatus: 'NOT_CALLED',
           decisionSource: 'NOT_REQUIRED',
@@ -51,18 +54,41 @@ export class VerifierAgentUseCase {
       };
     }
 
-    try {
-      const primary = await this.verifyWithRole(state, 'VERIFIER');
-      const escalationReason = this.escalationReason(primary, state);
-      const maxAttempts = Math.round(
-        this.config.number('AI_VERIFIER_MAX_ATTEMPTS', 2, 1, 2),
-      );
+    const maxAttempts = Math.round(
+      this.config.number('AI_VERIFIER_MAX_ATTEMPTS', 2, 1, 2),
+    );
+    const escalationEnabled =
+      maxAttempts >= 2 &&
+      this.config.boolean('AI_VERIFIER_ESCALATION_ENABLED', true);
 
-      if (
-        escalationReason &&
-        maxAttempts >= 2 &&
-        this.config.boolean('AI_VERIFIER_ESCALATION_ENABLED', true)
-      ) {
+    let primary: RagVerificationResult;
+    try {
+      primary = await this.verifyWithRole(state, 'VERIFIER');
+    } catch (primaryError: unknown) {
+      if (escalationEnabled && this.isTransientProviderFailure(primaryError)) {
+        try {
+          const escalated = await this.verifyWithRole(
+            state,
+            'VERIFIER_ESCALATION',
+          );
+          return this.withDiagnostics(escalated, {
+            role: 'VERIFIER_ESCALATION',
+            source: 'LLM_ESCALATION',
+            escalated: true,
+            escalationReason: 'PRIMARY_PROVIDER_FAILURE',
+            state,
+          });
+        } catch (escalationError: unknown) {
+          return this.providerFailureResult(escalationError, state);
+        }
+      }
+      return this.providerFailureResult(primaryError, state);
+    }
+
+    try {
+      const escalationReason = this.escalationReason(primary, state);
+
+      if (escalationReason && escalationEnabled) {
         const escalated = await this.verifyWithRole(
           state,
           'VERIFIER_ESCALATION',
@@ -83,50 +109,72 @@ export class VerifierAgentUseCase {
         state,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        `[VerifierAgent] semantic verification failed: ${message}`,
-      );
+      return this.providerFailureResult(error, state);
+    }
+  }
 
-      const exactProvenance = this.exactProvenance(state);
-      if (exactProvenance.supported) {
-        return {
-          passed: true,
-          confidence: 1,
-          issues: [
-            'Semantic verifier unavailable; answer accepted only as an exact source span.',
-          ],
-          requiresRevision: false,
-          diagnostics: {
-            providerStatus: 'ERROR',
-            decisionSource: 'EXACT_PROVENANCE',
-            finalPassed: true,
-            confidence: 1,
-            issues: [],
-            requiresRevision: false,
-            escalated: false,
-            exactProvenance,
-          },
-        };
-      }
+  private isTransientProviderFailure(error: unknown): boolean {
+    if (!error || typeof error !== 'object' || !('code' in error)) return false;
+    if (
+      error.code !== 'STRUCTURED_COMPLETION_TIMEOUT' &&
+      error.code !== 'STRUCTURED_COMPLETION_PROVIDER_ERROR'
+    ) {
+      return false;
+    }
+    return !('transient' in error) || error.transient !== false;
+  }
 
+  private providerFailureResult(
+    error: unknown,
+    state: RagChatWorkflowState,
+  ): RagVerificationResult {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.warn(
+      `[VerifierAgent] semantic verification failed: ${message}`,
+    );
+
+    const exactProvenance = this.exactProvenance(state);
+    if (exactProvenance.supported) {
       return {
-        passed: false,
-        confidence: 0,
-        issues: ['Required semantic answer verification was unavailable.'],
+        passed: true,
+        confidence: 1,
+        issues: [
+          'Semantic verifier unavailable; answer accepted only as an exact source span.',
+        ],
         requiresRevision: false,
+        supportedClaimMappings: [],
+        contradictions: [],
         diagnostics: {
           providerStatus: 'ERROR',
-          decisionSource: 'FAIL_CLOSED',
-          finalPassed: false,
-          confidence: 0,
-          issues: ['Required semantic answer verification was unavailable.'],
+          decisionSource: 'EXACT_PROVENANCE',
+          finalPassed: true,
+          confidence: 1,
+          issues: [],
           requiresRevision: false,
           escalated: false,
           exactProvenance,
         },
       };
     }
+
+    return {
+      passed: false,
+      confidence: 0,
+      issues: ['Required semantic answer verification was unavailable.'],
+      requiresRevision: false,
+      supportedClaimMappings: [],
+      contradictions: [],
+      diagnostics: {
+        providerStatus: 'ERROR',
+        decisionSource: 'FAIL_CLOSED',
+        finalPassed: false,
+        confidence: 0,
+        issues: ['Required semantic answer verification was unavailable.'],
+        requiresRevision: false,
+        escalated: false,
+        exactProvenance,
+      },
+    };
   }
 
   private async verifyWithRole(
@@ -189,6 +237,8 @@ export class VerifierAgentUseCase {
         issues: result.issues,
         requiresRevision: result.requiresRevision,
         revisedInstruction: result.revisedInstruction,
+        supportedClaimMappings: result.supportedClaimMappings ?? [],
+        contradictions: result.contradictions ?? [],
         exactProvenance: this.exactProvenance(input.state),
       },
     };
@@ -285,14 +335,33 @@ Return only compact JSON matching the schema. Keep issues, contradictions, claim
     const rawMappings = Array.isArray(raw.supportedClaimMappings)
       ? raw.supportedClaimMappings
       : [];
-    const hasUnknownEvidenceId = rawMappings.some((mapping) => {
-      if (!mapping || typeof mapping !== 'object') return true;
-      const ids = (mapping as Record<string, unknown>)['evidenceIds'];
-      return (
-        !Array.isArray(ids) ||
-        ids.some((id) => typeof id !== 'string' || !allowedIds.has(id))
-      );
-    });
+    let hasUnknownEvidenceId = false;
+    const supportedClaimMappings: RagSupportedClaimMapping[] = [];
+    for (const mapping of rawMappings) {
+      if (!mapping || typeof mapping !== 'object') {
+        hasUnknownEvidenceId = true;
+        continue;
+      }
+      const candidate = mapping as Record<string, unknown>;
+      const claim = candidate['claim'];
+      const ids = candidate['evidenceIds'];
+      if (typeof claim !== 'string' || !claim.trim() || !Array.isArray(ids)) {
+        hasUnknownEvidenceId = true;
+        continue;
+      }
+      const normalizedIds = [
+        ...new Set(
+          ids.filter(
+            (id): id is string => typeof id === 'string' && allowedIds.has(id),
+          ),
+        ),
+      ];
+      if (normalizedIds.length !== ids.length) hasUnknownEvidenceId = true;
+      supportedClaimMappings.push({
+        claim: claim.trim(),
+        evidenceIds: normalizedIds,
+      });
+    }
     const issues = Array.isArray(raw.issues)
       ? raw.issues.filter((item): item is string => typeof item === 'string')
       : [];
@@ -327,6 +396,8 @@ Return only compact JSON matching the schema. Keep issues, contradictions, claim
         raw.revisedInstruction.trim()
           ? raw.revisedInstruction.trim()
           : undefined,
+      supportedClaimMappings,
+      contradictions,
     };
   }
 

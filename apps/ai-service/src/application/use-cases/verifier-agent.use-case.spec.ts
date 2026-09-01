@@ -83,10 +83,16 @@ describe('VerifierAgentUseCase', () => {
     ).resolves.toMatchObject({
       passed: true,
       confidence: 0.95,
+      supportedClaimMappings: [
+        { claim: 'The zorb is linked to the quasar.', evidenceIds: ['e0'] },
+      ],
       diagnostics: {
         decisionSource: 'LLM_PRIMARY',
         modelRole: 'VERIFIER',
         escalated: false,
+        supportedClaimMappings: [
+          { claim: 'The zorb is linked to the quasar.', evidenceIds: ['e0'] },
+        ],
       },
     });
     expect(service.generateObject).toHaveBeenCalledWith(
@@ -142,6 +148,51 @@ describe('VerifierAgentUseCase', () => {
         maxTokens: 1_024,
       }),
     );
+  });
+
+  it('escalates exactly once after a transient primary provider failure', async () => {
+    const timeout = Object.assign(new Error('primary timeout'), {
+      code: 'STRUCTURED_COMPLETION_TIMEOUT',
+    });
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockRejectedValueOnce(timeout)
+        .mockResolvedValueOnce(result()),
+    };
+
+    await expect(
+      new VerifierAgentUseCase(service as never, config).execute(
+        state({ evidenceText: 'The zorb is linked to the quasar.' }),
+      ),
+    ).resolves.toMatchObject({
+      passed: true,
+      diagnostics: {
+        modelRole: 'VERIFIER_ESCALATION',
+        escalationReason: 'PRIMARY_PROVIDER_FAILURE',
+        escalated: true,
+      },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not escalate a non-transient account-limited provider failure', async () => {
+    const limited = Object.assign(new Error('account limited'), {
+      code: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+      transient: false,
+      providerCode: 3036,
+    });
+    const service = { generateObject: jest.fn().mockRejectedValue(limited) };
+
+    await expect(
+      new VerifierAgentUseCase(service as never, config).execute(
+        state({ evidenceText: 'Potential evidence.' }),
+      ),
+    ).resolves.toMatchObject({
+      passed: false,
+      diagnostics: { decisionSource: 'FAIL_CLOSED' },
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(1);
   });
 
   it('escalates a low-confidence primary acceptance', async () => {
@@ -285,6 +336,38 @@ describe('VerifierAgentUseCase', () => {
       useCase.execute(state({ evidenceText: 'Authorized evidence.' })),
     ).resolves.toMatchObject({
       passed: false,
+      issues: ['Verifier returned unknown evidence ID.'],
+    });
+  });
+
+  it('preserves valid mappings while failing closed on a mixed unknown mapping', async () => {
+    const service = {
+      generateObject: jest.fn().mockResolvedValue(
+        result({
+          supportedClaimMappings: [
+            { claim: 'Authorized mapping.', evidenceIds: ['e0'] },
+            { claim: 'Invalid mapping.', evidenceIds: ['e99'] },
+          ],
+        }),
+      ),
+    };
+    const noEscalationConfig = {
+      ...config,
+      boolean: jest.fn(() => false),
+    } as unknown as IAiApplicationConfig;
+    const useCase = new VerifierAgentUseCase(
+      service as never,
+      noEscalationConfig,
+    );
+
+    await expect(
+      useCase.execute(state({ evidenceText: 'Authorized evidence.' })),
+    ).resolves.toMatchObject({
+      passed: false,
+      supportedClaimMappings: [
+        { claim: 'Authorized mapping.', evidenceIds: ['e0'] },
+        { claim: 'Invalid mapping.', evidenceIds: [] },
+      ],
       issues: ['Verifier returned unknown evidence ID.'],
     });
   });
