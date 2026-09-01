@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any
 
 
-def load_runtime_snapshot(path: str | None, production_sha: str | None) -> dict[str, Any]:
+def load_runtime_snapshot(
+    path: str | None, production_sha: str | None, dataset_version: str
+) -> dict[str, Any]:
     if not path:
         raise ValueError("remote live evaluation requires --runtime-config-snapshot")
     snapshot = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -26,7 +28,7 @@ def load_runtime_snapshot(path: str | None, production_sha: str | None) -> dict[
         raise ValueError("runtime config snapshot is incomplete")
     if not production_sha or snapshot["gitSha"] != production_sha:
         raise ValueError("runtime config gitSha must match explicit --production-sha")
-    if snapshot["datasetVersion"] != "rag-frozen-ami-v1":
+    if not dataset_version or snapshot["datasetVersion"] != dataset_version:
         raise ValueError("runtime config dataset mismatch")
     if not snapshot["roles"] or any(
         not {"model", "timeoutMs", "maxCompletionTokens"} <= role.keys()

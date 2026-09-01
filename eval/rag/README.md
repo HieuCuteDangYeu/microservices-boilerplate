@@ -16,7 +16,7 @@ No evaluation dependency is a production dependency. `pnpm eval:rag:test` and of
 
 ## Datasets
 
-- `rag-frozen-ami-v1`: the immutable eight AMI questions, answers, reel scope, evidence modality, time interval, and curated concepts.
+- `rag-frozen-ami-v1` and `rag-frozen-ami-v2`: immutable eight-case AMI datasets with the same questions, answers, reel scope, evidence modality, time intervals, and curated concepts; v2 records new production reel and index provenance.
 - `rag-generalization-v1`: 65 router, 20 sufficiency, 15 verifier, and four generic retrieval/citation/access/provider rows. Tags are analysis metadata only.
 
 The JSONL files under `datasets/` are the source of truth. Existing Jest control-plane tests read their fixture payloads from the same generic dataset. To add a case, add safe, non-production fixture data, increment the dataset version when semantics change, update the declared count, and add contract tests. Never place credentials, private production text, or benchmark answers in runtime code.
@@ -109,7 +109,8 @@ authorized experiment. Do not increase timeout automatically after failure.
 `eval:rag:live` uses public backend APIs, not the local structured-LLM runner.
 Local env cannot configure a remote deployment. It therefore requires an
 operator-supplied `--runtime-config-snapshot` whose `gitSha` matches explicit
-`--production-sha`, includes the router snapshot fields and a `roles` map with
-each role's model/timeoutMs/maxCompletionTokens. This is labeled operator
-attestation, not claimed as remotely observed config. Deterministic outputs are
-saved before any optional semantic judge, which is forbidden on a failed gate.
+`--production-sha`, whose `datasetVersion` matches the requested dataset, and
+which includes the router snapshot fields and a `roles` map with each role's
+model/timeoutMs/maxCompletionTokens. This is labeled operator attestation, not
+claimed as remotely observed config. Deterministic outputs are saved before
+any optional semantic judge, which is forbidden on a failed gate.
