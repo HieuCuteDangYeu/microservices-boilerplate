@@ -38,6 +38,28 @@ export type RagReferenceTarget =
   | 'CONVERSATION'
   | 'USER_MEMORY';
 
+export type RagRouterSemanticInconsistencyType =
+  | 'INVALID_INTENT'
+  | 'INVALID_REFERENCE_TARGET'
+  | 'INTENT_REFERENCE_MISMATCH'
+  | 'SHARED_REEL_CONTEXT_UNAVAILABLE'
+  | 'INTENT_REEL_TYPE_MISMATCH'
+  | 'REQUIRED_EVIDENCE_MISMATCH'
+  | 'INVALID_RECOMMENDATION_ACTION'
+  | 'RECOMMENDATION_INTENT_MISMATCH'
+  | 'RECOMMENDATION_PAYLOAD_MISMATCH';
+
+export interface RagRouterSemanticInconsistencyDetails {
+  actualIntent?: RagChatIntent;
+  actualReferenceTarget?: RagReferenceTarget;
+  expectedReferenceTarget?: RagReferenceTarget;
+  actualReelQuestionType?: RagReelQuestionType;
+  expectedReelQuestionType?: RagReelQuestionType;
+  actualEvidence?: RagRequiredEvidence[];
+  expectedEvidence?: RagRequiredEvidence[];
+  recommendationActionType?: RagRecommendationAction['type'];
+}
+
 export interface RagRouterReferentContext {
   conversationHasSharedReelContext: boolean;
   accessibleSharedReelCount: number;
@@ -245,6 +267,8 @@ export interface RagWorkflowFailureDiagnostics {
   errorName: string;
   errorCode?: string;
   causeCode?: string;
+  semanticInconsistencyType?: RagRouterSemanticInconsistencyType;
+  semanticInconsistencyDetails?: RagRouterSemanticInconsistencyDetails;
   semanticCalls?: RagStructuredCallFailureDiagnostic[];
 }
 

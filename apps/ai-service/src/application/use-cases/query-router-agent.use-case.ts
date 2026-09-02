@@ -5,6 +5,8 @@ import type {
   RagRecommendationAction,
   RagReferenceTarget,
   RagReelQuestionType,
+  RagRouterSemanticInconsistencyDetails,
+  RagRouterSemanticInconsistencyType,
   RagRouterReferentContext,
   RagRequiredEvidence,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
@@ -32,6 +34,8 @@ export class RouterUnavailableError extends Error {
   constructor(
     readonly semanticCalls: StructuredLlmCallDiagnostics[] = [],
     readonly causeCode?: string,
+    readonly semanticInconsistencyType?: RagRouterSemanticInconsistencyType,
+    readonly semanticInconsistencyDetails?: RagRouterSemanticInconsistencyDetails,
   ) {
     super('Semantic router is temporarily unavailable');
     this.name = 'RouterUnavailableError';
@@ -41,7 +45,10 @@ export class RouterUnavailableError extends Error {
 export class RouterSemanticInconsistencyError extends Error {
   readonly code = 'ROUTER_SEMANTIC_INCONSISTENT';
 
-  constructor() {
+  constructor(
+    readonly semanticInconsistencyType: RagRouterSemanticInconsistencyType,
+    readonly semanticInconsistencyDetails: RagRouterSemanticInconsistencyDetails = {},
+  ) {
     super('Semantic router returned an internally inconsistent referent');
     this.name = 'RouterSemanticInconsistencyError';
   }
@@ -158,6 +165,8 @@ export class QueryRouterAgentUseCase {
       return await this.routeWithFallback({
         input,
         semanticCalls,
+        semanticInconsistency:
+          error instanceof RouterSemanticInconsistencyError ? error : undefined,
         reason:
           error instanceof RouterSemanticInconsistencyError
             ? 'PRIMARY_SEMANTIC_INCONSISTENCY'
@@ -170,6 +179,7 @@ export class QueryRouterAgentUseCase {
     input: Parameters<QueryRouterAgentUseCase['execute']>[0];
     semanticCalls: StructuredLlmCallDiagnostics[];
     primaryResult?: RagChatRouteDecision;
+    semanticInconsistency?: RouterSemanticInconsistencyError;
     reason: string;
   }): Promise<RagChatRouteDecision> {
     const fallbackModel = this.config
@@ -182,6 +192,8 @@ export class QueryRouterAgentUseCase {
         input.reason === 'PRIMARY_SEMANTIC_INCONSISTENCY'
           ? 'ROUTER_SEMANTIC_INCONSISTENT'
           : input.semanticCalls.at(-1)?.errorCode,
+        input.semanticInconsistency?.semanticInconsistencyType,
+        input.semanticInconsistency?.semanticInconsistencyDetails,
       );
     }
 
@@ -229,7 +241,18 @@ export class QueryRouterAgentUseCase {
       );
       throw new RouterUnavailableError(
         input.semanticCalls,
-        this.errorCode(error),
+        this.errorCode(error) ??
+          (input.semanticInconsistency
+            ? 'ROUTER_SEMANTIC_INCONSISTENT'
+            : undefined),
+        (error instanceof RouterSemanticInconsistencyError
+          ? error
+          : input.semanticInconsistency
+        )?.semanticInconsistencyType,
+        (error instanceof RouterSemanticInconsistencyError
+          ? error
+          : input.semanticInconsistency
+        )?.semanticInconsistencyDetails,
       );
     }
   }
@@ -330,6 +353,7 @@ Recommendation action meanings:
 
 Invariants:
 - A question about an available shared reel is REEL_VIDEO_QUESTION, not discovery.
+- A follow-up asking for new information from shared media remains REEL_VIDEO_QUESTION even when recent history already contains a user question and assistant answer about that media or subject. Use CONVERSATION_MEMORY_QUESTION only when the current message asks what the user or assistant previously said, asked, decided, or discussed.
 - Summary needs TRANSCRIPT and METADATA; transcript, visual, and metadata questions require their matching evidence. Never substitute transcript for visual proof.
 - Reel retrieval is required when grounded reel evidence is needed. Reel and memory answers require verification.
 - Conversation memory is for prior conversation context; user memory is only for stable preferences/profile.
@@ -517,7 +541,7 @@ Classify the current user message.
     ) {
       return value as RagReferenceTarget;
     }
-    throw new RouterSemanticInconsistencyError();
+    throw new RouterSemanticInconsistencyError('INVALID_REFERENCE_TARGET');
   }
 
   private validateReferentConsistency(
@@ -532,11 +556,22 @@ Classify the current user message.
       USER_MEMORY_QUESTION: 'USER_MEMORY',
       TASK_ACTION_REQUEST: 'NONE',
     };
-    if (
-      referenceTarget !== expected[intent] ||
-      (referenceTarget === 'SHARED_REEL' && !hasSharedReelContext)
-    ) {
-      throw new RouterSemanticInconsistencyError();
+    if (referenceTarget !== expected[intent]) {
+      throw new RouterSemanticInconsistencyError('INTENT_REFERENCE_MISMATCH', {
+        actualIntent: intent,
+        actualReferenceTarget: referenceTarget,
+        expectedReferenceTarget: expected[intent],
+      });
+    }
+    if (referenceTarget === 'SHARED_REEL' && !hasSharedReelContext) {
+      throw new RouterSemanticInconsistencyError(
+        'SHARED_REEL_CONTEXT_UNAVAILABLE',
+        {
+          actualIntent: intent,
+          actualReferenceTarget: referenceTarget,
+          expectedReferenceTarget: expected[intent],
+        },
+      );
     }
   }
 
@@ -558,7 +593,7 @@ Classify the current user message.
       return value as RagChatIntent;
     }
 
-    throw new RouterSemanticInconsistencyError();
+    throw new RouterSemanticInconsistencyError('INVALID_INTENT');
   }
 
   private normalizeReelQuestionType(
@@ -571,9 +606,19 @@ Classify the current user message.
     ) {
       if ((intent === 'REEL_VIDEO_QUESTION') === (value !== 'NONE'))
         return value as RagReelQuestionType;
+
+      throw new RouterSemanticInconsistencyError('INTENT_REEL_TYPE_MISMATCH', {
+        actualIntent: intent,
+        actualReelQuestionType: value as RagReelQuestionType,
+        ...(intent !== 'REEL_VIDEO_QUESTION'
+          ? { expectedReelQuestionType: 'NONE' as const }
+          : {}),
+      });
     }
 
-    throw new RouterSemanticInconsistencyError();
+    throw new RouterSemanticInconsistencyError('INTENT_REEL_TYPE_MISMATCH', {
+      actualIntent: intent,
+    });
   }
 
   private normalizeRequiredEvidence(
@@ -609,7 +654,20 @@ Classify the current user message.
       }
     }
 
-    throw new RouterSemanticInconsistencyError();
+    const expected = this.defaultRequiredEvidence(intent, reelQuestionType);
+    const actualEvidence = Array.isArray(value)
+      ? value.filter(
+          (item): item is RagRequiredEvidence =>
+            typeof item === 'string' &&
+            this.validRequiredEvidence.has(item as RagRequiredEvidence),
+        )
+      : [];
+    throw new RouterSemanticInconsistencyError('REQUIRED_EVIDENCE_MISMATCH', {
+      actualIntent: intent,
+      actualReelQuestionType: reelQuestionType,
+      actualEvidence,
+      expectedEvidence: expected,
+    });
   }
 
   private normalizeRecommendationAction(
@@ -619,29 +677,49 @@ Classify the current user message.
     const record = this.asRecord(value);
 
     if (!record) {
-      throw new RouterSemanticInconsistencyError();
+      throw new RouterSemanticInconsistencyError(
+        'INVALID_RECOMMENDATION_ACTION',
+      );
     }
 
     const type = record.type;
+    const actionTypes = ['NONE', 'RECOMMEND_REELS', 'SUGGEST_QUERIES'] as const;
     if (
-      !['NONE', 'RECOMMEND_REELS', 'SUGGEST_QUERIES'].includes(String(type)) ||
-      (type !== 'NONE' && intent !== 'NORMAL_CHAT')
-    )
-      throw new RouterSemanticInconsistencyError();
+      typeof type !== 'string' ||
+      !actionTypes.includes(type as (typeof actionTypes)[number])
+    ) {
+      throw new RouterSemanticInconsistencyError(
+        'INVALID_RECOMMENDATION_ACTION',
+      );
+    }
+    const actionType = type as (typeof actionTypes)[number];
+    if (actionType !== 'NONE' && intent !== 'NORMAL_CHAT') {
+      throw new RouterSemanticInconsistencyError(
+        'RECOMMENDATION_INTENT_MISMATCH',
+        {
+          actualIntent: intent,
+          recommendationActionType: actionType,
+        },
+      );
+    }
     const query = this.normalizeOptionalString(record.query);
     const suggestions = this.normalizeSuggestedQueries(record.suggestedQueries);
     if (
-      (type === 'NONE' &&
+      (actionType === 'NONE' &&
         (query ||
           record.allowPersonalizedFallback === true ||
           suggestions.length > 0)) ||
-      (type === 'RECOMMEND_REELS' && suggestions.length > 0) ||
-      (type === 'SUGGEST_QUERIES' &&
+      (actionType === 'RECOMMEND_REELS' && suggestions.length > 0) ||
+      (actionType === 'SUGGEST_QUERIES' &&
         (record.allowPersonalizedFallback === true || suggestions.length === 0))
-    )
-      throw new RouterSemanticInconsistencyError();
+    ) {
+      throw new RouterSemanticInconsistencyError(
+        'RECOMMENDATION_PAYLOAD_MISMATCH',
+        { recommendationActionType: actionType },
+      );
+    }
 
-    if (type === 'RECOMMEND_REELS') {
+    if (actionType === 'RECOMMEND_REELS') {
       const query = this.normalizeOptionalString(record.query);
       const allowPersonalizedFallback =
         typeof record.allowPersonalizedFallback === 'boolean'
@@ -660,7 +738,7 @@ Classify the current user message.
       };
     }
 
-    if (type === 'SUGGEST_QUERIES') {
+    if (actionType === 'SUGGEST_QUERIES') {
       return {
         type: 'SUGGEST_QUERIES',
         ...(this.normalizeOptionalString(record.query)

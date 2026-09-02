@@ -667,4 +667,192 @@ describe('QueryRouterAgentUseCase', () => {
       semanticCalls: [diagnostics],
     });
   });
+
+  it.each([
+    {
+      name: 'invalid intent',
+      overrides: { intent: 'NOT_A_CANONICAL_INTENT' },
+      input: { hasSharedReelContext: true },
+      type: 'INVALID_INTENT',
+    },
+    {
+      name: 'invalid reference target',
+      overrides: { referenceTarget: 'NOT_A_CANONICAL_TARGET' },
+      input: { hasSharedReelContext: true },
+      type: 'INVALID_REFERENCE_TARGET',
+    },
+    {
+      name: 'intent/reference mismatch',
+      overrides: {
+        intent: 'REEL_VIDEO_QUESTION',
+        referenceTarget: 'NONE',
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['TRANSCRIPT'],
+      },
+      input: { hasSharedReelContext: true },
+      type: 'INTENT_REFERENCE_MISMATCH',
+      details: {
+        actualIntent: 'REEL_VIDEO_QUESTION',
+        actualReferenceTarget: 'NONE',
+        expectedReferenceTarget: 'SHARED_REEL',
+      },
+    },
+    {
+      name: 'shared reel without accessible context',
+      overrides: {
+        intent: 'REEL_VIDEO_QUESTION',
+        referenceTarget: 'SHARED_REEL',
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['TRANSCRIPT'],
+      },
+      input: { hasSharedReelContext: false },
+      type: 'SHARED_REEL_CONTEXT_UNAVAILABLE',
+    },
+    {
+      name: 'conversation intent with shared-reel reference',
+      overrides: {
+        intent: 'CONVERSATION_MEMORY_QUESTION',
+        referenceTarget: 'SHARED_REEL',
+        reelQuestionType: 'NONE',
+        requiredEvidence: ['CONVERSATION_MEMORY'],
+      },
+      input: { hasSharedReelContext: true },
+      type: 'INTENT_REFERENCE_MISMATCH',
+      details: {
+        actualIntent: 'CONVERSATION_MEMORY_QUESTION',
+        actualReferenceTarget: 'SHARED_REEL',
+        expectedReferenceTarget: 'CONVERSATION',
+      },
+    },
+    {
+      name: 'reel intent with no reel question type',
+      overrides: {
+        intent: 'REEL_VIDEO_QUESTION',
+        referenceTarget: 'SHARED_REEL',
+        reelQuestionType: 'NONE',
+        requiredEvidence: ['TRANSCRIPT'],
+      },
+      input: { hasSharedReelContext: true },
+      type: 'INTENT_REEL_TYPE_MISMATCH',
+      details: {
+        actualIntent: 'REEL_VIDEO_QUESTION',
+        actualReelQuestionType: 'NONE',
+      },
+    },
+    {
+      name: 'intent/reel-question-type mismatch',
+      overrides: {
+        intent: 'NORMAL_CHAT',
+        referenceTarget: 'NONE',
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['TRANSCRIPT'],
+      },
+      input: { hasSharedReelContext: true },
+      type: 'INTENT_REEL_TYPE_MISMATCH',
+      details: {
+        actualIntent: 'NORMAL_CHAT',
+        actualReelQuestionType: 'TRANSCRIPT_CONTENT',
+        expectedReelQuestionType: 'NONE',
+      },
+    },
+    {
+      name: 'required-evidence mismatch',
+      overrides: {
+        intent: 'REEL_VIDEO_QUESTION',
+        referenceTarget: 'SHARED_REEL',
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['VISUAL'],
+      },
+      input: { hasSharedReelContext: true },
+      type: 'REQUIRED_EVIDENCE_MISMATCH',
+      details: {
+        actualIntent: 'REEL_VIDEO_QUESTION',
+        actualReelQuestionType: 'TRANSCRIPT_CONTENT',
+        actualEvidence: ['VISUAL'],
+        expectedEvidence: ['TRANSCRIPT'],
+      },
+    },
+    {
+      name: 'invalid recommendation action',
+      overrides: {
+        recommendationAction: {
+          type: 'NOT_A_RECOMMENDATION',
+          query: '',
+          allowPersonalizedFallback: false,
+          suggestedQueries: [],
+        },
+      },
+      input: { hasSharedReelContext: true },
+      type: 'INVALID_RECOMMENDATION_ACTION',
+    },
+    {
+      name: 'recommendation action on non-normal intent',
+      overrides: {
+        intent: 'REEL_VIDEO_QUESTION',
+        referenceTarget: 'SHARED_REEL',
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['TRANSCRIPT'],
+        recommendationAction: {
+          type: 'RECOMMEND_REELS',
+          query: 'sensitive query',
+          allowPersonalizedFallback: false,
+          suggestedQueries: [],
+        },
+      },
+      input: { hasSharedReelContext: true },
+      type: 'RECOMMENDATION_INTENT_MISMATCH',
+      details: {
+        actualIntent: 'REEL_VIDEO_QUESTION',
+        recommendationActionType: 'RECOMMEND_REELS',
+      },
+    },
+    {
+      name: 'NONE recommendation with payload',
+      overrides: {
+        recommendationAction: {
+          type: 'NONE',
+          query: 'sensitive query',
+          allowPersonalizedFallback: false,
+          suggestedQueries: [],
+        },
+      },
+      input: { hasSharedReelContext: true },
+      type: 'RECOMMENDATION_PAYLOAD_MISMATCH',
+      details: { recommendationActionType: 'NONE' },
+    },
+  ])(
+    'reports a safe semantic inconsistency subtype for $name',
+    async ({ overrides, input, type, details }) => {
+      const secret =
+        'untrusted-router-reason-sensitive-query-reel-123-request-id';
+      const service = {
+        generateObject: jest
+          .fn()
+          .mockResolvedValue(response({ ...overrides, reason: secret })),
+      };
+
+      let error: unknown;
+      try {
+        await new QueryRouterAgentUseCase(service as never, config).execute({
+          message: 'A generic semantic request.',
+          ...input,
+        });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toMatchObject({
+        code: 'ROUTER_UNAVAILABLE',
+        causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+        semanticInconsistencyType: type,
+        ...(details ? { semanticInconsistencyDetails: details } : {}),
+      });
+      expect(JSON.stringify(error)).not.toContain(secret);
+      expect(JSON.stringify(error)).not.toContain('requestId');
+      expect(JSON.stringify(error)).not.toContain('reel-123');
+      expect(JSON.stringify(error)).not.toContain('sensitive query');
+      expect(JSON.stringify(error)).not.toContain('reason');
+      expect(service.generateObject).toHaveBeenCalledTimes(1);
+    },
+  );
 });
