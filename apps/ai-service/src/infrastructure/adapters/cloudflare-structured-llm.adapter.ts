@@ -44,6 +44,9 @@ interface StructuredCallState {
   providerCategory?: StructuredProviderFailureCategory;
   retryAfterMs?: number;
   requestId?: string;
+  networkErrorName?: string;
+  networkErrorCode?: string;
+  networkErrorSyscall?: string;
   transient?: boolean;
   schemaPath?: string;
   schemaConstraint?: string;
@@ -118,6 +121,9 @@ export class StructuredCompletionProviderError extends Error {
     readonly requestId?: string,
     readonly transient = true,
     readonly providerCategory: StructuredProviderFailureCategory = 'UNKNOWN_PROVIDER_FAILURE',
+    readonly networkErrorName?: string,
+    readonly networkErrorCode?: string,
+    readonly networkErrorSyscall?: string,
   ) {
     super(
       status
@@ -192,6 +198,9 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
         state.requestId = error.requestId;
         state.transient = error.transient;
         state.providerCategory = error.providerCategory;
+        state.networkErrorName = error.networkErrorName;
+        state.networkErrorCode = error.networkErrorCode;
+        state.networkErrorSyscall = error.networkErrorSyscall;
       }
       if (error instanceof StructuredCompletionSchemaError) {
         state.schemaPath = error.path;
@@ -228,6 +237,9 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
         providerCategory: state.providerCategory,
         retryAfterMs: state.retryAfterMs,
         requestId: state.requestId,
+        networkErrorName: state.networkErrorName,
+        networkErrorCode: state.networkErrorCode,
+        networkErrorSyscall: state.networkErrorSyscall,
         transient: state.transient,
         schemaPath: state.schemaPath,
         schemaConstraint: state.schemaConstraint,
@@ -293,10 +305,11 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
         }),
         signal: controller.signal,
       });
-    } catch {
+    } catch (error: unknown) {
       if (controller.signal.aborted) {
         throw new StructuredCompletionTimeoutError(model, timeoutMs);
       }
+      const networkError = this.networkErrorDetails(error);
       throw new StructuredCompletionProviderError(
         model,
         undefined,
@@ -305,6 +318,9 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
         undefined,
         true,
         'TRANSIENT_PROVIDER_FAILURE',
+        networkError.name,
+        networkError.code,
+        networkError.syscall,
       );
     } finally {
       clearTimeout(timeout);
@@ -708,6 +724,32 @@ export class CloudflareStructuredLlmAdapter implements IStructuredLlmService {
 
   private gatewayMaxAttempts(): number {
     return this.integerConfig('CLOUDFLARE_AI_GATEWAY_MAX_ATTEMPTS', 1, 1, 5);
+  }
+
+  private networkErrorDetails(error: unknown): {
+    name?: string;
+    code?: string;
+    syscall?: string;
+  } {
+    const direct = this.asRecord(error);
+    const cause = this.asRecord(direct.cause);
+    return {
+      name: this.safeNetworkField(cause.name ?? direct.name),
+      code: this.safeNetworkField(cause.code ?? direct.code),
+      syscall: this.safeNetworkField(cause.syscall ?? direct.syscall),
+    };
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private safeNetworkField(value: unknown): string | undefined {
+    return typeof value === 'string' && /^[A-Za-z0-9_. -]{1,80}$/.test(value)
+      ? value
+      : undefined;
   }
 
   private gatewayRetryDelay(): number {

@@ -24,13 +24,34 @@ const { CheckContextSufficiencyUseCase } = load(
 const { VerifierAgentUseCase } = load(
   'application/use-cases/verifier-agent.use-case.js',
 );
-const { CloudflareStructuredLlmAdapter } = load(
-  'infrastructure/adapters/cloudflare-structured-llm.adapter.js',
-);
-
 function arg(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+function readBooleanFlag(name, argv = process.argv) {
+  const inlinePrefix = `${name}=`;
+  const inlineValue = argv.find((value) => value.startsWith(inlinePrefix));
+  if (inlineValue) {
+    throw new Error(`${name} is a boolean flag and does not accept a value`);
+  }
+
+  const index = argv.indexOf(name);
+  if (index < 0) return false;
+
+  const next = argv[index + 1];
+  if (next && !next.startsWith('--')) {
+    throw new Error(`${name} is a boolean flag and does not accept a value`);
+  }
+
+  return true;
+}
+
+function assertProviderConfirmation(snapshotOnly, confirmed) {
+  if (snapshotOnly || confirmed) return;
+  throw new Error(
+    'control-plane provider execution requires --confirm-provider-calls',
+  );
 }
 
 function percentile(values, fraction) {
@@ -67,6 +88,9 @@ function normalizeCalls(calls) {
     providerCategory: call.providerCategory,
     retryAfterMs: call.retryAfterMs,
     transient: call.transient,
+    networkErrorName: call.networkErrorName,
+    networkErrorCode: call.networkErrorCode,
+    networkErrorSyscall: call.networkErrorSyscall,
     errorCode: call.errorCode,
     schemaPath: call.schemaPath,
     schemaConstraint: call.schemaConstraint,
@@ -535,6 +559,13 @@ async function main() {
     throw new Error('Invalid mode');
   if (!arg('--config'))
     throw new Error('--config versioned candidate is required');
+  const snapshotOnly = readBooleanFlag('--snapshot-only');
+  const confirmProviderCalls = readBooleanFlag('--confirm-provider-calls');
+  if (snapshotOnly && confirmProviderCalls) {
+    throw new Error(
+      '--snapshot-only cannot be combined with --confirm-provider-calls',
+    );
+  }
   const output = arg('--output');
   const { service, config, snapshot, caseIds } = resolveExperiment({
     envFile: arg('--env-file') || '.env.test.local',
@@ -545,12 +576,16 @@ async function main() {
     maxTokens: arg('--router-max-completion-tokens'),
     subset: arg('--subset'),
   });
-  if (arg('--snapshot-only') === 'true') {
+  if (snapshotOnly) {
     console.log(JSON.stringify(snapshot));
     return;
   }
+  assertProviderConfirmation(snapshotOnly, confirmProviderCalls);
   if (output && fs.existsSync(output))
     throw new Error('Observations already exist; do not resend');
+  const { CloudflareStructuredLlmAdapter } = load(
+    'infrastructure/adapters/cloudflare-structured-llm.adapter.js',
+  );
   const llm = new CloudflareStructuredLlmAdapter(service);
   const callLog = [];
   const generateObject = llm.generateObject.bind(llm);
@@ -613,6 +648,8 @@ module.exports = {
   expectedRecommendedActions,
   checkpointWriter,
   normalizeCalls,
+  readBooleanFlag,
+  assertProviderConfirmation,
 };
 if (require.main === module)
   main().catch((error) => {

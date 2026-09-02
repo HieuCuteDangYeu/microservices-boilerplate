@@ -973,6 +973,19 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       ...(typeof record.transient === 'boolean'
         ? { transient: record.transient }
         : {}),
+      ...(this.optionalString(record.networkErrorName)
+        ? { networkErrorName: this.optionalString(record.networkErrorName) }
+        : {}),
+      ...(this.optionalString(record.networkErrorCode)
+        ? { networkErrorCode: this.optionalString(record.networkErrorCode) }
+        : {}),
+      ...(this.optionalString(record.networkErrorSyscall)
+        ? {
+            networkErrorSyscall: this.optionalString(
+              record.networkErrorSyscall,
+            ),
+          }
+        : {}),
       ...(this.optionalString(record.schemaPath)
         ? { schemaPath: this.optionalString(record.schemaPath) }
         : {}),
