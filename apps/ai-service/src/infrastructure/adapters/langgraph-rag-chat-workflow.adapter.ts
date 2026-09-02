@@ -18,6 +18,7 @@ import type {
   RagChatWorkflowInput,
   RagChatWorkflowResult,
   RagChatWorkflowState,
+  RagStructuredCallFailureDiagnostic,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { END, START, StateGraph, StateSchema } from '@langchain/langgraph';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -60,6 +61,7 @@ const RagChatStateSchema = new StateSchema({
   citationAttempts: z.array(z.any()).default([]),
   nextDraftSource: z.any().default('INITIAL'),
   finalFailureSource: z.any().default('UNKNOWN'),
+  failureDiagnostics: z.any().optional(),
 
   retryCount: z.number().default(0),
   retrievalRetryCount: z.number().default(0),
@@ -69,6 +71,10 @@ const RagChatStateSchema = new StateSchema({
 @Injectable()
 export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
   private readonly logger = new Logger(LangGraphRagChatWorkflowAdapter.name);
+  private readonly executionContexts = new WeakMap<
+    Record<string, number>,
+    { failedNode?: string }
+  >();
 
   constructor(
     private readonly queryRouterAgentUseCase: QueryRouterAgentUseCase,
@@ -93,6 +99,8 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
   async execute(input: RagChatWorkflowInput): Promise<RagChatWorkflowResult> {
     const nodeTimings: Record<string, number> = {};
+    const executionContext: { failedNode?: string } = {};
+    this.executionContexts.set(nodeTimings, executionContext);
     const graph = this.buildGraph(nodeTimings);
     const startedAt = Date.now();
 
@@ -131,7 +139,18 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         recommendedReels: result.recommendedReels ?? [],
         suggestedQueries: result.suggestedQueries ?? [],
       };
+    } catch (error: unknown) {
+      result = {
+        ...result,
+        finalFailureSource: this.failureSource(error),
+        failureDiagnostics: this.buildFailureDiagnostics(
+          error,
+          executionContext.failedNode,
+        ),
+      };
+      throw error;
     } finally {
+      this.executionContexts.delete(nodeTimings);
       await this.saveRagTraceUseCase.execute({
         state: result,
         latencyMs: Date.now() - startedAt,
@@ -838,15 +857,223 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     fn: () => Promise<T>,
   ): Promise<T> {
     const startedAt = Date.now();
+    const executionContext = this.executionContexts.get(nodeTimings);
+    let completed = false;
 
     try {
-      return await fn();
+      const result = await fn();
+      completed = true;
+      return result;
     } finally {
       const duration = Date.now() - startedAt;
       nodeTimings[label] = (nodeTimings[label] ?? 0) + duration;
+      if (!completed && executionContext) {
+        executionContext.failedNode = label;
+      }
 
       this.logger.debug(`[RagGraphTiming] ${label}=${duration}ms`);
     }
+  }
+
+  private failureSource(
+    error: unknown,
+  ): RagChatWorkflowState['finalFailureSource'] {
+    const errorCode = this.errorString(error, 'code');
+    return errorCode === 'ROUTER_UNAVAILABLE' ||
+      errorCode?.startsWith('STRUCTURED_COMPLETION_')
+      ? 'PROVIDER_ERROR'
+      : 'WORKFLOW';
+  }
+
+  private buildFailureDiagnostics(
+    error: unknown,
+    failedNode?: string,
+  ): NonNullable<RagChatWorkflowState['failureDiagnostics']> {
+    const record = this.errorRecord(error);
+    const errorCode = this.errorString(error, 'code');
+    const causeCode = this.errorString(error, 'causeCode');
+    const semanticCalls = Array.isArray(record.semanticCalls)
+      ? record.semanticCalls
+          .map((call) => this.toPersistedStructuredDiagnostic(call))
+          .filter(
+            (call): call is RagStructuredCallFailureDiagnostic =>
+              call !== undefined,
+          )
+      : [];
+
+    return {
+      failedNode: failedNode ?? 'UNKNOWN',
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      ...(errorCode ? { errorCode } : {}),
+      ...(causeCode ? { causeCode } : {}),
+      ...(semanticCalls.length > 0 ? { semanticCalls } : {}),
+    };
+  }
+
+  private toPersistedStructuredDiagnostic(
+    value: unknown,
+  ): RagStructuredCallFailureDiagnostic | undefined {
+    const record = this.asRecord(value);
+    if (
+      typeof record.model !== 'string' ||
+      !this.isStructuredProviderStatus(record.providerStatus) ||
+      typeof record.latencyMs !== 'number' ||
+      typeof record.configuredTimeoutMs !== 'number' ||
+      typeof record.configuredMaxCompletionTokens !== 'number' ||
+      typeof record.attempt !== 'number'
+    ) {
+      return undefined;
+    }
+
+    const diagnostic: RagStructuredCallFailureDiagnostic = {
+      model: record.model,
+      providerStatus: record.providerStatus,
+      latencyMs: record.latencyMs,
+      configuredTimeoutMs: record.configuredTimeoutMs,
+      configuredMaxCompletionTokens: record.configuredMaxCompletionTokens,
+      attempt: record.attempt,
+      ...(this.optionalString(record.modelRole)
+        ? { modelRole: this.optionalString(record.modelRole) }
+        : {}),
+      ...(this.optionalString(record.finishReason)
+        ? { finishReason: this.optionalString(record.finishReason) }
+        : {}),
+      ...(this.optionalString(record.endpointContract)
+        ? { endpointContract: this.optionalString(record.endpointContract) }
+        : {}),
+      ...(this.structuredJsonType(record.responseContentType)
+        ? {
+            responseContentType: this.structuredJsonType(
+              record.responseContentType,
+            ),
+          }
+        : {}),
+      ...(typeof record.contentPresent === 'boolean'
+        ? { contentPresent: record.contentPresent }
+        : {}),
+      ...(typeof record.toolCallsPresent === 'boolean'
+        ? { toolCallsPresent: record.toolCallsPresent }
+        : {}),
+      ...(this.optionalString(record.errorCode)
+        ? { errorCode: this.optionalString(record.errorCode) }
+        : {}),
+      ...(typeof record.providerCode === 'number'
+        ? { providerCode: record.providerCode }
+        : {}),
+      ...(this.structuredProviderCategory(record.providerCategory)
+        ? {
+            providerCategory: this.structuredProviderCategory(
+              record.providerCategory,
+            ),
+          }
+        : {}),
+      ...(typeof record.retryAfterMs === 'number'
+        ? { retryAfterMs: record.retryAfterMs }
+        : {}),
+      ...(typeof record.transient === 'boolean'
+        ? { transient: record.transient }
+        : {}),
+      ...(this.optionalString(record.schemaPath)
+        ? { schemaPath: this.optionalString(record.schemaPath) }
+        : {}),
+      ...(this.optionalString(record.schemaConstraint)
+        ? { schemaConstraint: this.optionalString(record.schemaConstraint) }
+        : {}),
+      ...(this.optionalString(record.schemaVersion)
+        ? { schemaVersion: this.optionalString(record.schemaVersion) }
+        : {}),
+      ...(this.structuredJsonType(record.expectedType)
+        ? { expectedType: this.structuredJsonType(record.expectedType) }
+        : {}),
+      ...(this.structuredJsonType(record.actualJsonType)
+        ? { actualJsonType: this.structuredJsonType(record.actualJsonType) }
+        : {}),
+      ...(this.safeUsage(record.usage)
+        ? { usage: this.safeUsage(record.usage) }
+        : {}),
+    };
+
+    return diagnostic;
+  }
+
+  private safeUsage(value: unknown):
+    | {
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+        reasoningTokens?: number;
+      }
+    | undefined {
+    const record = this.asRecord(value);
+    const usage = Object.fromEntries(
+      Object.entries({
+        inputTokens: record.inputTokens,
+        outputTokens: record.outputTokens,
+        totalTokens: record.totalTokens,
+        reasoningTokens: record.reasoningTokens,
+      }).filter(([, item]) => typeof item === 'number'),
+    );
+    return Object.keys(usage).length > 0 ? usage : undefined;
+  }
+
+  private errorRecord(error: unknown): Record<string, unknown> {
+    return this.asRecord(error);
+  }
+
+  private errorString(error: unknown, key: string): string | undefined {
+    return this.optionalString(this.errorRecord(error)[key]);
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private optionalString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  }
+
+  private isStructuredProviderStatus(
+    value: unknown,
+  ): value is RagStructuredCallFailureDiagnostic['providerStatus'] {
+    return (
+      (typeof value === 'number' && Number.isFinite(value)) ||
+      value === 'NETWORK_ERROR' ||
+      value === 'TIMEOUT'
+    );
+  }
+
+  private structuredProviderCategory(
+    value: unknown,
+  ): RagStructuredCallFailureDiagnostic['providerCategory'] | undefined {
+    return typeof value === 'string' &&
+      [
+        'ACCOUNT_LIMITED',
+        'OUT_OF_CAPACITY',
+        'RATE_LIMITED',
+        'TRANSIENT_PROVIDER_FAILURE',
+        'UNKNOWN_PROVIDER_FAILURE',
+      ].includes(value)
+      ? (value as RagStructuredCallFailureDiagnostic['providerCategory'])
+      : undefined;
+  }
+
+  private structuredJsonType(
+    value: unknown,
+  ): RagStructuredCallFailureDiagnostic['responseContentType'] | undefined {
+    return typeof value === 'string' &&
+      [
+        'string',
+        'array',
+        'object',
+        'number',
+        'boolean',
+        'null',
+        'absent',
+      ].includes(value)
+      ? (value as RagStructuredCallFailureDiagnostic['responseContentType'])
+      : undefined;
   }
 
   private formatRecentHistory(state: RagChatWorkflowState): string {

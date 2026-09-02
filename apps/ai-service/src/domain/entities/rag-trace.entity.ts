@@ -1,4 +1,7 @@
-import type { RagCitation } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+import type {
+  RagCitation,
+  RagWorkflowFailureDiagnostics,
+} from '@ai/domain/interfaces/rag-chat-workflow.interface';
 
 export interface RagWorkflowTraceMetrics {
   retrievalRetryCount: number;
@@ -20,6 +23,7 @@ export interface RagWorkflowTraceMetrics {
     verification?: unknown;
     citationAttempts?: unknown[];
     finalFailureSource?: string;
+    failure?: RagWorkflowFailureDiagnostics;
   };
 }
 
