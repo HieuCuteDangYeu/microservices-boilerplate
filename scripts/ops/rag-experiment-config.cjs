@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const dotenv = require('dotenv');
 const { ConfigService } = require('@nestjs/config');
@@ -36,7 +37,7 @@ function resolveExperiment(
       throw new Error(`Unsafe candidate key: ${key}`);
   }
   // Credential env and inherited values remain private; explicit candidate values win.
-  const values = { ...parsed, ...inherited, ...candidate.env };
+  const values = { ...inherited, ...parsed, ...candidate.env };
   const sources = Object.fromEntries(
     Object.keys(candidate.env).map((key) => [key, 'VERSIONED_CANDIDATE']),
   );
@@ -89,6 +90,9 @@ function resolveExperiment(
     `AI_${role}_TIMEOUT_MS`,
     `AI_${role}_MAX_TOKENS`,
   );
+  if (values.CLOUDFLARE_AI_GATEWAY_ENABLED === 'true') {
+    required.push('CLOUDFLARE_AI_GATEWAY_ID');
+  }
   for (const key of new Set(required)) {
     const emptyValueAllowed =
       key === 'AI_ROUTER_FALLBACK_MODEL' ||
@@ -96,7 +100,11 @@ function resolveExperiment(
     if (values[key] === undefined || (values[key] === '' && !emptyValueAllowed))
       throw new Error(`Explicit candidate config required: ${key}`);
     sources[key] ??=
-      inherited[key] !== undefined ? 'INHERITED_ENV' : 'ENV_FILE';
+      parsed[key] !== undefined
+        ? 'ENV_FILE'
+        : inherited[key] !== undefined
+          ? 'INHERITED_ENV'
+          : 'UNRESOLVED';
   }
   const reasoningEffort =
     values.CLOUDFLARE_STRUCTURED_REASONING_EFFORT?.trim().toLowerCase() ?? '';
@@ -199,6 +207,9 @@ function resolveExperiment(
     maxCompletionTokens: config.maxCompletionTokens(role),
     subset: subset || 'full',
     caseIds: caseIds || null,
+    executionHost: os.hostname(),
+    executionCwd: process.cwd(),
+    nodeVersion: process.version,
     calibrationReuseInFullComparison:
       candidate.calibrationReuseInFullComparison === true,
   };

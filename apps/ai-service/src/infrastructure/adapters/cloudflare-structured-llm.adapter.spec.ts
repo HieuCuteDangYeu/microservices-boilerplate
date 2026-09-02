@@ -455,6 +455,53 @@ describe('CloudflareStructuredLlmAdapter', () => {
   });
 
   it.each([
+    ['ENOTFOUND', 'getaddrinfo'],
+    ['ECONNRESET', 'read'],
+  ])(
+    'captures the safe underlying network cause for %s',
+    async (code, syscall) => {
+      const config = {
+        getOrThrow: jest.fn().mockReturnValue('value'),
+        get: jest.fn().mockReturnValue('false'),
+      };
+      const cause = Object.assign(new Error('private network detail'), {
+        code,
+        syscall,
+      });
+      const fetchError = Object.assign(new TypeError('fetch failed'), {
+        cause,
+      });
+      jest.spyOn(global, 'fetch').mockRejectedValue(fetchError);
+      const diagnostics = jest.fn();
+
+      const request = new CloudflareStructuredLlmAdapter(
+        config as never,
+      ).generateObject({
+        systemPrompt: 'Return JSON.',
+        userPrompt: 'Set passed.',
+        model: '@cf/test/structured',
+        onDiagnostics: diagnostics,
+        jsonSchema: { type: 'object', properties: {} },
+      });
+
+      await expect(request).rejects.toMatchObject({
+        networkErrorCode: code,
+        networkErrorSyscall: syscall,
+      });
+      expect(diagnostics).toHaveBeenCalledWith(
+        expect.objectContaining({
+          networkErrorName: 'Error',
+          networkErrorCode: code,
+          networkErrorSyscall: syscall,
+        }),
+      );
+      expect(JSON.stringify(diagnostics.mock.calls)).not.toContain(
+        'private network detail',
+      );
+    },
+  );
+
+  it.each([
     [500, 500],
     [45_000, 45_000],
     [60_000, 60_000],

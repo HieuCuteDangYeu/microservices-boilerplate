@@ -29,6 +29,7 @@ async def test_python_bridge_forwards_explicit_config_and_persists_snapshot(
         assert command[command.index("--router-timeout-ms") + 1] == str(timeout)
         assert command[command.index("--config") + 1] == "candidate.json"
         assert command[command.index("--subset") + 1] == "harness"
+        assert "--confirm-provider-calls" in command
         output = control_plane.Path(command[command.index("--output") + 1])
         assert output.parent == tmp_path / f"test-{timeout}"
         output.write_text(
@@ -50,7 +51,14 @@ async def test_python_bridge_forwards_explicit_config_and_persists_snapshot(
     monkeypatch.setattr(control_plane.subprocess, "run", fake_run)
     monkeypatch.setattr(control_plane.control_plane_experiment, "arun", fake_experiment)
     directory, summary = await control_plane.run_control_plane(
-        "ROUTER", "test-model", "test.env", f"test-{timeout}", "candidate.json", "harness", timeout
+        "ROUTER",
+        "test-model",
+        "test.env",
+        f"test-{timeout}",
+        "candidate.json",
+        "harness",
+        timeout,
+        confirm_provider_calls=True,
     )
     assert summary["configSnapshot"] == snapshot
     assert summary["expectedCaseCount"] == 1

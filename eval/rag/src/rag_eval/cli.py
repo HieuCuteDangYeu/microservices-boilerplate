@@ -343,6 +343,7 @@ def parser() -> argparse.ArgumentParser:
     control_plane.add_argument("--router-max-completion-tokens", type=int)
     control_plane.add_argument("--env-file", default=".env.test.local")
     control_plane.add_argument("--run-id")
+    control_plane.add_argument("--confirm-provider-calls", action="store_true")
     return root
 
 
@@ -369,6 +370,7 @@ def main() -> None:
                 args.subset,
                 args.router_timeout_ms,
                 args.router_max_completion_tokens,
+                args.confirm_provider_calls,
             )
         )
         print(json.dumps(summary, sort_keys=True))

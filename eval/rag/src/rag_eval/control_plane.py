@@ -354,6 +354,7 @@ async def run_control_plane(
     subset: str | None = None,
     router_timeout_ms: int | None = None,
     router_max_completion_tokens: int | None = None,
+    confirm_provider_calls: bool = False,
 ) -> tuple[Path, dict[str, Any]]:
     mode = mode.upper()
     if mode not in {"ROUTER", "SUFFICIENCY", "VERIFIER"}:
@@ -386,6 +387,8 @@ async def run_control_plane(
         command += ["--router-timeout-ms", str(router_timeout_ms)]
     if router_max_completion_tokens is not None:
         command += ["--router-max-completion-tokens", str(router_max_completion_tokens)]
+    if confirm_provider_calls:
+        command += ["--confirm-provider-calls"]
     completed = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,
