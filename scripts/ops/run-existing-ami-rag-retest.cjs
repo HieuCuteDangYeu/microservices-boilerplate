@@ -15,12 +15,8 @@ const ROOT = path.resolve(__dirname, '../..');
 const REPORT_DIR = path.join(ROOT, 'test-data/reel-integration/ami/reports');
 const STATE_DIR = path.join(REPORT_DIR, 'state');
 const BOT_USER_ID = 'b6ddf921-c87c-4f68-8d71-f1b1fd33f3e7';
-const REEL_IDS = [
-  '9f5ed300-8b47-4715-a23f-d5082987ff43',
-  'f9f57d92-7edf-4cc7-993a-24302bc3858b',
-  '944c9e59-cc47-412c-aece-f378cf758d66',
-  '487ebc29-697c-406c-8990-6d7a264c2c3c',
-];
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function arg(name) {
   const index = process.argv.indexOf(name);
@@ -29,6 +25,41 @@ function arg(name) {
 
 function fail(message) {
   throw new Error(message);
+}
+
+function caseReelIds(definition) {
+  if (typeof definition?.reelId === 'string') return [definition.reelId];
+  if (Array.isArray(definition?.expectedReelIds)) {
+    return definition.expectedReelIds;
+  }
+  return [];
+}
+
+function extractDistinctReelIds(definitions) {
+  const cases = definitions?.ragBenchmark?.cases;
+  if (!Array.isArray(cases) || cases.length !== 8) {
+    fail('definitions report must contain exactly eight benchmark cases');
+  }
+
+  const perCase = cases.map((definition) => {
+    const ids = caseReelIds(definition);
+    if (!ids.length || ids.some((id) => typeof id !== 'string')) {
+      fail(`case ${definition.caseId || '<unknown>'} must define reel IDs`);
+    }
+    if (ids.some((id) => !UUID_PATTERN.test(id))) {
+      fail(
+        `case ${definition.caseId || '<unknown>'} contains an invalid reel UUID`,
+      );
+    }
+    return ids;
+  });
+  const distinct = [...new Set(perCase.flat())];
+  if (distinct.length !== 4) {
+    fail(
+      `definitions report must contain exactly four distinct reel UUIDs; found ${distinct.length}`,
+    );
+  }
+  return distinct;
 }
 
 function writeJsonAtomically(file, value) {
@@ -311,6 +342,7 @@ async function main() {
     const allCases = definitions?.ragBenchmark?.cases;
     if (!Array.isArray(allCases) || allCases.length !== 8)
       fail('definitions report must contain exactly eight cases');
+    const reelIds = extractDistinctReelIds(definitions);
     const onlyCaseId = arg('--case-id');
     const cases = onlyCaseId
       ? allCases.filter((item) => item.caseId === onlyCaseId)
@@ -368,7 +400,7 @@ async function main() {
       password: process.env.VELORA_TEST_PASSWORD,
     });
     const statuses = [];
-    for (const reelId of REEL_IDS)
+    for (const reelId of reelIds)
       statuses.push({
         reelId,
         status: await request('GET', `/content/reels/${reelId}/status`),
@@ -406,7 +438,7 @@ async function main() {
         conversationId,
       };
       writeJsonAtomically(statePath(benchmarkRunId), state);
-      for (const reelId of REEL_IDS) {
+      for (const reelId of reelIds) {
         await retry(
           () =>
             request('POST', `/content/reels/${reelId}/share`, {
@@ -430,7 +462,7 @@ async function main() {
       ].sort();
       if (
         JSON.stringify(accessibleReelIds) !==
-        JSON.stringify([...REEL_IDS].sort())
+        JSON.stringify([...reelIds].sort())
       ) {
         fail(
           `conversation ${conversationId} has unexpected reel scope: ${JSON.stringify(accessibleReelIds)}`,
@@ -523,8 +555,8 @@ async function main() {
       startedAt,
       mode: 'existing-ami-rag-retest-public-api',
       strategy:
-        'one fresh supported group conversation per case; all four existing reels shared to BOT_USER_ID before the one authorised question',
-      preRun: { reelStatuses: statuses, expectedReelIds: REEL_IDS },
+        'one fresh supported group conversation per case; all dataset-defined reels shared to BOT_USER_ID before the one authorised question',
+      preRun: { reelStatuses: statuses, expectedReelIds: reelIds },
       cases: resultCases,
     };
     fs.mkdirSync(REPORT_DIR, { recursive: true });
@@ -553,6 +585,7 @@ module.exports = {
   lockRun,
   markCaseInFlight,
   pendingCases,
+  extractDistinctReelIds,
   readState,
   statePath,
   writeJsonAtomically,

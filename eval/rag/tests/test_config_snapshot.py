@@ -13,7 +13,7 @@ def test_invalid_timeout_runs_cannot_be_compared():
 
 def test_remote_live_requires_matching_deployment_snapshot(tmp_path):
     with pytest.raises(ValueError, match="requires"):
-        load_runtime_snapshot(None, None)
+        load_runtime_snapshot(None, None, "rag-frozen-ami-v1")
     snapshot = {
         "routerPrimaryModel": "gpt",
         "routerFallbackModel": "glm",
@@ -29,6 +29,20 @@ def test_remote_live_requires_matching_deployment_snapshot(tmp_path):
     }
     file = tmp_path / "snapshot.json"
     file.write_text(json.dumps(snapshot))
-    assert load_runtime_snapshot(str(file), "abc")["routerTimeoutMs"] == 45000
+    assert (
+        load_runtime_snapshot(str(file), "abc", "rag-frozen-ami-v1")["routerTimeoutMs"]
+        == 45000
+    )
+    assert (
+        load_runtime_snapshot(str(file), "abc", "rag-frozen-ami-v1")["provenance"]
+        == "OPERATOR_SUPPLIED_DEPLOYMENT_SNAPSHOT"
+    )
+    snapshot["datasetVersion"] = "rag-frozen-ami-v2"
+    file.write_text(json.dumps(snapshot))
+    assert load_runtime_snapshot(str(file), "abc", "rag-frozen-ami-v2")["gitSha"] == "abc"
+    with pytest.raises(ValueError, match="dataset"):
+        load_runtime_snapshot(str(file), "abc", "rag-frozen-ami-v1")
     with pytest.raises(ValueError, match="gitSha"):
-        load_runtime_snapshot(str(file), "wrong")
+        load_runtime_snapshot(str(file), None, "rag-frozen-ami-v2")
+    with pytest.raises(ValueError, match="gitSha"):
+        load_runtime_snapshot(str(file), "wrong", "rag-frozen-ami-v2")

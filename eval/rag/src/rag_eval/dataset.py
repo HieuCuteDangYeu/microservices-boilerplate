@@ -7,7 +7,16 @@ from ragas import Dataset
 from rag_eval.schemas import EvaluationRow
 
 ROOT = Path(__file__).resolve().parents[2]
-KNOWN_DATASETS = {"rag-frozen-ami-v1": 8, "rag-generalization-v1": 104}
+KNOWN_DATASETS = {
+    "rag-frozen-ami-v1": 8,
+    "rag-frozen-ami-v2": 8,
+    "rag-generalization-v1": 104,
+}
+FROZEN_AMI_DATASET_PREFIX = "rag-frozen-ami-"
+
+
+def is_supported_live_dataset(name: str) -> bool:
+    return name in KNOWN_DATASETS and name.startswith(FROZEN_AMI_DATASET_PREFIX)
 
 
 def load_dataset(name: str) -> Dataset:

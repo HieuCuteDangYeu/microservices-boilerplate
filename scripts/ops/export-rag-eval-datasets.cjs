@@ -21,12 +21,14 @@ function load(name) {
 }
 
 const frozen = load('rag-frozen-ami-v1');
+const frozenV2 = load('rag-frozen-ami-v2');
 const generalization = load('rag-generalization-v1');
 const groupCount = (name) =>
   generalization.filter((row) => row.fixtureGroup === name).length;
 
 if (
   frozen.length !== 8 ||
+  frozenV2.length !== 8 ||
   generalization.length !== 104 ||
   groupCount('router') !== 65 ||
   groupCount('sufficiency') !== 20 ||
@@ -40,6 +42,7 @@ if (
 console.log(
   JSON.stringify({
     frozen: frozen.length,
+    frozenV2: frozenV2.length,
     generalization: generalization.length,
     router: groupCount('router'),
     sufficiency: groupCount('sufficiency'),

@@ -6,6 +6,24 @@ const test = require('node:test');
 
 const runner = require('./run-existing-ami-rag-retest.cjs');
 
+const syntheticReelIds = [
+  '11111111-1111-4111-8111-111111111111',
+  '22222222-2222-4222-8222-222222222222',
+  '33333333-3333-4333-8333-333333333333',
+  '44444444-4444-4444-8444-444444444444',
+];
+
+function definitionsFor(reelIds = syntheticReelIds) {
+  return {
+    ragBenchmark: {
+      cases: Array.from({ length: 8 }, (_, index) => ({
+        caseId: `case-${index + 1}`,
+        reelId: reelIds[index % reelIds.length],
+      })),
+    },
+  };
+}
+
 const definitions = Array.from({ length: 8 }, (_, index) => ({
   caseId: `case-${index + 1}`,
 }));
@@ -16,6 +34,71 @@ const stateFor = (statuses = {}) => ({
       { status: statuses[caseId] || 'PENDING' },
     ]),
   ),
+});
+
+test('extracts four dataset-defined reel IDs without runtime UUID mappings', () => {
+  assert.deepEqual(
+    runner.extractDistinctReelIds(definitionsFor()),
+    syntheticReelIds,
+  );
+  assert.deepEqual(
+    runner.extractDistinctReelIds(
+      definitionsFor([
+        syntheticReelIds[0],
+        syntheticReelIds[1],
+        syntheticReelIds[1],
+        syntheticReelIds[2],
+        syntheticReelIds[3],
+      ]),
+    ),
+    syntheticReelIds,
+  );
+});
+
+test('accepts unrelated valid dataset UUIDs and rejects invalid definitions before network work', () => {
+  const alternate = [
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  ];
+  assert.deepEqual(
+    runner.extractDistinctReelIds(definitionsFor(alternate)),
+    alternate,
+  );
+  assert.throws(
+    () =>
+      runner.extractDistinctReelIds(
+        definitionsFor(['not-a-uuid', ...syntheticReelIds.slice(1)]),
+      ),
+    /invalid reel UUID/,
+  );
+  assert.throws(
+    () => runner.extractDistinctReelIds({ ragBenchmark: { cases: [] } }),
+    /exactly eight/,
+  );
+  assert.throws(
+    () =>
+      runner.extractDistinctReelIds(
+        definitionsFor(syntheticReelIds.slice(0, 3)),
+      ),
+    /exactly four distinct/,
+  );
+});
+
+test('generic runner has no dependency on obsolete v1 UUID constants', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, 'run-existing-ami-rag-retest.cjs'),
+    'utf8',
+  );
+  for (const obsolete of [
+    '9f5ed300-8b47-4715-a23f-d5082987ff43',
+    'f9f57d92-7edf-4cc7-993a-24302bc3858b',
+    '944c9e59-cc47-412c-aece-f378cf758d66',
+    '487ebc29-697c-406c-8990-6d7a264c2c3c',
+  ]) {
+    assert.equal(source.includes(obsolete), false);
+  }
 });
 
 test('fresh eight cases transition through persisted in-flight state exactly once', () => {
