@@ -27,6 +27,22 @@ describe('SaveRagTraceUseCase', () => {
       ],
       nextDraftSource: 'INITIAL',
       finalFailureSource: 'NO_CONTEXT',
+      failureDiagnostics: {
+        failedNode: 'queryRouterNode',
+        errorName: 'RouterUnavailableError',
+        errorCode: 'ROUTER_UNAVAILABLE',
+        causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+        semanticCalls: [
+          {
+            model: '@cf/test/router',
+            providerStatus: 200,
+            latencyMs: 10,
+            configuredTimeoutMs: 30_000,
+            configuredMaxCompletionTokens: 512,
+            attempt: 1,
+          },
+        ],
+      },
       route: {
         intent: 'REEL_VIDEO_QUESTION',
         needsRetrieval: true,
@@ -97,6 +113,7 @@ describe('SaveRagTraceUseCase', () => {
           diagnostics: expect.objectContaining({
             draftHistory: state.draftHistory,
             finalFailureSource: 'NO_CONTEXT',
+            failure: state.failureDiagnostics,
             citationAttempts: state.citationAttempts,
             route: state.route?.diagnostics,
             retrievalPlan: state.retrievalPlan?.diagnostics,

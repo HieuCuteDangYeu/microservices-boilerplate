@@ -422,3 +422,88 @@ describe('LangGraphRagChatWorkflowAdapter diagnostic nodes', () => {
     });
   });
 });
+
+describe('LangGraphRagChatWorkflowAdapter failure diagnostics', () => {
+  it('persists router diagnostics when graph execution fails before returning state', async () => {
+    const save = { execute: jest.fn().mockResolvedValue(undefined) };
+    const queryRouterError = Object.assign(
+      new Error('Semantic router is temporarily unavailable'),
+      {
+        name: 'RouterUnavailableError',
+        code: 'ROUTER_UNAVAILABLE',
+        causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+        semanticCalls: [
+          {
+            modelRole: 'ROUTER',
+            model: '@cf/test/router',
+            providerStatus: 200,
+            latencyMs: 12,
+            configuredTimeoutMs: 30_000,
+            configuredMaxCompletionTokens: 512,
+            finishReason: 'stop',
+            endpointContract: 'CHAT_JSON_SCHEMA',
+            responseContentType: 'string',
+            contentPresent: true,
+            toolCallsPresent: false,
+            attempt: 1,
+            requestId: 'must-not-persist',
+          },
+        ],
+      },
+    );
+    const workflow = new LangGraphRagChatWorkflowAdapter(
+      { execute: jest.fn().mockRejectedValue(queryRouterError) } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      save as never,
+      { get: jest.fn() } as never,
+      {
+        resolveReelContextAccess: jest.fn().mockResolvedValue(['reel-1']),
+      } as never,
+      undefined,
+    );
+
+    await expect(
+      workflow.execute({
+        userId: 'user-1',
+        conversationId: 'conversation-1',
+        message: 'question',
+      }),
+    ).rejects.toMatchObject({ code: 'ROUTER_UNAVAILABLE' });
+
+    expect(save.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          finalFailureSource: 'PROVIDER_ERROR',
+          failureDiagnostics: expect.objectContaining({
+            failedNode: 'queryRouterNode',
+            errorName: 'RouterUnavailableError',
+            errorCode: 'ROUTER_UNAVAILABLE',
+            causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+            semanticCalls: [
+              expect.objectContaining({
+                model: '@cf/test/router',
+                providerStatus: 200,
+                endpointContract: 'CHAT_JSON_SCHEMA',
+              }),
+            ],
+          }),
+        }),
+      }),
+    );
+
+    const savedState = save.execute.mock.calls[0][0].state;
+    expect(savedState.failureDiagnostics.semanticCalls[0]).not.toHaveProperty(
+      'requestId',
+    );
+  });
+});

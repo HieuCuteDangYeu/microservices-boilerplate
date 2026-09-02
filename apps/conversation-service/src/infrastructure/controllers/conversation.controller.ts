@@ -441,12 +441,18 @@ export class ConversationMicroserviceController {
                 result.botReply.senderId,
               );
             }
+          } else if (result.botError) {
+            this.chatGateway.emitBotReplyFailure(savedMessage, result.botError);
           }
         },
         (err) => {
           this.logger.warn(
             `Bot reply trigger failed: ${(err as Error).message}`,
           );
+          this.chatGateway.emitBotReplyFailure(savedMessage, {
+            code: 'UNKNOWN',
+            message: 'AI service is temporarily unavailable',
+          });
         },
       );
 

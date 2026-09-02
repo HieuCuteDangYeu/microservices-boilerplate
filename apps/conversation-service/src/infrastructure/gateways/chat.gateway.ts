@@ -26,6 +26,7 @@ import {
   type Message,
   type MessageMedia,
 } from '../../domain/entities/message.entity';
+import type { BotError } from '../../domain/interfaces/ai-service.interface';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { NotificationServiceAdapter } from '../adapters/notification-service.adapter';
 import { ChatMapper } from '../repositories/chat.mapper';
@@ -98,6 +99,24 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server
       .to(this.conversationRooms(conversationId))
       .emit(eventName, payload);
+  }
+
+  emitBotReplyFailure(
+    userMessage: Pick<Message, 'id' | 'conversationId' | 'clientMessageId'>,
+    error: BotError,
+  ): void {
+    this.emitToConversation(userMessage.conversationId, 'bot_reply_failed', {
+      conversationId: userMessage.conversationId,
+      userMessageId: userMessage.id,
+      clientMessageId: userMessage.clientMessageId,
+      error: {
+        code: error.code,
+        message:
+          error.code === 'NO_CONTENT'
+            ? 'No relevant video content found for this query.'
+            : 'AI service is temporarily unavailable',
+      },
+    });
   }
 
   emitToUsers(userIds: string[], eventName: string, payload: unknown): void {
@@ -301,12 +320,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 botResult.botReply.senderId,
               );
             }
+          } else if (botResult.botError) {
+            this.emitBotReplyFailure(savedMessage, botResult.botError);
           }
         },
         (err) => {
           this.logger.warn(
             `Bot reply trigger failed: ${(err as Error).message}`,
           );
+          this.emitBotReplyFailure(savedMessage, {
+            code: 'UNKNOWN',
+            message: 'AI service is temporarily unavailable',
+          });
         },
       );
     } catch {

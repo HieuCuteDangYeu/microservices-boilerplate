@@ -235,6 +235,19 @@ export interface RagChatWorkflowResult {
   suggestedQueries?: string[];
 }
 
+export type RagStructuredCallFailureDiagnostic = Omit<
+  StructuredLlmCallDiagnostics,
+  'requestId'
+>;
+
+export interface RagWorkflowFailureDiagnostics {
+  failedNode: string;
+  errorName: string;
+  errorCode?: string;
+  causeCode?: string;
+  semanticCalls?: RagStructuredCallFailureDiagnostic[];
+}
+
 export interface RagChatWorkflowState {
   userId: string;
   conversationId: string;
@@ -290,6 +303,7 @@ export interface RagChatWorkflowState {
     | 'PROVIDER_ERROR'
     | 'WORKFLOW'
     | 'UNKNOWN';
+  failureDiagnostics?: RagWorkflowFailureDiagnostics;
 
   retryCount: number;
   retrievalRetryCount: number;

@@ -1,13 +1,14 @@
 import { BOT_USER_ID } from '@common/constants/seed.constants';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Message } from '../../domain/entities/message.entity';
+import type { BotError } from '../../domain/interfaces/ai-service.interface';
 import { IChatRepository } from '../../domain/interfaces/chat.repository.interface';
 import { ProcessBotReplyUseCase } from './process-bot-reply.use-case';
 
 export interface TriggerBotReplyResult {
   triggered: boolean;
   botReply?: Message;
-  botError?: { code: string; message: string };
+  botError?: BotError;
 }
 
 @Injectable()
@@ -48,7 +49,7 @@ export class TriggerBotReplyUseCase {
       this.logger.error(`Bot reply trigger failed: ${msg}`);
       return {
         triggered: false,
-        botError: { code: 'TRIGGER_FAILED', message: msg },
+        botError: { code: 'UNKNOWN', message: msg },
       };
     }
   }
