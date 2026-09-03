@@ -18,6 +18,9 @@ import type {
   RagChatWorkflowInput,
   RagChatWorkflowResult,
   RagChatWorkflowState,
+  RagRequiredEvidence,
+  RagRouterSemanticInconsistencyDetails,
+  RagRouterSemanticInconsistencyType,
   RagStructuredCallFailureDiagnostic,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { END, START, StateGraph, StateSchema } from '@langchain/langgraph';
@@ -892,6 +895,12 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     const record = this.errorRecord(error);
     const errorCode = this.errorString(error, 'code');
     const causeCode = this.errorString(error, 'causeCode');
+    const semanticInconsistencyType = this.semanticInconsistencyType(
+      record.semanticInconsistencyType,
+    );
+    const semanticInconsistencyDetails = this.safeSemanticInconsistencyDetails(
+      record.semanticInconsistencyDetails,
+    );
     const semanticCalls = Array.isArray(record.semanticCalls)
       ? record.semanticCalls
           .map((call) => this.toPersistedStructuredDiagnostic(call))
@@ -906,8 +915,118 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       errorName: error instanceof Error ? error.name : 'UnknownError',
       ...(errorCode ? { errorCode } : {}),
       ...(causeCode ? { causeCode } : {}),
+      ...(semanticInconsistencyType ? { semanticInconsistencyType } : {}),
+      ...(semanticInconsistencyDetails ? { semanticInconsistencyDetails } : {}),
       ...(semanticCalls.length > 0 ? { semanticCalls } : {}),
     };
+  }
+
+  private semanticInconsistencyType(
+    value: unknown,
+  ): RagRouterSemanticInconsistencyType | undefined {
+    return this.canonicalSemanticEnum(value, [
+      'INVALID_INTENT',
+      'INVALID_REFERENCE_TARGET',
+      'INTENT_REFERENCE_MISMATCH',
+      'SHARED_REEL_CONTEXT_UNAVAILABLE',
+      'INTENT_REEL_TYPE_MISMATCH',
+      'REQUIRED_EVIDENCE_MISMATCH',
+      'INVALID_RECOMMENDATION_ACTION',
+      'RECOMMENDATION_INTENT_MISMATCH',
+      'RECOMMENDATION_PAYLOAD_MISMATCH',
+    ] as const);
+  }
+
+  private safeSemanticInconsistencyDetails(
+    value: unknown,
+  ): RagRouterSemanticInconsistencyDetails | undefined {
+    const record = this.asRecord(value);
+    const details: RagRouterSemanticInconsistencyDetails = {};
+    const actualIntent = this.canonicalSemanticEnum(record.actualIntent, [
+      'NORMAL_CHAT',
+      'REEL_VIDEO_QUESTION',
+      'CONVERSATION_MEMORY_QUESTION',
+      'USER_MEMORY_QUESTION',
+      'TASK_ACTION_REQUEST',
+    ] as const);
+    const actualReferenceTarget = this.canonicalSemanticEnum(
+      record.actualReferenceTarget,
+      ['NONE', 'SHARED_REEL', 'CONVERSATION', 'USER_MEMORY'] as const,
+    );
+    const expectedReferenceTarget = this.canonicalSemanticEnum(
+      record.expectedReferenceTarget,
+      ['NONE', 'SHARED_REEL', 'CONVERSATION', 'USER_MEMORY'] as const,
+    );
+    const actualReelQuestionType = this.canonicalSemanticEnum(
+      record.actualReelQuestionType,
+      [
+        'NONE',
+        'TRANSCRIPT_CONTENT',
+        'VISUAL_CONTENT',
+        'GENERAL_REEL_SUMMARY',
+        'REEL_METADATA',
+        'AMBIGUOUS_REEL_REFERENCE',
+      ] as const,
+    );
+    const expectedReelQuestionType = this.canonicalSemanticEnum(
+      record.expectedReelQuestionType,
+      [
+        'NONE',
+        'TRANSCRIPT_CONTENT',
+        'VISUAL_CONTENT',
+        'GENERAL_REEL_SUMMARY',
+        'REEL_METADATA',
+        'AMBIGUOUS_REEL_REFERENCE',
+      ] as const,
+    );
+    const recommendationActionType = this.canonicalSemanticEnum(
+      record.recommendationActionType,
+      ['NONE', 'RECOMMEND_REELS', 'SUGGEST_QUERIES'] as const,
+    );
+    const actualEvidence = this.canonicalEvidence(record.actualEvidence);
+    const expectedEvidence = this.canonicalEvidence(record.expectedEvidence);
+
+    if (actualIntent) details.actualIntent = actualIntent;
+    if (actualReferenceTarget)
+      details.actualReferenceTarget = actualReferenceTarget;
+    if (expectedReferenceTarget)
+      details.expectedReferenceTarget = expectedReferenceTarget;
+    if (actualReelQuestionType)
+      details.actualReelQuestionType = actualReelQuestionType;
+    if (expectedReelQuestionType)
+      details.expectedReelQuestionType = expectedReelQuestionType;
+    if (actualEvidence) details.actualEvidence = actualEvidence;
+    if (expectedEvidence) details.expectedEvidence = expectedEvidence;
+    if (recommendationActionType)
+      details.recommendationActionType = recommendationActionType;
+
+    return Object.keys(details).length > 0 ? details : undefined;
+  }
+
+  private canonicalEvidence(value: unknown): RagRequiredEvidence[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const values = [
+      'NONE',
+      'TRANSCRIPT',
+      'VISUAL',
+      'AUDIO',
+      'METADATA',
+      'CONVERSATION_MEMORY',
+      'USER_MEMORY',
+    ] as const;
+    const normalized = value.filter((item): item is RagRequiredEvidence =>
+      Boolean(this.canonicalSemanticEnum(item, values)),
+    );
+    return normalized.length === value.length ? normalized : undefined;
+  }
+
+  private canonicalSemanticEnum<T extends string>(
+    value: unknown,
+    values: readonly T[],
+  ): T | undefined {
+    return typeof value === 'string' && values.includes(value as T)
+      ? (value as T)
+      : undefined;
   }
 
   private toPersistedStructuredDiagnostic(

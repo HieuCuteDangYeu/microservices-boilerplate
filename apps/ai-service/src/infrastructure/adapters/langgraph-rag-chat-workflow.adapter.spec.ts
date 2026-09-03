@@ -38,6 +38,7 @@ describe('LangGraphRagChatWorkflowAdapter routing', () => {
       turnsSinceRecentShare?: number;
       recentEventTypes: string[];
     };
+    formatRecentHistory: (state: RagChatWorkflowState) => string;
   };
   const state = (overrides: Partial<RagChatWorkflowState> = {}) =>
     ({
@@ -118,6 +119,90 @@ describe('LangGraphRagChatWorkflowAdapter routing', () => {
         }),
       ),
     ).toMatchObject({ recentShareEvent: false, recentEventTypes: [] });
+  });
+
+  it('formats a realistic reel question and assistant answer follow-up coherently', () => {
+    const followUpState = state({
+      hasSharedReelContext: true,
+      accessibleReelIds: ['private-reel-id'],
+      memory: {
+        recentMessages: [
+          {
+            role: 'user',
+            content: '[Shared recording] orbital lattice',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            eventType: 'REEL_SHARE',
+          },
+          {
+            role: 'user',
+            content: 'Which structure does the presenter introduce first?',
+            createdAt: '2026-01-01T00:00:01.000Z',
+            eventType: 'TEXT',
+          },
+          {
+            role: 'assistant',
+            content: 'The presenter introduces the outer lattice.',
+            createdAt: '2026-01-01T00:00:02.000Z',
+            eventType: 'TEXT',
+          },
+        ],
+      },
+    });
+
+    expect(routeAfterVerifier.formatRecentHistory(followUpState)).toBe(
+      'USER: [Shared recording] orbital lattice\n' +
+        'USER: Which structure does the presenter introduce first?\n' +
+        'ASSISTANT: The presenter introduces the outer lattice.',
+    );
+    expect(
+      routeAfterVerifier.buildRouterReferentContext(followUpState),
+    ).toEqual({
+      conversationHasSharedReelContext: true,
+      accessibleSharedReelCount: 1,
+      recentShareEvent: true,
+      turnsSinceRecentShare: 2,
+      recentEventTypes: ['REEL_SHARE', 'TEXT', 'TEXT'],
+    });
+  });
+
+  it('keeps shared-reel context after the recent-share signal expires', () => {
+    const delayedState = state({
+      hasSharedReelContext: true,
+      accessibleReelIds: ['private-reel-id'],
+      memory: {
+        recentMessages: [
+          {
+            role: 'user',
+            content: '[Shared recording] orbital lattice',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            eventType: 'REEL_SHARE',
+          },
+          ...Array.from({ length: 5 }, (_, index) => ({
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `Synthetic text event ${index + 1}.`,
+            createdAt: `2026-01-01T00:00:0${index + 1}.000Z`,
+            eventType: 'TEXT' as const,
+          })),
+        ],
+      },
+    });
+
+    expect(routeAfterVerifier.buildRouterReferentContext(delayedState)).toEqual(
+      {
+        conversationHasSharedReelContext: true,
+        accessibleSharedReelCount: 1,
+        recentShareEvent: false,
+        turnsSinceRecentShare: 5,
+        recentEventTypes: [
+          'REEL_SHARE',
+          'TEXT',
+          'TEXT',
+          'TEXT',
+          'TEXT',
+          'TEXT',
+        ],
+      },
+    );
   });
 
   it('routes a revisable verifier failure to answer revision', () => {
@@ -432,6 +517,15 @@ describe('LangGraphRagChatWorkflowAdapter failure diagnostics', () => {
         name: 'RouterUnavailableError',
         code: 'ROUTER_UNAVAILABLE',
         causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+        semanticInconsistencyType: 'REQUIRED_EVIDENCE_MISMATCH',
+        semanticInconsistencyDetails: {
+          actualIntent: 'REEL_VIDEO_QUESTION',
+          actualReelQuestionType: 'TRANSCRIPT_CONTENT',
+          actualEvidence: ['TRANSCRIPT'],
+          expectedEvidence: ['TRANSCRIPT'],
+          query: 'must-not-persist',
+          reelId: 'must-not-persist',
+        },
         semanticCalls: [
           {
             modelRole: 'ROUTER',
@@ -489,6 +583,13 @@ describe('LangGraphRagChatWorkflowAdapter failure diagnostics', () => {
             errorName: 'RouterUnavailableError',
             errorCode: 'ROUTER_UNAVAILABLE',
             causeCode: 'ROUTER_SEMANTIC_INCONSISTENT',
+            semanticInconsistencyType: 'REQUIRED_EVIDENCE_MISMATCH',
+            semanticInconsistencyDetails: {
+              actualIntent: 'REEL_VIDEO_QUESTION',
+              actualReelQuestionType: 'TRANSCRIPT_CONTENT',
+              actualEvidence: ['TRANSCRIPT'],
+              expectedEvidence: ['TRANSCRIPT'],
+            },
             semanticCalls: [
               expect.objectContaining({
                 model: '@cf/test/router',
@@ -505,5 +606,11 @@ describe('LangGraphRagChatWorkflowAdapter failure diagnostics', () => {
     expect(savedState.failureDiagnostics.semanticCalls[0]).not.toHaveProperty(
       'requestId',
     );
+    expect(
+      savedState.failureDiagnostics.semanticInconsistencyDetails,
+    ).not.toHaveProperty('query');
+    expect(
+      savedState.failureDiagnostics.semanticInconsistencyDetails,
+    ).not.toHaveProperty('reelId');
   });
 });
