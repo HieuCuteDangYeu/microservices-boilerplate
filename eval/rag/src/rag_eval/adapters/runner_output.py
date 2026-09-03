@@ -1,6 +1,7 @@
 """Normalize the TypeScript exactly-once runner's completed/reconciled rows."""
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,51 @@ from rag_eval.schemas import EvaluationRow, NormalizedExecutionResult
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 RUNNER = REPOSITORY_ROOT / "scripts/ops/run-existing-ami-rag-retest.cjs"
+
+_DATABASE_URL_RE = re.compile(
+    r"\b(?:postgres(?:ql)?|mongodb(?:\+srv)?):\/\/[^\s\"']+", re.IGNORECASE
+)
+_BEARER_RE = re.compile(r"\bBearer\s+[^\s,;]+", re.IGNORECASE)
+_COOKIE_HEADER_RE = re.compile(
+    r"(?im)(\b(?:cookie|set-cookie)\s*[:=]\s*)[^\r\n]*?"
+    r"(?=\s+[A-Za-z][A-Za-z_-]*\s*[:=]|\s*$)"
+)
+_SENSITIVE_VALUE_RE = re.compile(
+    r"(?ix)("
+    r"(?:\"|')?(?:authorization|proxy-authorization|password|secret|token|"
+    r"access[_-]?token|refresh[_-]?token|api[_-]?key|database[_-]?url|"
+    r"cloudflare[_-]?api[_-]?token|content[_-]?database[_-]?url|"
+    r"reel[_-]?indexing[_-]?database[_-]?url)(?:\"|')?"
+    r"\s*[:=]\s*"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s,;}\]]+)"
+    r")"
+)
+
+
+def sanitize_runner_diagnostic(
+    stdout: str | bytes | None = None,
+    stderr: str | bytes | None = None,
+    limit: int = 4000,
+) -> str:
+    """Return bounded child output with credentials and session material removed."""
+
+    parts: list[str] = []
+    for label, value in (("stdout", stdout), ("stderr", stderr)):
+        if value is None:
+            continue
+        text = value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
+        if not text:
+            continue
+        text = _DATABASE_URL_RE.sub("<redacted-db-url>", text)
+        text = _BEARER_RE.sub("Bearer <redacted>", text)
+        text = _COOKIE_HEADER_RE.sub(r"\1<redacted>", text)
+        text = _SENSITIVE_VALUE_RE.sub(
+            lambda match: f"{match.group(0).split(':', 1)[0].split('=', 1)[0]}=<redacted>",
+            text,
+        )
+        parts.append(f"{label}: {' '.join(text.split())}")
+    diagnostic = " | ".join(parts) or "<no child output>"
+    return diagnostic[:limit]
 
 
 def normalize_runner_case(
@@ -59,13 +105,22 @@ def load_runner_report(
 
 
 def invoke_typescript_runner(arguments: list[str]) -> Path:
-    completed = subprocess.run(
-        ["node", str(RUNNER), *arguments],
-        cwd=REPOSITORY_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["node", str(RUNNER), *arguments],
+            cwd=REPOSITORY_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        diagnostic = sanitize_runner_diagnostic(error.stdout, error.stderr)
+        raise RuntimeError(
+            f"TypeScript runner failed with exit code {error.returncode}: {diagnostic}"
+        ) from error
+    except OSError as error:
+        diagnostic = sanitize_runner_diagnostic(stderr=str(error))
+        raise RuntimeError(f"TypeScript runner could not start: {diagnostic}") from error
     for line in reversed(completed.stdout.splitlines()):
         try:
             payload = json.loads(line)

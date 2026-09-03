@@ -93,6 +93,7 @@ export class SaveRagTraceUseCase {
               : undefined,
             citationAttempts: input.state.citationAttempts,
             finalFailureSource: input.state.finalFailureSource,
+            failure: input.state.failureDiagnostics,
           },
         },
       });

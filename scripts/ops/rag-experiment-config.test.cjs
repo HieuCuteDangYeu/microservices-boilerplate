@@ -1,6 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,6 +11,8 @@ const {
   checkpointWriter,
   normalizeCalls,
   expectedRecommendedActions,
+  readBooleanFlag,
+  assertProviderConfirmation,
 } = require('./run-rag-control-plane-evaluation.cjs');
 const { sufficiencyCases } = require('./rag-control-plane-fixtures.cjs');
 const {
@@ -21,6 +24,129 @@ const options = {
   mode: 'ROUTER',
   subset: 'harness',
 };
+const productionControlPlaneOptions = {
+  envFile: '.env.test.local',
+  configFile:
+    'eval/rag/results/production-control-plane-smoke-20260902-config.json',
+  mode: 'ROUTER',
+  subset: 'stress',
+};
+
+test('snapshot-only is a bare boolean flag and rejects value forms safely', () => {
+  assert.equal(
+    readBooleanFlag('--snapshot-only', ['node', 'script', '--snapshot-only']),
+    true,
+  );
+  assert.equal(readBooleanFlag('--snapshot-only', ['node', 'script']), false);
+  assert.throws(
+    () =>
+      readBooleanFlag('--snapshot-only', [
+        'node',
+        'script',
+        '--snapshot-only',
+        'true',
+      ]),
+    /boolean flag/,
+  );
+  assert.throws(
+    () =>
+      readBooleanFlag('--snapshot-only', [
+        'node',
+        'script',
+        '--snapshot-only=true',
+      ]),
+    /boolean flag/,
+  );
+});
+
+test('provider execution requires explicit confirmation while snapshot mode does not', () => {
+  assert.doesNotThrow(() => assertProviderConfirmation(true, false));
+  assert.throws(
+    () => assertProviderConfirmation(false, false),
+    /--confirm-provider-calls/,
+  );
+  assert.doesNotThrow(() => assertProviderConfirmation(false, true));
+});
+
+test('gateway-enabled evaluator config fails before provider work when its ID is missing', () => {
+  assert.throws(
+    () => resolveExperiment(productionControlPlaneOptions, {}),
+    /CLOUDFLARE_AI_GATEWAY_ID/,
+  );
+  const resolved = resolveExperiment(productionControlPlaneOptions, {
+    CLOUDFLARE_AI_GATEWAY_ID: 'synthetic-gateway-id',
+  });
+  assert.equal(resolved.snapshot.aiGatewayEnabled, true);
+});
+
+test('explicit env-file values take precedence over inherited environment values', () => {
+  const resolved = resolveExperiment(
+    { ...productionControlPlaneOptions, envFile: '.env' },
+    { CLOUDFLARE_AI_GATEWAY_ID: 'stale-inherited-gateway-id' },
+  );
+  assert.equal(
+    resolved.snapshot.valueSources.CLOUDFLARE_AI_GATEWAY_ID,
+    'ENV_FILE',
+  );
+});
+
+test('snapshot-only and missing confirmation both stop before provider invocation', () => {
+  const script = path.join(__dirname, 'run-rag-control-plane-evaluation.cjs');
+  const baseArgs = [
+    script,
+    '--mode',
+    'ROUTER',
+    '--config',
+    productionControlPlaneOptions.configFile,
+    '--subset',
+    'stress',
+    '--env-file',
+    productionControlPlaneOptions.envFile,
+  ];
+  const env = {
+    ...process.env,
+    CLOUDFLARE_AI_GATEWAY_ID: 'synthetic-gateway-id',
+  };
+  const snapshot = spawnSync(
+    process.execPath,
+    [...baseArgs, '--snapshot-only'],
+    {
+      cwd: path.resolve(__dirname, '../..'),
+      env,
+      encoding: 'utf8',
+    },
+  );
+  assert.equal(snapshot.status, 0, snapshot.stderr);
+  assert.match(snapshot.stdout, /"schemaVersion":"rag-effective-config-v1"/);
+  assert.doesNotMatch(snapshot.stdout, /StructuredCall|providerStatus/);
+
+  const malformed = spawnSync(
+    process.execPath,
+    [...baseArgs, '--snapshot-only', 'true'],
+    { cwd: path.resolve(__dirname, '../..'), env, encoding: 'utf8' },
+  );
+  assert.notEqual(malformed.status, 0);
+  assert.match(`${malformed.stdout}\n${malformed.stderr}`, /boolean flag/);
+  assert.doesNotMatch(
+    `${malformed.stdout}\n${malformed.stderr}`,
+    /StructuredCall/,
+  );
+
+  const missingConfirmation = spawnSync(process.execPath, baseArgs, {
+    cwd: path.resolve(__dirname, '../..'),
+    env,
+    encoding: 'utf8',
+  });
+  assert.notEqual(missingConfirmation.status, 0);
+  assert.match(
+    `${missingConfirmation.stdout}\n${missingConfirmation.stderr}`,
+    /--confirm-provider-calls/,
+  );
+  assert.doesNotMatch(
+    `${missingConfirmation.stdout}\n${missingConfirmation.stderr}`,
+    /StructuredCall|providerStatus/,
+  );
+});
 
 test('provider contract variants share cases, prompt, schema, budget and strict semantic validation', async (t) => {
   const requests = [];

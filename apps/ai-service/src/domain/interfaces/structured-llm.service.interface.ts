@@ -45,6 +45,9 @@ export interface StructuredLlmCallDiagnostics {
   providerCategory?: StructuredProviderFailureCategory;
   retryAfterMs?: number;
   requestId?: string;
+  networkErrorName?: string;
+  networkErrorCode?: string;
+  networkErrorSyscall?: string;
   transient?: boolean;
   schemaPath?: string;
   schemaConstraint?: string;

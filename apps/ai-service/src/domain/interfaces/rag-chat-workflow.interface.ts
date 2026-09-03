@@ -38,6 +38,28 @@ export type RagReferenceTarget =
   | 'CONVERSATION'
   | 'USER_MEMORY';
 
+export type RagRouterSemanticInconsistencyType =
+  | 'INVALID_INTENT'
+  | 'INVALID_REFERENCE_TARGET'
+  | 'INTENT_REFERENCE_MISMATCH'
+  | 'SHARED_REEL_CONTEXT_UNAVAILABLE'
+  | 'INTENT_REEL_TYPE_MISMATCH'
+  | 'REQUIRED_EVIDENCE_MISMATCH'
+  | 'INVALID_RECOMMENDATION_ACTION'
+  | 'RECOMMENDATION_INTENT_MISMATCH'
+  | 'RECOMMENDATION_PAYLOAD_MISMATCH';
+
+export interface RagRouterSemanticInconsistencyDetails {
+  actualIntent?: RagChatIntent;
+  actualReferenceTarget?: RagReferenceTarget;
+  expectedReferenceTarget?: RagReferenceTarget;
+  actualReelQuestionType?: RagReelQuestionType;
+  expectedReelQuestionType?: RagReelQuestionType;
+  actualEvidence?: RagRequiredEvidence[];
+  expectedEvidence?: RagRequiredEvidence[];
+  recommendationActionType?: RagRecommendationAction['type'];
+}
+
 export interface RagRouterReferentContext {
   conversationHasSharedReelContext: boolean;
   accessibleSharedReelCount: number;
@@ -235,6 +257,21 @@ export interface RagChatWorkflowResult {
   suggestedQueries?: string[];
 }
 
+export type RagStructuredCallFailureDiagnostic = Omit<
+  StructuredLlmCallDiagnostics,
+  'requestId'
+>;
+
+export interface RagWorkflowFailureDiagnostics {
+  failedNode: string;
+  errorName: string;
+  errorCode?: string;
+  causeCode?: string;
+  semanticInconsistencyType?: RagRouterSemanticInconsistencyType;
+  semanticInconsistencyDetails?: RagRouterSemanticInconsistencyDetails;
+  semanticCalls?: RagStructuredCallFailureDiagnostic[];
+}
+
 export interface RagChatWorkflowState {
   userId: string;
   conversationId: string;
@@ -290,6 +327,7 @@ export interface RagChatWorkflowState {
     | 'PROVIDER_ERROR'
     | 'WORKFLOW'
     | 'UNKNOWN';
+  failureDiagnostics?: RagWorkflowFailureDiagnostics;
 
   retryCount: number;
   retrievalRetryCount: number;

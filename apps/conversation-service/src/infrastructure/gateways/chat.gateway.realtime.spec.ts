@@ -157,6 +157,34 @@ describe('ChatGateway realtime membership helpers', () => {
     });
   });
 
+  it('emits a bounded terminal bot failure without forwarding provider detail', () => {
+    const message = new Message({
+      id: 'user-message-id',
+      conversationId: CONVERSATION_ID,
+      clientMessageId: 'client-message-id',
+      senderId: OWNER_ID,
+      content: 'question',
+      signalType: 0,
+      type: 'text',
+      createdAt: new Date('2026-08-19T00:01:00.000Z'),
+    });
+
+    gateway.emitBotReplyFailure(message, {
+      code: 'AI_UNAVAILABLE',
+      message: 'provider token=secret-detail',
+    });
+
+    expect(emit).toHaveBeenCalledWith('bot_reply_failed', {
+      conversationId: CONVERSATION_ID,
+      userMessageId: 'user-message-id',
+      clientMessageId: 'client-message-id',
+      error: {
+        code: 'AI_UNAVAILABLE',
+        message: 'AI service is temporarily unavailable',
+      },
+    });
+  });
+
   it('emits conversation updates to legacy and namespaced account rooms in one fanout', () => {
     const group = conversation();
 
