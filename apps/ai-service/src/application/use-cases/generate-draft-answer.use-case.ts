@@ -49,8 +49,9 @@ export class GenerateDraftAnswerUseCase {
           includeRetrievedEvidence: false,
         }),
         'Return only JSON matching the supplied schema.',
-        'For every factual claim about a reel, declare the exact authorized evidence IDs that support it.',
-        'Do not declare an evidence ID for a claim unless its exact evidence text supports the requested relation and modality.',
+        'Treat claims as an exhaustive grounding audit of every independently checkable factual reel assertion actually stated in answer; do not omit any such assertion.',
+        'Split compound answer sentences into atomic claims when they contain multiple independently checkable facts. Each factual claim must be stated in answer exactly once; do not add factual claims that answer does not state.',
+        'For every claim, declare only the authorized evidence IDs that directly support that exact assertion and requested relation or modality. Multiple claims may cite the same evidence ID, and one claim may cite multiple evidence IDs when combined support is genuinely required.',
         'Normal conversational statements that do not depend on reel evidence may have no claims.',
       ].join('\n\n'),
       userPrompt: JSON.stringify({
@@ -78,15 +79,24 @@ export class GenerateDraftAnswerUseCase {
         answer: { type: 'string', maxLength: 2_500 },
         claims: {
           type: 'array',
+          description:
+            'Exhaustive atomic grounding mappings for factual reel assertions actually stated in the answer.',
           maxItems: 12,
           items: {
             type: 'object',
             additionalProperties: false,
             required: ['claim', 'evidenceIds'],
             properties: {
-              claim: { type: 'string', maxLength: 500 },
+              claim: {
+                type: 'string',
+                description:
+                  'One independently checkable factual reel assertion actually stated in answer.',
+                maxLength: 500,
+              },
               evidenceIds: {
                 type: 'array',
+                description:
+                  'Authorized evidence IDs that directly support this exact claim.',
                 maxItems: 3,
                 items: { type: 'string', maxLength: 64 },
               },
