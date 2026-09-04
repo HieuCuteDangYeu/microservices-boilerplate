@@ -67,6 +67,31 @@ describe('GenerateDraftAnswerUseCase', () => {
     expect(request.jsonSchema.properties.claims).toMatchObject({
       maxItems: 12,
     });
+    expect(request.systemPrompt).toContain(
+      'exhaustive grounding audit of every independently checkable factual reel assertion',
+    );
+    expect(request.systemPrompt).toContain(
+      'Split compound answer sentences into atomic claims',
+    );
+    expect(request.systemPrompt).toContain(
+      'do not add factual claims that answer does not state',
+    );
+    expect(request.systemPrompt).toContain(
+      'Multiple claims may cite the same evidence ID',
+    );
+    expect(request.systemPrompt).toContain(
+      'one claim may cite multiple evidence IDs',
+    );
+    expect(request.jsonSchema.properties.claims.description).toContain(
+      'Exhaustive atomic grounding mappings',
+    );
+    expect(
+      request.jsonSchema.properties.claims.items.properties.claim.description,
+    ).toContain('actually stated in answer');
+    expect(
+      request.jsonSchema.properties.claims.items.properties.evidenceIds
+        .description,
+    ).toContain('directly support this exact claim');
     expect(promptBuilder.build).toHaveBeenCalledWith(state, {
       includeRetrievedEvidence: false,
     });
