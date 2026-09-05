@@ -22,7 +22,27 @@ describe('SaveRagTraceUseCase', () => {
           decisionSource: 'LLM',
           coverage: 1,
           selectedEvidenceIds: ['e0'],
+          selectedEvidenceMappings: [
+            {
+              citationIndex: 0,
+              selectedEvidenceId: 'e0',
+              evidenceId: 'reel:r1:chunk:0',
+            },
+          ],
           deterministicSupportingEvidenceIds: [],
+          providerStatus: 200,
+          model: '@cf/test/citation',
+          semanticCalls: [
+            {
+              modelRole: 'CITATION_ATTRIBUTION',
+              model: '@cf/test/citation',
+              providerStatus: 200,
+              latencyMs: 10,
+              configuredTimeoutMs: 12_000,
+              configuredMaxCompletionTokens: 768,
+              attempt: 1,
+            },
+          ],
         },
       ],
       nextDraftSource: 'INITIAL',
@@ -65,12 +85,58 @@ describe('SaveRagTraceUseCase', () => {
         },
       },
       retrievalPlan: {
+        mode: 'REEL_HYBRID',
+        query: 'spoken project',
+        rewrittenQuery: 'spoken project',
+        queries: ['spoken project', 'project name'],
+        searchLimit: 8,
+        rerankLimit: 5,
+        shouldRerank: true,
+        reason: 'Focused transcript search.',
         diagnostics: {
           modelRole: 'RETRIEVAL_PLANNER',
           model: '@cf/test/planner',
           providerStatus: 'SUCCESS',
           decisionSource: 'LLM',
+          semanticCalls: [
+            {
+              modelRole: 'RETRIEVAL_PLANNER',
+              model: '@cf/test/planner',
+              providerStatus: 200,
+              latencyMs: 10,
+              configuredTimeoutMs: 8_000,
+              configuredMaxCompletionTokens: 512,
+              attempt: 1,
+            },
+          ],
         },
+      },
+      retrievalExecution: {
+        accessibleReelCount: 1,
+        accessibleReelIds: ['reel:r1'],
+        queryCount: 2,
+        queries: [
+          {
+            queryOrdinal: 1,
+            mode: 'REEL_HYBRID',
+            includeTranscript: true,
+            includeVisual: false,
+            semanticCandidateCount: 2,
+            hydratedCandidateCount: 2,
+            returnedChunkCount: 2,
+          },
+          {
+            queryOrdinal: 2,
+            mode: 'REEL_HYBRID',
+            includeTranscript: true,
+            includeVisual: false,
+            semanticCandidateCount: 1,
+            hydratedCandidateCount: 1,
+            returnedChunkCount: 1,
+          },
+        ],
+        retrievedCount: 2,
+        rerankedCount: 1,
       },
       answerClaims: [{ claim: 'answer', evidenceIds: ['e0'] }],
       contextSufficiency: {
@@ -103,6 +169,17 @@ describe('SaveRagTraceUseCase', () => {
               citationIndex: 0,
               selectedEvidenceId: 'e0',
               evidenceId: 'reel:r1:chunk:0',
+            },
+          ],
+          semanticCalls: [
+            {
+              modelRole: 'CITATION_ATTRIBUTION',
+              model: '@cf/test/citation',
+              providerStatus: 200,
+              latencyMs: 10,
+              configuredTimeoutMs: 12_000,
+              configuredMaxCompletionTokens: 768,
+              attempt: 1,
             },
           ],
         },
@@ -155,6 +232,18 @@ describe('SaveRagTraceUseCase', () => {
             finalFailureSource: 'NO_CONTEXT',
             failure: state.failureDiagnostics,
             citationAttempts: state.citationAttempts,
+            citationDiagnostics: state.citationCoverage?.diagnostics,
+            retrievalPlanActual: {
+              mode: 'REEL_HYBRID',
+              query: 'spoken project',
+              rewrittenQuery: 'spoken project',
+              queries: ['spoken project', 'project name'],
+              searchLimit: 8,
+              rerankLimit: 5,
+              shouldRerank: true,
+              reason: 'Focused transcript search.',
+            },
+            retrievalExecution: state.retrievalExecution,
             routeDecision: {
               intent: 'REEL_VIDEO_QUESTION',
               referenceTarget: 'SHARED_REEL',
@@ -181,5 +270,50 @@ describe('SaveRagTraceUseCase', () => {
         }),
       }),
     );
+  });
+
+  it('bounds actual retrieval-plan text in persisted diagnostics', async () => {
+    const create = jest.fn().mockResolvedValue(undefined);
+    const useCase = new SaveRagTraceUseCase({ create });
+    await useCase.execute({
+      state: {
+        userId: 'u',
+        conversationId: 'c',
+        userMessage: 'question',
+        retrievedChunks: [],
+        rerankedChunks: [],
+        retryCount: 0,
+        retrievalRetryCount: 0,
+        citationRetryCount: 0,
+        draftHistory: [],
+        draftRevision: 0,
+        citationAttempts: [],
+        nextDraftSource: 'INITIAL',
+        finalFailureSource: 'NONE',
+        retrievalPlan: {
+          mode: 'REEL_HYBRID',
+          query: 'q'.repeat(1_000),
+          rewrittenQuery: 'w'.repeat(1_000),
+          queries: ['a'.repeat(1_000), 'b'.repeat(1_000), 'c'.repeat(1_000)],
+          searchLimit: 8,
+          rerankLimit: 5,
+          shouldRerank: true,
+          reason: 'r'.repeat(500),
+        },
+      },
+      latencyMs: 1,
+      nodeTimings: {},
+    });
+
+    const actual =
+      create.mock.calls[0][0].workflowMetrics.diagnostics.retrievalPlanActual;
+    expect(actual.query).toHaveLength(500);
+    expect(actual.rewrittenQuery).toHaveLength(500);
+    expect(actual.queries).toEqual([
+      'a'.repeat(500),
+      'b'.repeat(500),
+      'c'.repeat(500),
+    ]);
+    expect(actual.reason).toHaveLength(240);
   });
 });

@@ -149,7 +149,12 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
 
   private toJsonDiagnostics(value: unknown): Prisma.InputJsonValue | null {
     if (!value) return null;
-    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+    const json = JSON.stringify(value, (key: string, item: unknown): unknown =>
+      key === 'requestId' ? undefined : item,
+    );
+    if (json === undefined) return null;
+    const sanitized = JSON.parse(json) as Prisma.InputJsonValue;
+    return sanitized;
   }
 
   private fromJsonStringArray(

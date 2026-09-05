@@ -1,4 +1,7 @@
-import type { ICitationAttributionService } from '@ai/domain/interfaces/citation-attribution.service.interface';
+import {
+  CitationAttributionProviderError,
+  type ICitationAttributionService,
+} from '@ai/domain/interfaces/citation-attribution.service.interface';
 import type { RagChatWorkflowState } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { BuildRagCitationsUseCase } from './build-rag-citations.use-case';
 
@@ -71,6 +74,18 @@ describe('BuildRagCitationsUseCase', () => {
           decisionSource: 'LLM',
           selectedEvidenceIds: ['e0'],
           deterministicSupportingEvidenceIds: [],
+          semanticCalls: [
+            {
+              modelRole: 'CITATION_ATTRIBUTION',
+              model: '@cf/test/citation',
+              providerStatus: 200,
+              latencyMs: 7,
+              configuredTimeoutMs: 4_000,
+              configuredMaxCompletionTokens: 768,
+              attempt: 1,
+              requestId: 'must-not-persist',
+            },
+          ],
         },
         coverage: 1,
       }),
@@ -104,6 +119,12 @@ describe('BuildRagCitationsUseCase', () => {
               evidenceId: 'reel:r1:visual:0',
             },
           ],
+          semanticCalls: expect.arrayContaining([
+            expect.objectContaining({
+              modelRole: 'CITATION_ATTRIBUTION',
+              providerStatus: 200,
+            }),
+          ]),
         }),
       }),
     );
@@ -137,8 +158,21 @@ describe('BuildRagCitationsUseCase', () => {
   });
 
   it('fails citation coverage closed when attribution provider fails', async () => {
+    const failure = new CitationAttributionProviderError([
+      {
+        modelRole: 'CITATION_ATTRIBUTION',
+        model: '@cf/test/citation',
+        providerStatus: 'TIMEOUT',
+        latencyMs: 4_000,
+        configuredTimeoutMs: 4_000,
+        configuredMaxCompletionTokens: 768,
+        attempt: 1,
+        errorCode: 'STRUCTURED_COMPLETION_TIMEOUT',
+        providerCategory: 'TRANSIENT_PROVIDER_FAILURE',
+      },
+    ]);
     const attributionService: ICitationAttributionService = {
-      attribute: jest.fn().mockRejectedValue(new Error('provider unavailable')),
+      attribute: jest.fn().mockRejectedValue(failure),
     };
     const useCase = new BuildRagCitationsUseCase(attributionService);
 
@@ -150,6 +184,17 @@ describe('BuildRagCitationsUseCase', () => {
       supportedClaimCount: 0,
       diagnostics: { decisionSource: 'FALLBACK', selectedEvidenceIds: [] },
     });
+    expect(assessment.coverage.diagnostics).toEqual(
+      expect.objectContaining({
+        providerStatus: 'ERROR',
+        semanticCalls: [
+          expect.objectContaining({
+            providerStatus: 'TIMEOUT',
+            errorCode: 'STRUCTURED_COMPLETION_TIMEOUT',
+          }),
+        ],
+      }),
+    );
   });
 
   it.each([

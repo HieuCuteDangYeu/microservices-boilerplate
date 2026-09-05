@@ -1,4 +1,5 @@
 import type { RagChatWorkflowState } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+import type { RagCitationAssessment } from '@ai/application/use-cases/build-rag-citations.use-case';
 import { LangGraphRagChatWorkflowAdapter } from './langgraph-rag-chat-workflow.adapter';
 
 describe('LangGraphRagChatWorkflowAdapter routing', () => {
@@ -31,6 +32,11 @@ describe('LangGraphRagChatWorkflowAdapter routing', () => {
     createVerificationFailureNode: () => (
       state: RagChatWorkflowState,
     ) => Partial<RagChatWorkflowState>;
+    createCitationNode: (
+      nodeTimings: Record<string, number>,
+    ) => (
+      state: RagChatWorkflowState,
+    ) => Promise<Partial<RagChatWorkflowState>>;
     buildRouterReferentContext: (state: RagChatWorkflowState) => {
       conversationHasSharedReelContext: boolean;
       accessibleSharedReelCount: number;
@@ -50,6 +56,7 @@ describe('LangGraphRagChatWorkflowAdapter routing', () => {
       retryCount: 0,
       retrievalRetryCount: 0,
       citationRetryCount: 0,
+      citationAttempts: [],
       ...overrides,
     }) as RagChatWorkflowState;
 
@@ -342,6 +349,85 @@ describe('LangGraphRagChatWorkflowAdapter routing', () => {
         }),
       ),
     ).toMatchObject({ finalFailureSource: 'CITATION' });
+  });
+
+  it('retains per-attempt citation diagnostics before a later attempt overwrites coverage', async () => {
+    const firstAssessment: RagCitationAssessment = {
+      citations: [],
+      coverage: {
+        mode: 'FALLBACK',
+        coverage: 0,
+        factualClaimCount: 1,
+        supportedClaimCount: 0,
+        unsupportedClaims: [],
+        diagnostics: {
+          decisionSource: 'FALLBACK',
+          selectedEvidenceIds: [],
+          deterministicSupportingEvidenceIds: [],
+          providerStatus: 'ERROR',
+          modelRole: 'CITATION_ATTRIBUTION',
+          semanticCalls: [
+            {
+              modelRole: 'CITATION_ATTRIBUTION',
+              model: '@cf/test/citation',
+              providerStatus: 'TIMEOUT',
+              latencyMs: 4_000,
+              configuredTimeoutMs: 4_000,
+              configuredMaxCompletionTokens: 768,
+              attempt: 1,
+              errorCode: 'STRUCTURED_COMPLETION_TIMEOUT',
+            },
+          ],
+        },
+      },
+    };
+    const buildCitations = {
+      execute: jest.fn().mockResolvedValue(firstAssessment),
+    };
+    const workflow = new LangGraphRagChatWorkflowAdapter(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      buildCitations as never,
+      undefined as never,
+      { get: jest.fn() } as never,
+      undefined as never,
+    ) as unknown as {
+      createCitationNode: (
+        nodeTimings: Record<string, number>,
+      ) => (
+        state: RagChatWorkflowState,
+      ) => Promise<Partial<RagChatWorkflowState>>;
+    };
+
+    const result = await workflow.createCitationNode({})(state());
+
+    expect(result).toMatchObject({
+      citationAttempts: [
+        {
+          attempt: 0,
+          decisionSource: 'FALLBACK',
+          coverage: 0,
+          providerStatus: 'ERROR',
+          semanticCalls: [
+            expect.objectContaining({
+              errorCode: 'STRUCTURED_COMPLETION_TIMEOUT',
+            }),
+          ],
+        },
+      ],
+      citationDiagnostics: expect.objectContaining({
+        providerStatus: 'ERROR',
+      }),
+    });
   });
 });
 

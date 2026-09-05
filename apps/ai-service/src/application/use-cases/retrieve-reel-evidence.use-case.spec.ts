@@ -1,4 +1,5 @@
 import { RetrieveReelEvidenceUseCase } from './retrieve-reel-evidence.use-case';
+import type { RagRetrievalExecutionDiagnostics } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 
 const route = {
   intent: 'REEL_VIDEO_QUESTION' as const,
@@ -183,5 +184,88 @@ describe('RetrieveReelEvidenceUseCase', () => {
     ).resolves.toEqual([match]);
 
     expect(retrievalEngine.retrieve).toHaveBeenCalledTimes(1);
+  });
+
+  it('records an empty access scope without invoking retrieval', async () => {
+    const retrievalEngine = {
+      plan: jest.fn().mockResolvedValue(plan),
+      retrieve: jest.fn(),
+      rerank: jest.fn(),
+    };
+    const diagnostics: RagRetrievalExecutionDiagnostics = {
+      accessibleReelCount: 0,
+      accessibleReelIds: [],
+      queryCount: 0,
+      queries: [],
+      retrievedCount: 0,
+      rerankedCount: 0,
+    };
+    const useCase = new RetrieveReelEvidenceUseCase(
+      retrievalEngine,
+      { resolveReelContextAccess: jest.fn() } as never,
+      { complete: jest.fn() },
+      enabledPolicy,
+      aiConfig as never,
+    );
+
+    await expect(
+      useCase.execute({
+        userId: 'user-1',
+        conversationId: 'conversation-1',
+        route,
+        plan,
+        accessibleReelIds: [],
+        diagnostics,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(retrievalEngine.retrieve).not.toHaveBeenCalled();
+    expect(diagnostics).toEqual(
+      expect.objectContaining({ accessibleReelCount: 0, queryCount: 0 }),
+    );
+  });
+
+  it('records access-resolution failures without changing the thrown error', async () => {
+    const retrievalEngine = {
+      plan: jest.fn().mockResolvedValue(plan),
+      retrieve: jest.fn(),
+      rerank: jest.fn(),
+    };
+    const accessFailure = Object.assign(new Error('access unavailable'), {
+      code: 'CONTENT_ACCESS_ERROR',
+    });
+    const diagnostics: RagRetrievalExecutionDiagnostics = {
+      accessibleReelCount: 0,
+      accessibleReelIds: [],
+      queryCount: 0,
+      queries: [],
+      retrievedCount: 0,
+      rerankedCount: 0,
+    };
+    const useCase = new RetrieveReelEvidenceUseCase(
+      retrievalEngine,
+      {
+        resolveReelContextAccess: jest.fn().mockRejectedValue(accessFailure),
+      } as never,
+      { complete: jest.fn() },
+      enabledPolicy,
+      aiConfig as never,
+    );
+
+    await expect(
+      useCase.execute({
+        userId: 'user-1',
+        conversationId: 'conversation-1',
+        route,
+        plan,
+        diagnostics,
+      }),
+    ).rejects.toBe(accessFailure);
+    expect(diagnostics).toEqual(
+      expect.objectContaining({
+        failedStage: 'ACCESS_RESOLUTION',
+        errorCode: 'CONTENT_ACCESS_ERROR',
+      }),
+    );
   });
 });

@@ -1,7 +1,10 @@
 import type {
   RagCitation,
+  RagCitationDiagnostics,
   RagCitationEvidenceMapping,
   RagPersistedRouteDecision,
+  RagRetrievalExecutionDiagnostics,
+  RagRetrievalPlanActual,
   RagWorkflowFailureDiagnostics,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 
@@ -21,6 +24,8 @@ export interface RagWorkflowTraceMetrics {
   supportedClaimCount?: number;
   diagnostics?: {
     routeDecision?: RagPersistedRouteDecision;
+    retrievalPlanActual?: RagRetrievalPlanActual;
+    retrievalExecution?: RagRetrievalExecutionDiagnostics;
     contextSufficiency?: unknown;
     route?: unknown;
     retrievalPlan?: unknown;
@@ -30,6 +35,7 @@ export interface RagWorkflowTraceMetrics {
     answerClaims?: unknown[];
     answerCalls?: unknown[];
     verification?: unknown;
+    citationDiagnostics?: RagCitationDiagnostics;
     citationAttempts?: unknown[];
     finalFailureSource?: string;
     failure?: RagWorkflowFailureDiagnostics;

@@ -7,8 +7,12 @@ import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-
 import type {
   RagChatRouteDecision,
   RagRequiredEvidence,
+  RagRetrievalExecutionDiagnostics,
+  RagRetrievalFailureStage,
   RagRetrievalMode,
   RagRetrievalPlan,
+  RagRetrievalQueryDiagnostics,
+  RagStructuredCallFailureDiagnostic,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IRagHierarchyShadowObservationRepository } from '@ai/domain/interfaces/rag-hierarchy-shadow-observation.repository.interface';
 import type { IRetrievalEngine } from '@ai/domain/interfaces/retrieval-engine.interface';
@@ -50,6 +54,7 @@ interface RetrievalExecutionInput {
   includeTranscript: boolean;
   includeVisual: boolean;
   requiredEvidence: RagRequiredEvidence[];
+  diagnostics?: RagRetrievalExecutionDiagnostics;
 }
 
 @Injectable()
@@ -90,36 +95,64 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
     route: RagChatRouteDecision;
     plan: RagRetrievalPlan;
     accessibleReelIds?: string[];
+    diagnostics?: RagRetrievalExecutionDiagnostics;
   }): Promise<TranscriptMatch[]> {
+    const diagnostics = input.diagnostics;
+    this.initializeAccessDiagnostics(diagnostics, input.accessibleReelIds);
     if (input.plan.mode === 'NONE') {
+      if (diagnostics) {
+        diagnostics.queryCount = diagnostics.queries.length;
+        diagnostics.retrievedCount = 0;
+      }
       return [];
     }
 
     const queries = this.getQueries(input.plan);
-    const allCandidates: TranscriptMatch[] = [];
-    const accessibleReelIds =
-      input.accessibleReelIds ??
-      (await this.contentService.resolveReelContextAccess({
-        userId: input.userId,
-        conversationId: input.conversationId,
-      }));
-    if (accessibleReelIds.length === 0) {
-      return [];
-    }
-
     const includeVisual = input.route.requiredEvidence.includes('VISUAL');
     const includeTranscript =
       !includeVisual ||
       input.route.requiredEvidence.includes('TRANSCRIPT') ||
       input.route.requiredEvidence.includes('AUDIO');
+    const allCandidates: TranscriptMatch[] = [];
+    let accessibleReelIds: string[];
+    try {
+      accessibleReelIds =
+        input.accessibleReelIds ??
+        (await this.contentService.resolveReelContextAccess({
+          userId: input.userId,
+          conversationId: input.conversationId,
+        }));
+    } catch (error: unknown) {
+      this.recordFailure(diagnostics, 'ACCESS_RESOLUTION', error);
+      throw error;
+    }
+    this.initializeAccessDiagnostics(diagnostics, accessibleReelIds);
+    if (accessibleReelIds.length === 0) {
+      if (diagnostics) diagnostics.queryCount = 0;
+      return [];
+    }
 
     for (const queryText of queries) {
-      const queryEmbedding = await this.embeddingService.generateVector({
-        text: queryText,
-        taskType: 'RETRIEVAL_QUERY',
-      });
-      allCandidates.push(
-        ...(await this.retrieveForQuery({
+      const queryDiagnostics = this.beginQueryDiagnostics(
+        diagnostics,
+        input.plan.mode,
+        includeTranscript,
+        includeVisual,
+      );
+      let queryEmbedding: Awaited<
+        ReturnType<IEmbeddingService['generateVector']>
+      >;
+      try {
+        queryEmbedding = await this.embeddingService.generateVector({
+          text: queryText,
+          taskType: 'RETRIEVAL_QUERY',
+        });
+      } catch (error: unknown) {
+        this.recordFailure(diagnostics, 'EMBEDDING', error);
+        throw error;
+      }
+      const queryResults = await this.retrieveForQuery(
+        {
           userId: input.userId,
           conversationId: input.conversationId,
           mode: input.plan.mode,
@@ -132,32 +165,53 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
           includeTranscript,
           includeVisual,
           requiredEvidence: input.route.requiredEvidence,
-        })),
+          diagnostics,
+        },
+        queryDiagnostics,
       );
+      allCandidates.push(...queryResults);
     }
 
-    return this.dedupeByChunkId(allCandidates);
+    const retrieved = this.dedupeByChunkId(allCandidates);
+    if (diagnostics) {
+      diagnostics.queryCount = diagnostics.queries.length;
+      diagnostics.retrievedCount = retrieved.length;
+    }
+    return retrieved;
   }
 
   async rerank(input: {
     plan: RagRetrievalPlan;
     retrievedChunks: TranscriptMatch[];
+    diagnostics?: RagRetrievalExecutionDiagnostics;
   }): Promise<TranscriptMatch[]> {
+    if (input.diagnostics) {
+      input.diagnostics.retrievedCount = input.retrievedChunks.length;
+    }
     if (input.plan.mode === 'NONE' || input.retrievedChunks.length === 0) {
+      if (input.diagnostics) input.diagnostics.rerankedCount = 0;
       return [];
     }
 
-    return input.plan.shouldRerank
-      ? await this.rerankerService.rerank({
-          queryText: this.getQueries(input.plan).join('\n'),
-          candidates: input.retrievedChunks,
-          limit: input.plan.rerankLimit,
-        })
-      : input.retrievedChunks.slice(0, input.plan.rerankLimit);
+    try {
+      const reranked = input.plan.shouldRerank
+        ? await this.rerankerService.rerank({
+            queryText: this.getQueries(input.plan).join('\n'),
+            candidates: input.retrievedChunks,
+            limit: input.plan.rerankLimit,
+          })
+        : input.retrievedChunks.slice(0, input.plan.rerankLimit);
+      if (input.diagnostics) input.diagnostics.rerankedCount = reranked.length;
+      return reranked;
+    } catch (error: unknown) {
+      this.recordFailure(input.diagnostics, 'RERANK', error);
+      throw error;
+    }
   }
 
   private async retrieveForQuery(
     input: RetrievalExecutionInput,
+    queryDiagnostics?: RagRetrievalQueryDiagnostics,
   ): Promise<TranscriptMatch[]> {
     const hierarchyRequested = this.readBoolean(
       'RAG_HIERARCHICAL_RETRIEVAL_ENABLED',
@@ -171,24 +225,29 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
         this.readBoolean('RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED', true));
 
     if (hierarchicalEnabled) {
-      return await this.retrieveHierarchically(input);
+      return await this.retrieveHierarchically(input, queryDiagnostics);
     }
 
     const startedAt = Date.now();
-    const direct = await this.retrieveDirectly(input);
+    const direct = await this.retrieveDirectly(input, queryDiagnostics);
     const directMs = Date.now() - startedAt;
 
     if (shadowEnabled && input.includeTranscript) {
-      const shadowStartedAt = Date.now();
-      const hierarchical = await this.retrieveHierarchically(input);
-      const hierarchicalMs = Date.now() - shadowStartedAt;
-      await this.recordHierarchyShadowComparison({
-        input,
-        direct,
-        hierarchical,
-        directMs,
-        hierarchicalMs,
-      });
+      try {
+        const shadowStartedAt = Date.now();
+        const hierarchical = await this.retrieveHierarchically(input);
+        const hierarchicalMs = Date.now() - shadowStartedAt;
+        await this.recordHierarchyShadowComparison({
+          input,
+          direct,
+          hierarchical,
+          directMs,
+          hierarchicalMs,
+        });
+      } catch (error: unknown) {
+        this.recordFailure(input.diagnostics, 'SEMANTIC_SEARCH', error);
+        throw error;
+      }
     }
 
     return direct;
@@ -196,19 +255,36 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
 
   private async retrieveHierarchically(
     input: RetrievalExecutionInput,
+    queryDiagnostics?: RagRetrievalQueryDiagnostics,
   ): Promise<TranscriptMatch[]> {
-    const [transcriptCandidates, visualCandidates] = await Promise.all([
-      input.includeTranscript
-        ? this.retrieveTranscriptHierarchically(input)
-        : Promise.resolve([] as SemanticIndexSearchResult[]),
-      input.includeVisual
-        ? this.retrieveVisualScenes(input)
-        : Promise.resolve([] as SemanticIndexSearchResult[]),
-    ]);
-    return await this.hydrateAndExpand(
-      [...transcriptCandidates, ...visualCandidates],
-      input.accessibleReelIds,
-    );
+    let candidates: SemanticIndexSearchResult[];
+    try {
+      const [transcriptCandidates, visualCandidates] = await Promise.all([
+        input.includeTranscript
+          ? this.retrieveTranscriptHierarchically(input)
+          : Promise.resolve([] as SemanticIndexSearchResult[]),
+        input.includeVisual
+          ? this.retrieveVisualScenes(input)
+          : Promise.resolve([] as SemanticIndexSearchResult[]),
+      ]);
+      candidates = [...transcriptCandidates, ...visualCandidates];
+    } catch (error: unknown) {
+      this.recordFailure(input.diagnostics, 'SEMANTIC_SEARCH', error);
+      throw error;
+    }
+    if (queryDiagnostics)
+      queryDiagnostics.semanticCandidateCount = candidates.length;
+    try {
+      const hydrated = await this.hydrateAndExpand(
+        candidates,
+        input.accessibleReelIds,
+      );
+      this.recordHydrationCounts(queryDiagnostics, hydrated.length);
+      return hydrated;
+    } catch (error: unknown) {
+      this.recordFailure(input.diagnostics, 'HYDRATION', error);
+      throw error;
+    }
   }
 
   private async retrieveTranscriptHierarchically(
@@ -257,25 +333,42 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
 
   private async retrieveDirectly(
     input: RetrievalExecutionInput,
+    queryDiagnostics?: RagRetrievalQueryDiagnostics,
   ): Promise<TranscriptMatch[]> {
-    const search = this.buildSearchRequest(input);
-    const [chunks, visualScenes] = await Promise.all([
-      input.includeTranscript
-        ? this.semanticIndexService.searchChunks({
-            ...search,
-            filters: { reelIds: input.accessibleReelIds },
-            limit: input.limit,
-            candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
-          })
-        : Promise.resolve([] as SemanticIndexSearchResult[]),
-      input.includeVisual
-        ? this.retrieveVisualScenes(input)
-        : Promise.resolve([] as SemanticIndexSearchResult[]),
-    ]);
-    return await this.hydrateAndExpand(
-      [...chunks, ...visualScenes],
-      input.accessibleReelIds,
-    );
+    let candidates: SemanticIndexSearchResult[];
+    try {
+      const search = this.buildSearchRequest(input);
+      const [chunks, visualScenes] = await Promise.all([
+        input.includeTranscript
+          ? this.semanticIndexService.searchChunks({
+              ...search,
+              filters: { reelIds: input.accessibleReelIds },
+              limit: input.limit,
+              candidateLimit: Math.min(Math.max(input.limit * 8, 50), 200),
+            })
+          : Promise.resolve([] as SemanticIndexSearchResult[]),
+        input.includeVisual
+          ? this.retrieveVisualScenes(input)
+          : Promise.resolve([] as SemanticIndexSearchResult[]),
+      ]);
+      candidates = [...chunks, ...visualScenes];
+    } catch (error: unknown) {
+      this.recordFailure(input.diagnostics, 'SEMANTIC_SEARCH', error);
+      throw error;
+    }
+    if (queryDiagnostics)
+      queryDiagnostics.semanticCandidateCount = candidates.length;
+    try {
+      const hydrated = await this.hydrateAndExpand(
+        candidates,
+        input.accessibleReelIds,
+      );
+      this.recordHydrationCounts(queryDiagnostics, hydrated.length);
+      return hydrated;
+    } catch (error: unknown) {
+      this.recordFailure(input.diagnostics, 'HYDRATION', error);
+      throw error;
+    }
   }
 
   private async retrieveVisualScenes(
@@ -409,6 +502,71 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
     return fallback;
   }
 
+  private initializeAccessDiagnostics(
+    diagnostics: RagRetrievalExecutionDiagnostics | undefined,
+    accessibleReelIds: string[] | undefined,
+  ): void {
+    if (!diagnostics || !accessibleReelIds) return;
+    if (
+      diagnostics.accessibleReelCount > 0 ||
+      diagnostics.accessibleReelIds.length > 0
+    ) {
+      return;
+    }
+    diagnostics.accessibleReelCount = accessibleReelIds.length;
+    diagnostics.accessibleReelIds = accessibleReelIds.slice(0, 32);
+    diagnostics.accessibleReelIdsTruncated = accessibleReelIds.length > 32;
+  }
+
+  private beginQueryDiagnostics(
+    diagnostics: RagRetrievalExecutionDiagnostics | undefined,
+    mode: Exclude<RagRetrievalMode, 'NONE'>,
+    includeTranscript: boolean,
+    includeVisual: boolean,
+  ): RagRetrievalQueryDiagnostics | undefined {
+    if (!diagnostics) return undefined;
+    const query: RagRetrievalQueryDiagnostics = {
+      queryOrdinal: diagnostics.queries.length + 1,
+      mode,
+      includeTranscript,
+      includeVisual,
+      semanticCandidateCount: 0,
+      hydratedCandidateCount: 0,
+      returnedChunkCount: 0,
+    };
+    diagnostics.queries.push(query);
+    return query;
+  }
+
+  private recordHydrationCounts(
+    diagnostics: RagRetrievalQueryDiagnostics | undefined,
+    count: number,
+  ): void {
+    if (!diagnostics) return;
+    diagnostics.hydratedCandidateCount = count;
+    diagnostics.returnedChunkCount = count;
+  }
+
+  private recordFailure(
+    diagnostics: RagRetrievalExecutionDiagnostics | undefined,
+    failedStage: RagRetrievalFailureStage,
+    error: unknown,
+  ): void {
+    if (!diagnostics || diagnostics.failedStage) return;
+    diagnostics.failedStage = failedStage;
+    const record =
+      error && typeof error === 'object'
+        ? (error as Record<string, unknown>)
+        : {};
+    if (error instanceof Error) diagnostics.errorName = error.name;
+    if (typeof record.code === 'string') diagnostics.errorCode = record.code;
+    if (typeof record.providerCategory === 'string') {
+      diagnostics.providerCategory = record.providerCategory as NonNullable<
+        RagRetrievalExecutionDiagnostics['providerCategory']
+      >;
+    }
+  }
+
   private toTranscriptMatch(
     candidate: SemanticIndexSearchResult,
     document: SemanticReelDocument | null,
@@ -522,6 +680,7 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
         },
       };
     }
+    const semanticCalls: RagStructuredCallFailureDiagnostic[] = [];
     try {
       const raw =
         await this.structuredLlmService.generateObject<RawRetrievalPlan>({
@@ -537,6 +696,11 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
             this.config.get<string>('AI_RETRIEVAL_PLANNER_TIMEOUT_MS') ??
               '8000',
           ),
+          onDiagnostics: (diagnostics) => {
+            const safeDiagnostics = { ...diagnostics };
+            delete safeDiagnostics.requestId;
+            semanticCalls.push(safeDiagnostics);
+          },
         });
       return {
         ...this.normalize(raw, input.message),
@@ -545,6 +709,7 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
           model: this.config.getOrThrow<string>('AI_RETRIEVAL_PLANNER_MODEL'),
           providerStatus: 'SUCCESS',
           decisionSource: 'LLM',
+          semanticCalls,
         },
       };
     } catch (error: unknown) {
@@ -564,6 +729,7 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
           modelRole: 'RETRIEVAL_PLANNER',
           providerStatus: 'ERROR',
           decisionSource: 'FAIL_CLOSED',
+          semanticCalls,
         },
       };
     }

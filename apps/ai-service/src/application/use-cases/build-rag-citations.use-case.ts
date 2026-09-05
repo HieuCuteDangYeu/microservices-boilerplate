@@ -1,6 +1,7 @@
-import type {
-  CitationAttributionCandidate,
-  ICitationAttributionService,
+import {
+  CitationAttributionProviderError,
+  type CitationAttributionCandidate,
+  type ICitationAttributionService,
 } from '@ai/domain/interfaces/citation-attribution.service.interface';
 import type {
   RagChatWorkflowState,
@@ -108,11 +109,18 @@ export class BuildRagCitationsUseCase {
             modelRole: attribution.diagnostics?.modelRole,
             model: attribution.diagnostics?.model,
             providerStatus: 'SUCCESS',
+            ...(attribution.diagnostics?.semanticCalls
+              ? { semanticCalls: attribution.diagnostics.semanticCalls }
+              : {}),
           },
         },
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      const providerFailure =
+        error instanceof CitationAttributionProviderError ? error : undefined;
+      const semanticCalls = providerFailure?.semanticCalls ?? [];
+      const latestCall = semanticCalls.at(-1);
       this.logger.warn(
         `[CitationAttribution] provider failed; citation coverage is incomplete: ${message}`,
       );
@@ -131,6 +139,13 @@ export class BuildRagCitationsUseCase {
             deterministicSupportingEvidenceIds: [],
             modelRole: 'CITATION_ATTRIBUTION',
             providerStatus: 'ERROR',
+            ...(semanticCalls.length > 0 ? { semanticCalls } : {}),
+            ...(latestCall?.errorCode
+              ? { errorCode: latestCall.errorCode }
+              : {}),
+            ...(latestCall?.providerCategory
+              ? { providerCategory: latestCall.providerCategory }
+              : {}),
           },
         },
       };

@@ -5,7 +5,10 @@ import type {
 import type { AiChatMemoryContext } from '@common/ai/interfaces/chat-memory-context.interface';
 import type { ConversationMemoryContext } from '@common/ai/interfaces/conversation-memory.interface';
 import type { RelevantUserMemoriesContext } from '@common/ai/interfaces/user-memory.interface';
-import type { StructuredLlmCallDiagnostics } from './structured-llm.service.interface';
+import type {
+  StructuredLlmCallDiagnostics,
+  StructuredProviderFailureCategory,
+} from './structured-llm.service.interface';
 import type { ReelContextSearchResult } from '@common/content/interfaces/reel-context-search-result.interface';
 
 export type RagChatIntent =
@@ -127,7 +130,51 @@ export interface RagRetrievalPlan {
     model?: string;
     providerStatus: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
     decisionSource: 'LLM' | 'FAIL_CLOSED' | 'NOT_REQUIRED';
+    semanticCalls?: RagStructuredCallFailureDiagnostic[];
   };
+}
+
+export type RagRetrievalPlanActual = Pick<
+  RagRetrievalPlan,
+  | 'mode'
+  | 'query'
+  | 'rewrittenQuery'
+  | 'queries'
+  | 'searchLimit'
+  | 'rerankLimit'
+  | 'shouldRerank'
+  | 'reason'
+>;
+
+export type RagRetrievalFailureStage =
+  | 'ACCESS_RESOLUTION'
+  | 'EMBEDDING'
+  | 'SEMANTIC_SEARCH'
+  | 'HYDRATION'
+  | 'RERANK';
+
+export interface RagRetrievalQueryDiagnostics {
+  queryOrdinal: number;
+  mode: Exclude<RagRetrievalMode, 'NONE'>;
+  includeTranscript: boolean;
+  includeVisual: boolean;
+  semanticCandidateCount: number;
+  hydratedCandidateCount: number;
+  returnedChunkCount: number;
+}
+
+export interface RagRetrievalExecutionDiagnostics {
+  accessibleReelCount: number;
+  accessibleReelIds: string[];
+  accessibleReelIdsTruncated?: boolean;
+  queryCount: number;
+  queries: RagRetrievalQueryDiagnostics[];
+  retrievedCount: number;
+  rerankedCount: number;
+  failedStage?: RagRetrievalFailureStage;
+  errorName?: string;
+  errorCode?: string;
+  providerCategory?: StructuredProviderFailureCategory;
 }
 
 export interface RagMemorySelection {
@@ -226,12 +273,29 @@ export interface RagCitationDiagnostics {
   modelRole?: 'CITATION_ATTRIBUTION';
   model?: string;
   providerStatus?: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
+  semanticCalls?: RagStructuredCallFailureDiagnostic[];
+  errorCode?: string;
+  providerCategory?: StructuredProviderFailureCategory;
 }
 
 export interface RagCitationEvidenceMapping {
   citationIndex: number;
   selectedEvidenceId: string;
   evidenceId: string;
+}
+
+export interface RagCitationAttemptDiagnostics {
+  attempt: number;
+  decisionSource: RagCitationDiagnostics['decisionSource'];
+  coverage: number;
+  selectedEvidenceIds: string[];
+  selectedEvidenceMappings: RagCitationEvidenceMapping[];
+  deterministicSupportingEvidenceIds: string[];
+  providerStatus?: RagCitationDiagnostics['providerStatus'];
+  model?: string;
+  semanticCalls?: RagStructuredCallFailureDiagnostic[];
+  errorCode?: string;
+  providerCategory?: StructuredProviderFailureCategory;
 }
 
 export interface RagPersistedRouteDecision {
@@ -323,19 +387,14 @@ export interface RagChatWorkflowState {
   verification?: RagVerificationResult;
   citations?: RagCitation[];
   citationCoverage?: RagCitationCoverageResult;
+  citationDiagnostics?: RagCitationDiagnostics;
   groundedRevision?: {
     evidenceIds: string[];
     modelRole: 'ANSWER_REVISION';
   };
   draftHistory: RagDraftHistoryEntry[];
   draftRevision: number;
-  citationAttempts: Array<{
-    attempt: number;
-    decisionSource: RagCitationDiagnostics['decisionSource'];
-    coverage: number;
-    selectedEvidenceIds: string[];
-    deterministicSupportingEvidenceIds: string[];
-  }>;
+  citationAttempts: RagCitationAttemptDiagnostics[];
   nextDraftSource: RagDraftHistoryEntry['source'];
   finalFailureSource:
     | 'NONE'
@@ -350,6 +409,7 @@ export interface RagChatWorkflowState {
   retryCount: number;
   retrievalRetryCount: number;
   citationRetryCount: number;
+  retrievalExecution?: RagRetrievalExecutionDiagnostics;
 }
 
 export interface IRagChatWorkflow {
