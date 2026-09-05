@@ -5,6 +5,8 @@ import type {
 import type {
   RagChatRouteDecision,
   RagRequiredEvidence,
+  RagRetrievalExecutionDiagnostics,
+  RagRetrievalFailureStage,
   RagRetrievalMode,
   RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
@@ -47,17 +49,25 @@ export class RetrieveReelEvidenceUseCase {
     route: RagChatRouteDecision;
     plan: RagRetrievalPlan;
     accessibleReelIds?: string[];
+    diagnostics?: RagRetrievalExecutionDiagnostics;
   }): Promise<TranscriptMatch[]> {
     if (input.plan.mode === 'NONE' || !this.policy.enabled) {
       return await this.retrievalEngine.retrieve(input);
     }
 
-    const accessibleReelIds =
-      input.accessibleReelIds ??
-      (await this.contentService.resolveReelContextAccess({
-        userId: input.userId,
-        conversationId: input.conversationId,
-      }));
+    let accessibleReelIds: string[];
+    try {
+      accessibleReelIds =
+        input.accessibleReelIds ??
+        (await this.contentService.resolveReelContextAccess({
+          userId: input.userId,
+          conversationId: input.conversationId,
+        }));
+    } catch (error: unknown) {
+      this.recordFailure(input.diagnostics, 'ACCESS_RESOLUTION', error);
+      throw error;
+    }
+    this.initializeDiagnostics(input.diagnostics, accessibleReelIds);
     if (accessibleReelIds.length === 0) return [];
 
     try {
@@ -101,6 +111,7 @@ export class RetrieveReelEvidenceUseCase {
             call,
             input,
             accessibleReelIds,
+            diagnostics: input.diagnostics,
           });
           for (const item of result.items) {
             const existing = accumulated.get(item.chunkId);
@@ -122,6 +133,9 @@ export class RetrieveReelEvidenceUseCase {
       }
 
       if (accumulated.size > 0) {
+        if (input.diagnostics) {
+          input.diagnostics.retrievedCount = accumulated.size;
+        }
         return [...accumulated.values()];
       }
 
@@ -131,6 +145,7 @@ export class RetrieveReelEvidenceUseCase {
       return await this.retrievalEngine.retrieve({
         ...input,
         accessibleReelIds,
+        diagnostics: input.diagnostics,
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -140,6 +155,7 @@ export class RetrieveReelEvidenceUseCase {
       return await this.retrievalEngine.retrieve({
         ...input,
         accessibleReelIds,
+        diagnostics: input.diagnostics,
       });
     }
   }
@@ -153,6 +169,7 @@ export class RetrieveReelEvidenceUseCase {
       plan: RagRetrievalPlan;
     };
     accessibleReelIds: string[];
+    diagnostics?: RagRetrievalExecutionDiagnostics;
   }): Promise<RetrievalToolResult> {
     if (
       input.call.name !== 'search_reel_content' &&
@@ -212,6 +229,7 @@ export class RetrieveReelEvidenceUseCase {
       route,
       plan,
       accessibleReelIds: reelIds,
+      diagnostics: input.diagnostics,
     });
 
     return { items };
@@ -372,5 +390,41 @@ Rules:
     return Number.isFinite(parsed)
       ? Math.min(upper, Math.max(1, Math.floor(parsed)))
       : upper;
+  }
+
+  private initializeDiagnostics(
+    diagnostics: RagRetrievalExecutionDiagnostics | undefined,
+    accessibleReelIds: string[],
+  ): void {
+    if (!diagnostics) return;
+    if (
+      diagnostics.accessibleReelCount > 0 ||
+      diagnostics.accessibleReelIds.length > 0
+    ) {
+      return;
+    }
+    diagnostics.accessibleReelCount = accessibleReelIds.length;
+    diagnostics.accessibleReelIds = accessibleReelIds.slice(0, 32);
+    diagnostics.accessibleReelIdsTruncated = accessibleReelIds.length > 32;
+  }
+
+  private recordFailure(
+    diagnostics: RagRetrievalExecutionDiagnostics | undefined,
+    failedStage: RagRetrievalFailureStage,
+    error: unknown,
+  ): void {
+    if (!diagnostics || diagnostics.failedStage) return;
+    diagnostics.failedStage = failedStage;
+    diagnostics.errorName =
+      error instanceof Error ? error.name : 'UnknownError';
+    if (error && typeof error === 'object') {
+      const record = error as Record<string, unknown>;
+      if (typeof record.code === 'string') diagnostics.errorCode = record.code;
+      if (typeof record.providerCategory === 'string') {
+        diagnostics.providerCategory = record.providerCategory as NonNullable<
+          RagRetrievalExecutionDiagnostics['providerCategory']
+        >;
+      }
+    }
   }
 }

@@ -12,16 +12,22 @@ import { RewriteRetrievalQueryUseCase } from '@ai/application/use-cases/rewrite-
 import { SaveRagTraceUseCase } from '@ai/application/use-cases/save-rag-trace.use-case';
 import { StreamFinalAnswerUseCase } from '@ai/application/use-cases/stream-final-answer.use-case';
 import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.use-case';
-import type { IContentService } from '@ai/domain/interfaces/content-service.interface';
+import type {
+  IContentService,
+  TranscriptMatch,
+} from '@ai/domain/interfaces/content-service.interface';
 import type {
   IRagChatWorkflow,
   RagChatWorkflowInput,
   RagChatWorkflowResult,
   RagChatWorkflowState,
+  RagChatRouteDecision,
   RagRequiredEvidence,
   RagRouterSemanticInconsistencyDetails,
   RagRouterSemanticInconsistencyType,
   RagStructuredCallFailureDiagnostic,
+  RagRetrievalExecutionDiagnostics,
+  RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import { END, START, StateGraph, StateSchema } from '@langchain/langgraph';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -42,6 +48,7 @@ const RagChatStateSchema = new StateSchema({
 
   retrievedChunks: z.array(z.any()).default([]),
   rerankedChunks: z.array(z.any()).default([]),
+  retrievalExecution: z.any().optional(),
   retrievalReady: z.boolean().default(false),
 
   recommendedReels: z.array(z.any()).default([]),
@@ -76,7 +83,12 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
   private readonly logger = new Logger(LangGraphRagChatWorkflowAdapter.name);
   private readonly executionContexts = new WeakMap<
     Record<string, number>,
-    { failedNode?: string }
+    {
+      failedNode?: string;
+      route?: RagChatRouteDecision;
+      retrievalPlan?: RagRetrievalPlan;
+      retrievalExecution?: RagRetrievalExecutionDiagnostics;
+    }
   >();
 
   constructor(
@@ -102,7 +114,12 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
 
   async execute(input: RagChatWorkflowInput): Promise<RagChatWorkflowResult> {
     const nodeTimings: Record<string, number> = {};
-    const executionContext: { failedNode?: string } = {};
+    const executionContext: {
+      failedNode?: string;
+      route?: RagChatRouteDecision;
+      retrievalPlan?: RagRetrievalPlan;
+      retrievalExecution?: RagRetrievalExecutionDiagnostics;
+    } = {};
     this.executionContexts.set(nodeTimings, executionContext);
     const graph = this.buildGraph(nodeTimings);
     const startedAt = Date.now();
@@ -143,8 +160,14 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         suggestedQueries: result.suggestedQueries ?? [],
       };
     } catch (error: unknown) {
+      const retrievalExecution = executionContext.retrievalExecution;
+      const route = executionContext.route;
+      const retrievalPlan = executionContext.retrievalPlan;
       result = {
         ...result,
+        ...(route ? { route } : {}),
+        ...(retrievalPlan ? { retrievalPlan } : {}),
+        ...(retrievalExecution ? { retrievalExecution } : {}),
         finalFailureSource: this.failureSource(error),
         failureDiagnostics: this.buildFailureDiagnostics(
           error,
@@ -281,6 +304,8 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       this.logger.debug(
         `[RagGraph] route intent=${route.intent} retrieval=${route.needsRetrieval} recommendation=${route.recommendationAction.type}`,
       );
+      const executionContext = this.executionContexts.get(nodeTimings);
+      if (executionContext) executionContext.route = route;
 
       return { route };
     };
@@ -327,6 +352,8 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       this.logger.debug(
         `[RagGraph] retrieval plan mode=${retrievalPlan.mode} queries=${retrievalPlan.queries?.length ?? 0} searchLimit=${retrievalPlan.searchLimit} rerankLimit=${retrievalPlan.rerankLimit}`,
       );
+      const executionContext = this.executionContexts.get(nodeTimings);
+      if (executionContext) executionContext.retrievalPlan = retrievalPlan;
       return { retrievalPlan };
     };
   }
@@ -337,26 +364,41 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     ): Promise<Partial<RagChatWorkflowState>> => {
       if (!state.route || !state.retrievalPlan) return {};
 
-      const retrievedChunks = await this.timed(
-        'retrievalNode',
-        nodeTimings,
-        () =>
+      const retrievalExecution =
+        state.retrievalExecution ??
+        this.createRetrievalExecutionDiagnostics(state.accessibleReelIds);
+      let retrievedChunks: TranscriptMatch[];
+      try {
+        retrievedChunks = await this.timed('retrievalNode', nodeTimings, () =>
           this.retrieveReelEvidenceUseCase.execute({
             userId: state.userId,
             conversationId: state.conversationId,
             route: state.route!,
             plan: state.retrievalPlan!,
             accessibleReelIds: state.accessibleReelIds,
+            diagnostics: retrievalExecution,
           }),
-      );
+        );
+      } catch (error: unknown) {
+        const executionContext = this.executionContexts.get(nodeTimings);
+        if (executionContext) {
+          executionContext.retrievalExecution = retrievalExecution;
+        }
+        throw error;
+      }
 
       this.logger.log(
         `[RagGraph] retrieved=${retrievedChunks.length} retry=${state.retrievalRetryCount}`,
       );
+      const executionContext = this.executionContexts.get(nodeTimings);
+      if (executionContext) {
+        executionContext.retrievalExecution = retrievalExecution;
+      }
 
       return {
         retrievedChunks,
         rerankedChunks: [],
+        retrievalExecution,
       };
     };
   }
@@ -367,18 +409,35 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
     ): Promise<Partial<RagChatWorkflowState>> => {
       if (!state.retrievalPlan) return { rerankedChunks: [] };
 
-      const rerankedChunks = await this.timed(
-        'neuralRerankerNode',
-        nodeTimings,
-        () =>
-          this.rerankRetrievedEvidenceUseCase.execute({
-            plan: state.retrievalPlan!,
-            retrievedChunks: state.retrievedChunks,
-          }),
-      );
+      const retrievalExecution =
+        state.retrievalExecution ??
+        this.createRetrievalExecutionDiagnostics(state.accessibleReelIds);
+      let rerankedChunks: TranscriptMatch[];
+      try {
+        rerankedChunks = await this.timed(
+          'neuralRerankerNode',
+          nodeTimings,
+          () =>
+            this.rerankRetrievedEvidenceUseCase.execute({
+              plan: state.retrievalPlan!,
+              retrievedChunks: state.retrievedChunks,
+              diagnostics: retrievalExecution,
+            }),
+        );
+      } catch (error: unknown) {
+        const executionContext = this.executionContexts.get(nodeTimings);
+        if (executionContext) {
+          executionContext.retrievalExecution = retrievalExecution;
+        }
+        throw error;
+      }
 
       this.logger.log(`[RagGraph] reranked=${rerankedChunks.length}`);
-      return { rerankedChunks };
+      const executionContext = this.executionContexts.get(nodeTimings);
+      if (executionContext) {
+        executionContext.retrievalExecution = retrievalExecution;
+      }
+      return { rerankedChunks, retrievalExecution };
     };
   }
 
@@ -524,6 +583,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       nextDraftSource: 'VERIFIER_REVISION',
       citations: [],
       citationCoverage: undefined,
+      citationDiagnostics: undefined,
     });
   }
 
@@ -538,6 +598,7 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
       return {
         citations: assessment.citations,
         citationCoverage: assessment.coverage,
+        citationDiagnostics: assessment.coverage.diagnostics,
         citationAttempts: [
           ...state.citationAttempts,
           {
@@ -551,6 +612,13 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
             deterministicSupportingEvidenceIds:
               assessment.coverage.diagnostics
                 ?.deterministicSupportingEvidenceIds ?? [],
+            selectedEvidenceMappings:
+              assessment.coverage.diagnostics?.selectedEvidenceMappings ?? [],
+            providerStatus: assessment.coverage.diagnostics?.providerStatus,
+            model: assessment.coverage.diagnostics?.model,
+            semanticCalls: assessment.coverage.diagnostics?.semanticCalls ?? [],
+            errorCode: assessment.coverage.diagnostics?.errorCode,
+            providerCategory: assessment.coverage.diagnostics?.providerCategory,
           },
         ].slice(-this.integer('AI_RAG_MAX_CITATION_REVISIONS', 1, 0, 2) - 1),
       };
@@ -651,6 +719,20 @@ export class LangGraphRagChatWorkflowAdapter implements IRagChatWorkflow {
         },
         finalFailureSource: 'NO_CONTEXT',
       };
+    };
+  }
+
+  private createRetrievalExecutionDiagnostics(
+    accessibleReelIds?: string[],
+  ): RagRetrievalExecutionDiagnostics {
+    return {
+      accessibleReelCount: accessibleReelIds?.length ?? 0,
+      accessibleReelIds: accessibleReelIds?.slice(0, 32) ?? [],
+      accessibleReelIdsTruncated: (accessibleReelIds?.length ?? 0) > 32,
+      queryCount: 0,
+      queries: [],
+      retrievedCount: 0,
+      rerankedCount: 0,
     };
   }
 

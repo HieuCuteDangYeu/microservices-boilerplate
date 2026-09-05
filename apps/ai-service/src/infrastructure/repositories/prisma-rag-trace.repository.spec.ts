@@ -49,6 +49,7 @@ describe('PrismaRagTraceRepository', () => {
             model: '@cf/test/router',
             providerStatus: 'SUCCESS',
             decisionSource: 'LLM',
+            requestId: 'must-not-persist',
           },
           routeDecision: {
             intent: 'REEL_VIDEO_QUESTION',
@@ -90,6 +91,9 @@ describe('PrismaRagTraceRepository', () => {
     const data = create.mock.calls[0][0].data;
 
     expect(data.citations[0]).not.toHaveProperty('evidenceId');
+    expect(JSON.stringify(data.workflowMetrics)).not.toContain(
+      'must-not-persist',
+    );
     expect(data.workflowMetrics).toEqual(
       expect.objectContaining({
         citationEvidenceIds: ['reel:r1:chunk:0'],

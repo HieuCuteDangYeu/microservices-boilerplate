@@ -1,4 +1,17 @@
+import type { RagStructuredCallFailureDiagnostic } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+
 export type CitationEvidenceType = 'TRANSCRIPT' | 'VISUAL' | 'METADATA';
+
+export class CitationAttributionProviderError extends Error {
+  readonly code = 'CITATION_ATTRIBUTION_PROVIDER_ERROR';
+
+  constructor(
+    readonly semanticCalls: RagStructuredCallFailureDiagnostic[] = [],
+  ) {
+    super('Citation attribution provider failed');
+    this.name = 'CitationAttributionProviderError';
+  }
+}
 
 export interface CitationAttributionCandidate {
   evidenceId: string;
@@ -32,6 +45,7 @@ export interface CitationAttributionResult {
     modelRole: 'CITATION_ATTRIBUTION';
     model: string;
     providerStatus: 'SUCCESS';
+    semanticCalls?: RagStructuredCallFailureDiagnostic[];
   };
 }
 

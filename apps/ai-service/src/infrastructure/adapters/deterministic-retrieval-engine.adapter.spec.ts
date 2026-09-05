@@ -2,12 +2,16 @@ import type { IContentService } from '@ai/domain/interfaces/content-service.inte
 import type { IEmbeddingService } from '@ai/domain/interfaces/embedding.service.interface';
 import type {
   RagChatRouteDecision,
+  RagRetrievalExecutionDiagnostics,
   RagRetrievalPlan,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IRagHierarchyShadowObservationRepository } from '@ai/domain/interfaces/rag-hierarchy-shadow-observation.repository.interface';
 import type { IRerankerService } from '@ai/domain/interfaces/reranker.service.interface';
 import type { IReelSemanticIndexService } from '@ai/domain/interfaces/reel-semantic-index.service.interface';
-import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
+import type {
+  GenerateStructuredObjectInput,
+  IStructuredLlmService,
+} from '@ai/domain/interfaces/structured-llm.service.interface';
 import type {
   SemanticIndexSearchRequest,
   SemanticIndexSearchResult,
@@ -159,13 +163,17 @@ const buildAdapter = (configValues: Record<string, string>) => {
     {
       save: jest.fn().mockResolvedValue(undefined),
     };
+  const rerank = jest
+    .fn()
+    .mockResolvedValue([buildCandidate('reranked', 'reel-document-1')]);
+  const rerankerService: IRerankerService = { rerank };
 
   const adapter = new DeterministicRetrievalEngineAdapter(
     { generateObject } as IStructuredLlmService,
     embeddingService,
     contentService,
     semanticIndexService,
-    {} as IRerankerService,
+    rerankerService,
     hierarchyObservationRepository,
     new ConfigService(configValues),
     { maxCompletionTokens: jest.fn(() => 512) } as never,
@@ -177,8 +185,21 @@ const buildAdapter = (configValues: Record<string, string>) => {
     searchChunks,
     searchVisualScenes,
     generateObject,
+    rerankerService,
+    rerank,
+    semanticIndexService,
+    embeddingService,
   };
 };
+
+const emptyRetrievalDiagnostics = (): RagRetrievalExecutionDiagnostics => ({
+  accessibleReelCount: 0,
+  accessibleReelIds: [],
+  queryCount: 0,
+  queries: [],
+  retrievedCount: 0,
+  rerankedCount: 0,
+});
 
 describe('DeterministicRetrievalEngineAdapter', () => {
   it('uses an explicit bounded contract for semantic retrieval planning', async () => {
@@ -216,6 +237,280 @@ describe('DeterministicRetrievalEngineAdapter', () => {
         searchLimit: expect.objectContaining({ minimum: 1, maximum: 20 }),
         rerankLimit: expect.objectContaining({ minimum: 1, maximum: 10 }),
         reason: expect.objectContaining({ maxLength: 240 }),
+      }),
+    );
+  });
+
+  it('persists safe planner structured-call diagnostics on success', async () => {
+    const { adapter, generateObject } = buildAdapter({
+      AI_RETRIEVAL_PLANNER_MODEL: '@cf/openai/gpt-oss-20b',
+      AI_RETRIEVAL_PLANNER_TIMEOUT_MS: '8000',
+    });
+    generateObject.mockImplementationOnce(
+      (input: GenerateStructuredObjectInput) => {
+        input.onDiagnostics?.({
+          modelRole: 'RETRIEVAL_PLANNER',
+          model: '@cf/openai/gpt-oss-20b',
+          providerStatus: 200,
+          latencyMs: 12,
+          configuredTimeoutMs: 8000,
+          configuredMaxCompletionTokens: 512,
+          attempt: 1,
+          requestId: 'must-not-persist',
+        });
+        return Promise.resolve({
+          mode: 'REEL_HYBRID',
+          query: 'spoken project',
+          rewrittenQuery: 'spoken project',
+          queries: ['spoken project', 'project name'],
+          searchLimit: 8,
+          rerankLimit: 5,
+          shouldRerank: true,
+          reason: 'Focused transcript search.',
+        });
+      },
+    );
+
+    const result = await adapter.plan({
+      message: 'What project name is spoken?',
+      route: transcriptRoute,
+    });
+
+    expect(result.diagnostics).toEqual(
+      expect.objectContaining({
+        semanticCalls: [
+          expect.objectContaining({
+            modelRole: 'RETRIEVAL_PLANNER',
+            providerStatus: 200,
+          }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(result.diagnostics)).not.toContain(
+      'must-not-persist',
+    );
+  });
+
+  it('persists safe failed planner diagnostics on fail-closed planning', async () => {
+    const { adapter, generateObject } = buildAdapter({
+      AI_RETRIEVAL_PLANNER_MODEL: '@cf/openai/gpt-oss-20b',
+      AI_RETRIEVAL_PLANNER_TIMEOUT_MS: '8000',
+    });
+    generateObject.mockImplementationOnce(
+      (input: GenerateStructuredObjectInput) => {
+        input.onDiagnostics?.({
+          modelRole: 'RETRIEVAL_PLANNER',
+          model: '@cf/openai/gpt-oss-20b',
+          providerStatus: 429,
+          latencyMs: 20,
+          configuredTimeoutMs: 8000,
+          configuredMaxCompletionTokens: 512,
+          attempt: 1,
+          errorCode: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+          providerCode: 3036,
+          providerCategory: 'ACCOUNT_LIMITED',
+          requestId: 'must-not-persist',
+        });
+        return Promise.reject(new Error('provider failure'));
+      },
+    );
+
+    const result = await adapter.plan({
+      message: 'What project name is spoken?',
+      route: transcriptRoute,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        mode: 'NONE',
+        diagnostics: expect.objectContaining({
+          providerStatus: 'ERROR',
+          decisionSource: 'FAIL_CLOSED',
+          semanticCalls: [
+            expect.objectContaining({
+              errorCode: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+              providerCategory: 'ACCOUNT_LIMITED',
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(JSON.stringify(result.diagnostics)).not.toContain(
+      'must-not-persist',
+    );
+  });
+
+  it('distinguishes empty access from semantic search zero results', async () => {
+    const emptyAccess = emptyRetrievalDiagnostics();
+    const { adapter } = buildAdapter({
+      NODE_ENV: 'test',
+      RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED: 'false',
+    });
+    await expect(
+      adapter.retrieve({
+        userId: 'user-1',
+        conversationId: 'conversation-1',
+        route: transcriptRoute,
+        plan,
+        accessibleReelIds: [],
+        diagnostics: emptyAccess,
+      }),
+    ).resolves.toEqual([]);
+    expect(emptyAccess).toEqual(
+      expect.objectContaining({
+        accessibleReelCount: 0,
+        queryCount: 0,
+        retrievedCount: 0,
+      }),
+    );
+
+    const noSearchResults = buildAdapter({
+      NODE_ENV: 'test',
+      RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED: 'false',
+    });
+    noSearchResults.searchChunks.mockResolvedValue([]);
+    const diagnostics = emptyRetrievalDiagnostics();
+    await expect(
+      noSearchResults.adapter.retrieve({
+        userId: 'user-1',
+        conversationId: 'conversation-1',
+        route: transcriptRoute,
+        plan,
+        accessibleReelIds: ['reel-1'],
+        diagnostics,
+      }),
+    ).resolves.toEqual([]);
+    expect(diagnostics).toEqual(
+      expect.objectContaining({
+        accessibleReelCount: 1,
+        queryCount: 1,
+        queries: [
+          expect.objectContaining({
+            semanticCandidateCount: 0,
+            hydratedCandidateCount: 0,
+            returnedChunkCount: 0,
+          }),
+        ],
+        retrievedCount: 0,
+      }),
+    );
+  });
+
+  it('preserves successful stage counts and identifies rerank loss', async () => {
+    const built = buildAdapter({
+      NODE_ENV: 'test',
+      RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED: 'false',
+    });
+    const diagnostics = emptyRetrievalDiagnostics();
+    const retrieved = await built.adapter.retrieve({
+      userId: 'user-1',
+      conversationId: 'conversation-1',
+      route: transcriptRoute,
+      plan,
+      accessibleReelIds: ['reel-1'],
+      diagnostics,
+    });
+    expect(retrieved.length).toBeGreaterThan(0);
+    expect(diagnostics.queries[0]).toEqual(
+      expect.objectContaining({
+        semanticCandidateCount: 1,
+        hydratedCandidateCount: 1,
+        returnedChunkCount: 1,
+      }),
+    );
+    expect(diagnostics.retrievedCount).toBe(1);
+
+    built.rerank.mockResolvedValueOnce([]);
+    await expect(
+      built.adapter.rerank({
+        plan: { ...plan, shouldRerank: true },
+        retrievedChunks: retrieved,
+        diagnostics,
+      }),
+    ).resolves.toEqual([]);
+    expect(diagnostics).toEqual(
+      expect.objectContaining({ retrievedCount: 1, rerankedCount: 0 }),
+    );
+
+    const rerankFailure = Object.assign(new Error('rerank failed'), {
+      code: 'RERANK_PROVIDER_ERROR',
+      providerCategory: 'TRANSIENT_PROVIDER_FAILURE',
+    });
+    built.rerank.mockRejectedValueOnce(rerankFailure);
+    const rerankDiagnostics = emptyRetrievalDiagnostics();
+    await expect(
+      built.adapter.rerank({
+        plan: { ...plan, shouldRerank: true },
+        retrievedChunks: retrieved,
+        diagnostics: rerankDiagnostics,
+      }),
+    ).rejects.toBe(rerankFailure);
+    expect(rerankDiagnostics).toEqual(
+      expect.objectContaining({
+        failedStage: 'RERANK',
+        errorCode: 'RERANK_PROVIDER_ERROR',
+        providerCategory: 'TRANSIENT_PROVIDER_FAILURE',
+      }),
+    );
+  });
+
+  it('records hydration failures after semantic candidates exist', async () => {
+    const built = buildAdapter({
+      NODE_ENV: 'test',
+      RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED: 'false',
+    });
+    built.semanticIndexService.getReelDocument = jest
+      .fn()
+      .mockRejectedValue(new Error('hydration failed'));
+    const diagnostics = emptyRetrievalDiagnostics();
+
+    await expect(
+      built.adapter.retrieve({
+        userId: 'user-1',
+        conversationId: 'conversation-1',
+        route: transcriptRoute,
+        plan,
+        accessibleReelIds: ['reel-1'],
+        diagnostics,
+      }),
+    ).rejects.toThrow('hydration failed');
+    expect(diagnostics).toEqual(
+      expect.objectContaining({
+        failedStage: 'HYDRATION',
+        queries: [expect.objectContaining({ semanticCandidateCount: 1 })],
+      }),
+    );
+  });
+
+  it('records embedding failures without changing the thrown runtime error', async () => {
+    const built = buildAdapter({
+      NODE_ENV: 'test',
+      RAG_HIERARCHICAL_RETRIEVAL_SHADOW_ENABLED: 'false',
+    });
+    const failure = Object.assign(new Error('embedding failed'), {
+      code: 'EMBEDDING_PROVIDER_ERROR',
+      providerCategory: 'TRANSIENT_PROVIDER_FAILURE',
+    });
+    built.embeddingService.generateVector = jest
+      .fn()
+      .mockRejectedValue(failure);
+    const diagnostics = emptyRetrievalDiagnostics();
+
+    await expect(
+      built.adapter.retrieve({
+        userId: 'user-1',
+        conversationId: 'conversation-1',
+        route: transcriptRoute,
+        plan,
+        accessibleReelIds: ['reel-1'],
+        diagnostics,
+      }),
+    ).rejects.toBe(failure);
+    expect(diagnostics).toEqual(
+      expect.objectContaining({
+        failedStage: 'EMBEDDING',
+        errorCode: 'EMBEDDING_PROVIDER_ERROR',
+        providerCategory: 'TRANSIENT_PROVIDER_FAILURE',
       }),
     );
   });

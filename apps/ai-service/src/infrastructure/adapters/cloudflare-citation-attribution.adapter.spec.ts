@@ -1,4 +1,7 @@
-import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
+import type {
+  GenerateStructuredObjectInput,
+  IStructuredLlmService,
+} from '@ai/domain/interfaces/structured-llm.service.interface';
 import type { ConfigService } from '@nestjs/config';
 import { CloudflareCitationAttributionAdapter } from './cloudflare-citation-attribution.adapter';
 
@@ -138,5 +141,60 @@ describe('CloudflareCitationAttributionAdapter', () => {
         providerStatus: 'SUCCESS',
       },
     });
+  });
+
+  it('preserves safe structured-call diagnostics when attribution fails', async () => {
+    const structuredLlmService: IStructuredLlmService = {
+      generateObject: jest
+        .fn()
+        .mockImplementation((input: GenerateStructuredObjectInput) => {
+          input.onDiagnostics?.({
+            modelRole: 'CITATION_ATTRIBUTION',
+            model: '@cf/test/citation',
+            providerStatus: 429,
+            latencyMs: 4_000,
+            configuredTimeoutMs: 4_000,
+            configuredMaxCompletionTokens: 768,
+            attempt: 1,
+            errorCode: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+            providerCategory: 'OUT_OF_CAPACITY',
+            requestId: 'must-not-persist',
+          });
+          return Promise.reject(new Error('provider failed'));
+        }),
+    };
+    const adapter = new CloudflareCitationAttributionAdapter(
+      structuredLlmService,
+      createConfig(),
+      aiConfig as never,
+    );
+
+    const error = await adapter
+      .attribute({
+        question: 'What is visible?',
+        answer: 'A red diagram is visible.',
+        maxCitations: 3,
+        candidates: [
+          {
+            evidenceId: 'e0',
+            reelId: 'r1',
+            evidenceType: 'VISUAL',
+            evidenceText: 'A red diagram is visible.',
+          },
+        ],
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: 'CITATION_ATTRIBUTION_PROVIDER_ERROR',
+      semanticCalls: [
+        expect.objectContaining({
+          providerStatus: 429,
+          providerCategory: 'OUT_OF_CAPACITY',
+        }),
+      ],
+    });
+    expect(JSON.stringify(error)).not.toContain('must-not-persist');
+    expect(structuredLlmService.generateObject).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,10 +1,12 @@
-import type {
-  CitationAttributionCandidate,
-  CitationAttributionResult,
-  CitationAttributionSelection,
-  CitationClaimAssessment,
-  ICitationAttributionService,
+import {
+  CitationAttributionProviderError,
+  type CitationAttributionCandidate,
+  type CitationAttributionResult,
+  type CitationAttributionSelection,
+  type CitationClaimAssessment,
+  type ICitationAttributionService,
 } from '@ai/domain/interfaces/citation-attribution.service.interface';
+import type { RagStructuredCallFailureDiagnostic } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IStructuredLlmService } from '@ai/domain/interfaces/structured-llm.service.interface';
 import type { IAiApplicationConfig } from '@ai/domain/interfaces/ai-application-config.interface';
 import { Inject, Injectable } from '@nestjs/common';
@@ -55,44 +57,60 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
     const timeoutMs = this.config.timeoutMs('CITATION_ATTRIBUTION');
     const candidates = input.candidates.slice(0, maxCandidates);
 
-    const result =
-      await this.structuredLlmService.generateObject<RawCitationAttributionResult>(
-        {
-          model,
-          systemPrompt: this.systemPrompt(),
-          userPrompt: this.userPrompt({ ...input, candidates }),
-          jsonSchema: {
-            type: 'object',
-            properties: {
-              claims: {
-                type: 'array',
-                maxItems: 12,
-                items: {
-                  type: 'object',
-                  properties: {
-                    claim: { type: 'string', maxLength: 500 },
-                    supported: { type: 'boolean' },
-                    evidenceIds: {
-                      type: 'array',
-                      items: { type: 'string', maxLength: 64 },
-                      maxItems: 3,
+    const semanticCalls: RagStructuredCallFailureDiagnostic[] = [];
+    let result: RawCitationAttributionResult;
+    try {
+      result =
+        await this.structuredLlmService.generateObject<RawCitationAttributionResult>(
+          {
+            model,
+            systemPrompt: this.systemPrompt(),
+            userPrompt: this.userPrompt({ ...input, candidates }),
+            jsonSchema: {
+              type: 'object',
+              properties: {
+                claims: {
+                  type: 'array',
+                  maxItems: 12,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      claim: { type: 'string', maxLength: 500 },
+                      supported: { type: 'boolean' },
+                      evidenceIds: {
+                        type: 'array',
+                        items: { type: 'string', maxLength: 64 },
+                        maxItems: 3,
+                      },
+                      confidence: { type: 'number', minimum: 0, maximum: 1 },
                     },
-                    confidence: { type: 'number', minimum: 0, maximum: 1 },
+                    required: [
+                      'claim',
+                      'supported',
+                      'evidenceIds',
+                      'confidence',
+                    ],
+                    additionalProperties: false,
                   },
-                  required: ['claim', 'supported', 'evidenceIds', 'confidence'],
-                  additionalProperties: false,
                 },
               },
+              required: ['claims'],
+              additionalProperties: false,
             },
-            required: ['claims'],
-            additionalProperties: false,
+            maxTokens: this.config.maxCompletionTokens('CITATION_ATTRIBUTION'),
+            modelRole: 'CITATION_ATTRIBUTION',
+            temperature: 0,
+            timeoutMs,
+            onDiagnostics: (diagnostics) => {
+              const safeDiagnostics = { ...diagnostics };
+              delete safeDiagnostics.requestId;
+              semanticCalls.push(safeDiagnostics);
+            },
           },
-          maxTokens: this.config.maxCompletionTokens('CITATION_ATTRIBUTION'),
-          modelRole: 'CITATION_ATTRIBUTION',
-          temperature: 0,
-          timeoutMs,
-        },
-      );
+        );
+    } catch {
+      throw new CitationAttributionProviderError(semanticCalls);
+    }
 
     const allowedIds = new Set(
       candidates.map((candidate) => candidate.evidenceId),
@@ -161,6 +179,7 @@ export class CloudflareCitationAttributionAdapter implements ICitationAttributio
         modelRole: 'CITATION_ATTRIBUTION',
         model,
         providerStatus: 'SUCCESS',
+        ...(semanticCalls.length > 0 ? { semanticCalls } : {}),
       },
     };
   }

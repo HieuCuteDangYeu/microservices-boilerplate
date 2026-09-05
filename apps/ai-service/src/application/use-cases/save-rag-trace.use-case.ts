@@ -1,4 +1,7 @@
-import type { RagChatWorkflowState } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+import type {
+  RagChatWorkflowState,
+  RagRetrievalPlan,
+} from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type { IRagTraceRepository } from '@ai/domain/interfaces/rag-trace.repository.interface';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
@@ -75,6 +78,10 @@ export class SaveRagTraceUseCase {
                     input.state.route.recommendationAction?.type,
                 }
               : undefined,
+            retrievalPlanActual: input.state.retrievalPlan
+              ? this.toPersistedRetrievalPlan(input.state.retrievalPlan)
+              : undefined,
+            retrievalExecution: input.state.retrievalExecution,
             route: input.state.route?.diagnostics,
             retrievalPlan: input.state.retrievalPlan?.diagnostics,
             retrievalCounts: {
@@ -116,6 +123,9 @@ export class SaveRagTraceUseCase {
                   contradictions: input.state.verification.contradictions ?? [],
                 }
               : undefined,
+            citationDiagnostics:
+              input.state.citationDiagnostics ??
+              input.state.citationCoverage?.diagnostics,
             citationAttempts: input.state.citationAttempts,
             finalFailureSource: input.state.finalFailureSource,
             failure: input.state.failureDiagnostics,
@@ -126,5 +136,18 @@ export class SaveRagTraceUseCase {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(`[RagTrace] save failed: ${message}`);
     }
+  }
+
+  private toPersistedRetrievalPlan(plan: RagRetrievalPlan) {
+    return {
+      mode: plan.mode,
+      query: plan.query.slice(0, 500),
+      rewrittenQuery: plan.rewrittenQuery?.slice(0, 500),
+      queries: plan.queries?.slice(0, 3).map((query) => query.slice(0, 500)),
+      searchLimit: plan.searchLimit,
+      rerankLimit: plan.rerankLimit,
+      shouldRerank: plan.shouldRerank,
+      reason: plan.reason.slice(0, 240),
+    };
   }
 }
