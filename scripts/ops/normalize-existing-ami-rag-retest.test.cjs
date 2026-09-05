@@ -7,6 +7,101 @@ const {
   normalizeCase,
 } = require('./normalize-existing-ami-rag-retest.cjs');
 
+test('normalizes actual persisted route and citation provenance without fixture substitution', () => {
+  const value = normalizeCase(
+    {
+      caseId: 'C-ROUTE',
+      question: 'Question?',
+      referenceAnswerText: 'Expected answer.',
+      reelId: 'r1',
+      expectedEvidenceType: 'TRANSCRIPT',
+    },
+    {
+      status: 'EVALUATED',
+      finalAnswer: 'Actual answer.',
+      latencyMs: 42,
+      citations: [
+        {
+          sourceType: 'REEL',
+          reelId: 'r1',
+          evidenceType: 'TRANSCRIPT',
+        },
+      ],
+    },
+    {
+      traceId: 'trace-1',
+      intent: 'NORMAL_CHAT',
+      retrievedContexts: [
+        {
+          evidenceId: 'reel:r1:chunk:0',
+          reelId: 'r1',
+          evidenceType: 'TRANSCRIPT',
+        },
+      ],
+      rerankedContexts: [
+        {
+          evidenceId: 'reel:r1:chunk:0',
+          reelId: 'r1',
+          evidenceType: 'TRANSCRIPT',
+        },
+      ],
+      workflowMetrics: {
+        citationEvidenceIds: ['reel:r1:chunk:0'],
+        citationEvidenceMappings: [
+          {
+            citationIndex: 0,
+            selectedEvidenceId: 'e0',
+            evidenceId: 'reel:r1:chunk:0',
+          },
+        ],
+        diagnostics: {
+          route: { modelRole: 'ROUTER', providerStatus: 'SUCCESS' },
+          routeDecision: {
+            intent: 'REEL_VIDEO_QUESTION',
+            referenceTarget: 'SHARED_REEL',
+            reelQuestionType: 'TRANSCRIPT_CONTENT',
+            requiredEvidence: ['TRANSCRIPT'],
+            needsRetrieval: true,
+            needsVerification: true,
+            recommendationActionType: 'NONE',
+          },
+        },
+      },
+    },
+    'run-route',
+  );
+  assert.deepEqual(value.actual.route, {
+    intent: 'REEL_VIDEO_QUESTION',
+    referenceTarget: 'SHARED_REEL',
+    reelQuestionType: 'TRANSCRIPT_CONTENT',
+    requiredEvidence: ['TRANSCRIPT'],
+    needsRetrieval: true,
+    needsVerification: true,
+    recommendationActionType: 'NONE',
+  });
+  assert.equal(value.actual.citations[0].evidenceId, 'reel:r1:chunk:0');
+  assert.equal(value.trace.ragTraceId, 'trace-1');
+});
+
+test('missing persisted route fields remain missing instead of using expected fixture values', () => {
+  const value = normalizeCase(
+    {
+      caseId: 'C-MISSING',
+      question: 'Question?',
+      referenceAnswerText: 'Expected answer.',
+      reelId: 'r1',
+      expectedEvidenceType: 'TRANSCRIPT',
+    },
+    { status: 'EVALUATED', finalAnswer: 'Actual answer.', citations: [] },
+    { intent: 'REEL_VIDEO_QUESTION', workflowMetrics: { diagnostics: {} } },
+    'run-missing',
+  );
+  assert.equal(value.actual.route.intent, 'REEL_VIDEO_QUESTION');
+  assert.equal(value.actual.route.referenceTarget, null);
+  assert.equal(value.actual.route.reelQuestionType, null);
+  assert.deepEqual(value.actual.route.requiredEvidence, []);
+});
+
 test('normalizes a completed runner case without scoring it', () => {
   const value = normalizeCase(
     {

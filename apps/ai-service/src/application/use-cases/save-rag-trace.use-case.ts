@@ -44,12 +44,37 @@ export class SaveRagTraceUseCase {
           retrievalRetryCount: input.state.retrievalRetryCount,
           answerRetryCount: input.state.retryCount,
           citationRetryCount: input.state.citationRetryCount,
+          citationEvidenceIds:
+            input.state.citationCoverage?.diagnostics?.selectedEvidenceMappings?.map(
+              (mapping) => mapping.evidenceId,
+            ) ?? [],
+          citationSelectedEvidenceIds:
+            input.state.citationCoverage?.diagnostics?.selectedEvidenceIds ??
+            [],
+          deterministicSupportingEvidenceIds:
+            input.state.citationCoverage?.diagnostics
+              ?.deterministicSupportingEvidenceIds ?? [],
+          citationEvidenceMappings:
+            input.state.citationCoverage?.diagnostics
+              ?.selectedEvidenceMappings ?? [],
           citationCoverageMode: input.state.citationCoverage?.mode,
           citationCoverage: input.state.citationCoverage?.coverage,
           factualClaimCount: input.state.citationCoverage?.factualClaimCount,
           supportedClaimCount:
             input.state.citationCoverage?.supportedClaimCount,
           diagnostics: {
+            routeDecision: input.state.route
+              ? {
+                  intent: input.state.route.intent,
+                  referenceTarget: input.state.route.referenceTarget,
+                  reelQuestionType: input.state.route.reelQuestionType,
+                  requiredEvidence: input.state.route.requiredEvidence,
+                  needsRetrieval: input.state.route.needsRetrieval,
+                  needsVerification: input.state.route.needsVerification,
+                  recommendationActionType:
+                    input.state.route.recommendationAction?.type,
+                }
+              : undefined,
             route: input.state.route?.diagnostics,
             retrievalPlan: input.state.retrievalPlan?.diagnostics,
             retrievalCounts: {

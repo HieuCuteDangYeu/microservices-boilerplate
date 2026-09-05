@@ -221,9 +221,27 @@ export interface RagCitationDiagnostics {
   decisionSource: 'NOT_REQUIRED' | 'LLM' | 'DETERMINISTIC' | 'FALLBACK';
   selectedEvidenceIds: string[];
   deterministicSupportingEvidenceIds: string[];
+  /** Explicit mapping from prompt-local attribution IDs to canonical index IDs. */
+  selectedEvidenceMappings?: RagCitationEvidenceMapping[];
   modelRole?: 'CITATION_ATTRIBUTION';
   model?: string;
   providerStatus?: 'SUCCESS' | 'ERROR' | 'NOT_CALLED';
+}
+
+export interface RagCitationEvidenceMapping {
+  citationIndex: number;
+  selectedEvidenceId: string;
+  evidenceId: string;
+}
+
+export interface RagPersistedRouteDecision {
+  intent: RagChatIntent;
+  referenceTarget: RagReferenceTarget;
+  reelQuestionType: RagReelQuestionType;
+  requiredEvidence: RagRequiredEvidence[];
+  needsRetrieval: boolean;
+  needsVerification: boolean;
+  recommendationActionType?: RagRecommendationAction['type'];
 }
 
 export interface RagDraftHistoryEntry {

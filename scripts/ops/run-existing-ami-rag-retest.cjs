@@ -563,14 +563,10 @@ async function main() {
     const reportPath = path.join(REPORT_DIR, `${report.runId}.json`);
     fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
     console.log(
-      JSON.stringify(
-        {
-          reportPath,
-          conversationIds: resultCases.map((item) => item.conversationId),
-        },
-        null,
-        2,
-      ),
+      JSON.stringify({
+        reportPath,
+        conversationIds: resultCases.map((item) => item.conversationId),
+      }),
     );
   } finally {
     releaseLock();
