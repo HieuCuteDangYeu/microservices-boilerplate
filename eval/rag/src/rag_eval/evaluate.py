@@ -85,6 +85,38 @@ def frozen_answer_correct(answer: str | None, reference: str | None) -> float | 
     return float(sum(word in actual for word in words) >= math.ceil(len(words) * 2 / 3))
 
 
+def authorized_scope(
+    row: EvaluationRow, execution: NormalizedExecutionResult
+) -> tuple[list[str], list[str]]:
+    configured_reels = row.accessScope.get("authorizedReelIds")
+    configured_evidence = row.accessScope.get("authorizedEvidenceIds")
+    diagnostics = execution.trace.get("diagnostics") or {}
+    retrieval_execution = diagnostics.get("retrievalExecution") or {}
+    observed_reels = retrieval_execution.get("accessibleReelIds")
+    observed_reels_truncated = retrieval_execution.get("accessibleReelIdsTruncated") is True
+
+    if isinstance(observed_reels, list) and observed_reels and not observed_reels_truncated:
+        reels = [item for item in observed_reels if isinstance(item, str)]
+        evidence = (
+            [item for item in configured_evidence if isinstance(item, str)]
+            if isinstance(configured_evidence, list)
+            else []
+        )
+        return reels, evidence
+
+    reels = (
+        [item for item in configured_reels if isinstance(item, str)]
+        if isinstance(configured_reels, list)
+        else row.expectedReelIds
+    )
+    evidence = (
+        [item for item in configured_evidence if isinstance(item, str)]
+        if isinstance(configured_evidence, list)
+        else row.relevantEvidenceIds
+    )
+    return reels, evidence
+
+
 def evaluate_case(
     row: EvaluationRow,
     execution: NormalizedExecutionResult,
@@ -98,8 +130,7 @@ def evaluate_case(
     citations = actual.get("citations") or []
     retrieved_ids = [item.get("evidenceId") for item in reranked if item.get("evidenceId")]
     types = [item.get("evidenceType") for item in retrieved if item.get("evidenceType")]
-    authorized_reels = row.accessScope.get("authorizedReelIds", row.expectedReelIds)
-    authorized_evidence = row.accessScope.get("authorizedEvidenceIds", row.relevantEvidenceIds)
+    authorized_reels, authorized_evidence = authorized_scope(row, execution)
     answer_correct = frozen_answer_correct(actual.get("answer"), row.referenceAnswer)
     access_violations = access_control_violations(
         retrieved, citations, authorized_reels, authorized_evidence

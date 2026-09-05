@@ -64,6 +64,67 @@ def test_load_runner_report_accepts_jsonl_trace_rows(tmp_path):
     assert result["C-1"].trace["ragTraceId"] == "trace-1"
 
 
+def test_load_runner_report_normalizes_canonical_chunk_ids_for_citations(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"runId":"run-canonical","cases":[{"caseId":"C-1","status":"EVALUATED",'
+        '"finalAnswer":"Actual","citations":[{"reelId":"r1","evidenceType":"TRANSCRIPT"}]}]}'
+    )
+    traces = tmp_path / "traces.jsonl"
+    traces.write_text(
+        '{"caseId":"C-1","traceId":"trace-1","retrievedChunkIds":["reel:r1:chunk:0"],'
+        '"rerankedChunkIds":["reel:r1:chunk:0"],"workflowMetrics":{'
+        '"citationEvidenceMappings":[{"citationIndex":0,"evidenceId":"reel:r1:chunk:0"}]}}\n'
+    )
+    from rag_eval.schemas import EvaluationRow
+
+    row = EvaluationRow(
+        id="C-1",
+        datasetVersion="test",
+        question="Question?",
+        referenceAnswer="Actual",
+        expectedReelIds=["r1"],
+        relevantEvidenceIds=["reel:r1:chunk:0"],
+        category="test",
+        fixtureGroup="test",
+    )
+
+    result = runner_output.load_runner_report(report, {row.id: row}, traces)["C-1"]
+
+    assert result.actual["rerankedContexts"][0]["reelId"] == "r1"
+    assert result.actual["citations"][0]["evidenceId"] == "reel:r1:chunk:0"
+
+
+def test_load_runner_report_collects_nested_structured_call_diagnostics(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"runId":"run-calls","cases":[{"caseId":"C-1","status":"EVALUATED",'
+        '"finalAnswer":"Actual","citations":[]}]}'
+    )
+    traces = tmp_path / "traces.jsonl"
+    traces.write_text(
+        '{"caseId":"C-1","workflowMetrics":{"diagnostics":{"route":{'
+        '"modelRole":"ROUTER","model":"@cf/test/router","providerStatus":200,'
+        '"latencyMs":12,"usage":{"inputTokens":10,"outputTokens":4,"totalTokens":14},'
+        '"attempt":1}}}}\n'
+    )
+    from rag_eval.schemas import EvaluationRow
+
+    row = EvaluationRow(
+        id="C-1",
+        datasetVersion="test",
+        question="Question?",
+        referenceAnswer="Actual",
+        category="test",
+        fixtureGroup="test",
+    )
+
+    result = runner_output.load_runner_report(report, {row.id: row}, traces)["C-1"]
+
+    assert result.modelCalls[0].modelRole == "ROUTER"
+    assert result.modelCalls[0].totalTokens == 14
+
+
 def test_invoke_typescript_runner_parses_report_path(monkeypatch):
     def fake_run(*_args, **_kwargs):
         return SimpleNamespace(stdout='progress\n{"reportPath": "/tmp/report.json"}\n')

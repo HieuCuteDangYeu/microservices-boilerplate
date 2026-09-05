@@ -1,8 +1,10 @@
 import json
+from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
-from rag_eval.cli import validate_definitions_report
+from rag_eval.cli import _build_live_runner_args, validate_definitions_report
 from rag_eval.dataset import is_supported_live_dataset, load_dataset
 
 
@@ -51,3 +53,42 @@ def test_definitions_reel_mismatch_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="reel mismatch"):
         validate_definitions_report(str(path), {row.id: row for row in dataset})
+
+
+def _runner_args(**overrides):
+    values = {
+        "run_id": None,
+        "resume": None,
+        "env_file": ".env.test.local",
+    }
+    values.update(overrides)
+    return Namespace(**values)
+
+
+def test_live_new_run_propagates_run_id_without_resume():
+    run_id, args = _build_live_runner_args(
+        _runner_args(run_id="test-run"), Path("/tmp/definitions.json")
+    )
+
+    assert run_id == "test-run"
+    assert "--run-id" in args
+    assert args[args.index("--run-id") + 1] == "test-run"
+    assert "--resume" not in args
+
+
+def test_live_resume_propagates_resume_without_run_id():
+    run_id, args = _build_live_runner_args(
+        _runner_args(resume="test-run"), Path("/tmp/definitions.json")
+    )
+
+    assert run_id == "test-run"
+    assert "--resume" in args
+    assert args[args.index("--resume") + 1] == "test-run"
+    assert "--run-id" not in args
+
+
+def test_live_rejects_ambiguous_run_id_and_resume():
+    with pytest.raises(SystemExit, match="either --run-id or --resume"):
+        _build_live_runner_args(
+            _runner_args(run_id="run-a", resume="run-b"), Path("/tmp/definitions.json")
+        )
