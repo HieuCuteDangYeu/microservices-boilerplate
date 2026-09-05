@@ -41,9 +41,10 @@ function collectModelCalls(value, output = []) {
 
 function normalizeContext(item, rank) {
   if (typeof item === 'string') {
+    const parts = item.split(':');
     return {
       evidenceId: item,
-      reelId: item.includes(':') ? item.split(':')[0] : null,
+      reelId: parts[0] === 'reel' ? parts[1] || null : parts[0] || null,
       evidenceType: 'UNKNOWN',
       rank,
     };
@@ -57,11 +58,161 @@ function normalizeContext(item, rank) {
   };
 }
 
+function objectValue(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function routeDecisionFromTrace(trace) {
+  const metrics = objectValue(trace?.workflowMetrics);
+  const diagnostics = objectValue(metrics.diagnostics);
+  const routeCandidates = [
+    trace?.routeDecision,
+    metrics.routeDecision,
+    diagnostics.routeDecision,
+  ].map(objectValue);
+  const persisted = routeCandidates.find((candidate) =>
+    [
+      'intent',
+      'referenceTarget',
+      'reelQuestionType',
+      'requiredEvidence',
+      'needsRetrieval',
+      'needsVerification',
+      'recommendationActionType',
+    ].some((key) => Object.hasOwn(candidate, key)),
+  );
+  let legacy = objectValue(trace?.route);
+  if (
+    ![
+      'intent',
+      'referenceTarget',
+      'reelQuestionType',
+      'requiredEvidence',
+      'needsRetrieval',
+      'needsVerification',
+      'recommendationActionType',
+    ].some((key) => Object.hasOwn(legacy, key))
+  ) {
+    legacy = Object.fromEntries(
+      [
+        'intent',
+        'referenceTarget',
+        'reelQuestionType',
+        'requiredEvidence',
+        'needsRetrieval',
+        'needsVerification',
+        'recommendationActionType',
+      ]
+        .filter((key) => Object.hasOwn(trace || {}, key))
+        .map((key) => [key, trace[key]]),
+    );
+  }
+  const route = persisted || legacy;
+  const requiredEvidence = Array.isArray(route.requiredEvidence)
+    ? route.requiredEvidence
+    : [];
+
+  return {
+    intent: route.intent ?? trace?.intent ?? null,
+    referenceTarget: route.referenceTarget ?? null,
+    reelQuestionType: route.reelQuestionType ?? null,
+    requiredEvidence,
+    needsRetrieval: route.needsRetrieval ?? trace?.needsRetrieval ?? null,
+    needsVerification: route.needsVerification ?? null,
+    recommendationActionType: route.recommendationActionType ?? null,
+  };
+}
+
+function citationProvenanceFromTrace(trace) {
+  const metrics = objectValue(trace?.workflowMetrics);
+  const diagnostics = objectValue(metrics.diagnostics);
+  const mappings = Array.isArray(metrics.citationEvidenceMappings)
+    ? metrics.citationEvidenceMappings
+    : Array.isArray(diagnostics.citationEvidenceMappings)
+      ? diagnostics.citationEvidenceMappings
+      : [];
+  const evidenceIds = Array.isArray(metrics.citationEvidenceIds)
+    ? metrics.citationEvidenceIds
+    : Array.isArray(diagnostics.citationEvidenceIds)
+      ? diagnostics.citationEvidenceIds
+      : [];
+  return {
+    mappings: mappings.filter((item) => item && typeof item === 'object'),
+    evidenceIds: evidenceIds.filter((item) => typeof item === 'string'),
+  };
+}
+
+function normalizeCitationProvenance(citations, trace, rerankedContexts) {
+  if (!Array.isArray(citations) || citations.length === 0) return [];
+  const contextById = new Map(
+    rerankedContexts
+      .map((item) => [item.evidenceId, item])
+      .filter(([evidenceId]) => evidenceId),
+  );
+  const provenance = citationProvenanceFromTrace(trace);
+  const byIndex = new Map();
+
+  for (const mapping of provenance.mappings) {
+    const index = mapping.citationIndex;
+    const evidenceId = mapping.evidenceId;
+    if (
+      Number.isInteger(index) &&
+      index >= 0 &&
+      typeof evidenceId === 'string' &&
+      !byIndex.has(index) &&
+      contextById.has(evidenceId)
+    ) {
+      byIndex.set(index, evidenceId);
+    }
+  }
+  if (
+    byIndex.size < citations.length &&
+    provenance.evidenceIds.length === citations.length
+  ) {
+    provenance.evidenceIds.forEach((evidenceId, index) => {
+      if (contextById.has(evidenceId) && !byIndex.has(index)) {
+        byIndex.set(index, evidenceId);
+      }
+    });
+  }
+
+  return citations.map((citation, index) => {
+    const evidenceId = byIndex.get(index);
+    const context = evidenceId ? contextById.get(evidenceId) : undefined;
+    if (
+      !context ||
+      (citation.reelId &&
+        context.reelId &&
+        citation.reelId !== context.reelId) ||
+      (citation.evidenceType &&
+        context.evidenceType &&
+        citation.evidenceType !== context.evidenceType)
+    ) {
+      return { ...citation };
+    }
+    return { ...citation, evidenceId };
+  });
+}
+
 function normalizeCase(definition, execution, trace, runId) {
   const diagnostics = trace?.workflowMetrics?.diagnostics || {};
   const retrieved = trace?.retrievedContexts || trace?.retrievedChunkIds || [];
-  const reranked = trace?.rerankedContexts || retrieved;
-  const citations = execution?.citations || trace?.citations || [];
+  const reranked =
+    trace?.rerankedContexts || trace?.rerankedChunkIds || retrieved;
+  const normalizedRetrieved = retrieved.map((item, index) =>
+    normalizeContext(item, index + 1),
+  );
+  const normalizedReranked = reranked.map((item, index) =>
+    normalizeContext(item, index + 1),
+  );
+  const citations = normalizeCitationProvenance(
+    execution?.citations || trace?.citations || [],
+    trace,
+    normalizedReranked,
+  );
+  const route = routeDecisionFromTrace(trace);
   const status = execution?.status;
   return {
     schemaVersion: 'rag-eval-result-v1',
@@ -86,20 +237,14 @@ function normalizeCase(definition, execution, trace, runId) {
     actual: {
       answer: execution?.finalAnswer ?? trace?.answer ?? null,
       route: {
-        intent: trace?.intent ?? null,
-        referenceTarget: trace?.referenceTarget ?? null,
-        reelQuestionType: trace?.reelQuestionType ?? null,
-        requiredEvidence: trace?.requiredEvidence || [],
+        ...route,
       },
-      retrievedContexts: retrieved.map((item, index) =>
-        normalizeContext(item, index + 1),
-      ),
-      rerankedContexts: reranked.map((item, index) =>
-        normalizeContext(item, index + 1),
-      ),
+      retrievedContexts: normalizedRetrieved,
+      rerankedContexts: normalizedReranked,
       citations,
     },
     trace: {
+      ragTraceId: trace?.traceId || null,
       retryCount: diagnostics.retryCount || 0,
       citationRetryCount: diagnostics.citationRetryCount || 0,
       revisionDepth: diagnostics.revisionDepth || 0,

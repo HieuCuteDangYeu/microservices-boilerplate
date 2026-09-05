@@ -95,8 +95,19 @@ describe('BuildRagCitationsUseCase', () => {
         coverage: 1,
         factualClaimCount: 1,
         supportedClaimCount: 1,
+        diagnostics: expect.objectContaining({
+          selectedEvidenceIds: ['e0'],
+          selectedEvidenceMappings: [
+            {
+              citationIndex: 0,
+              selectedEvidenceId: 'e0',
+              evidenceId: 'reel:r1:visual:0',
+            },
+          ],
+        }),
       }),
     );
+    expect(assessment.citations[0]).not.toHaveProperty('evidenceId');
   });
 
   it('reports unsupported claims instead of inventing citations', async () => {

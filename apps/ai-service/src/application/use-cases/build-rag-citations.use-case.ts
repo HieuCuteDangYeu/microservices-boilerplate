@@ -4,6 +4,7 @@ import type {
 } from '@ai/domain/interfaces/citation-attribution.service.interface';
 import type {
   RagChatWorkflowState,
+  RagCitationEvidenceMapping,
   RagCitation,
   RagCitationCoverageResult,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
@@ -12,6 +13,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 interface GroundedCitationCandidate {
   attribution: CitationAttributionCandidate;
   citation: RagCitation;
+  sourceEvidenceId: string;
 }
 
 export interface RagCitationAssessment {
@@ -64,6 +66,7 @@ export class BuildRagCitationsUseCase {
       );
       const citations: RagCitation[] = [];
       const selectedEvidenceIds: string[] = [];
+      const selectedEvidenceMappings: RagCitationEvidenceMapping[] = [];
       const seen = new Set<string>();
 
       for (const selection of attribution.selections) {
@@ -71,8 +74,14 @@ export class BuildRagCitationsUseCase {
         if (!candidate || seen.has(selection.evidenceId)) continue;
 
         seen.add(selection.evidenceId);
+        const citationIndex = citations.length;
         citations.push(candidate.citation);
         selectedEvidenceIds.push(selection.evidenceId);
+        selectedEvidenceMappings.push({
+          citationIndex,
+          selectedEvidenceId: selection.evidenceId,
+          evidenceId: candidate.sourceEvidenceId,
+        });
 
         if (citations.length >= this.maxCitations) break;
       }
@@ -95,6 +104,7 @@ export class BuildRagCitationsUseCase {
             decisionSource: 'LLM',
             selectedEvidenceIds,
             deterministicSupportingEvidenceIds: [],
+            selectedEvidenceMappings,
             modelRole: attribution.diagnostics?.modelRole,
             model: attribution.diagnostics?.model,
             providerStatus: 'SUCCESS',
@@ -187,6 +197,7 @@ export class BuildRagCitationsUseCase {
           endTime,
           quote: this.exactQuote(evidence, 240),
         },
+        sourceEvidenceId: chunk.chunkId,
       });
 
       if (candidates.length >= 12) break;

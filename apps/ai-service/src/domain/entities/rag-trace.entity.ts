@@ -1,5 +1,7 @@
 import type {
   RagCitation,
+  RagCitationEvidenceMapping,
+  RagPersistedRouteDecision,
   RagWorkflowFailureDiagnostics,
 } from '@ai/domain/interfaces/rag-chat-workflow.interface';
 
@@ -7,11 +9,18 @@ export interface RagWorkflowTraceMetrics {
   retrievalRetryCount: number;
   answerRetryCount: number;
   citationRetryCount: number;
+  /** Canonical index IDs selected for the final public citations. */
+  citationEvidenceIds?: string[];
+  /** Prompt-local IDs used by the citation attribution call. */
+  citationSelectedEvidenceIds?: string[];
+  deterministicSupportingEvidenceIds?: string[];
+  citationEvidenceMappings?: RagCitationEvidenceMapping[];
   citationCoverageMode?: 'LLM' | 'DETERMINISTIC' | 'FALLBACK' | 'NOT_REQUIRED';
   citationCoverage?: number;
   factualClaimCount?: number;
   supportedClaimCount?: number;
   diagnostics?: {
+    routeDecision?: RagPersistedRouteDecision;
     contextSufficiency?: unknown;
     route?: unknown;
     retrievalPlan?: unknown;

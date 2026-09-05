@@ -2,7 +2,10 @@ import {
   RagTrace,
   type RagWorkflowTraceMetrics,
 } from '@ai/domain/entities/rag-trace.entity';
-import type { RagCitation } from '@ai/domain/interfaces/rag-chat-workflow.interface';
+import type {
+  RagCitation,
+  RagCitationEvidenceMapping,
+} from '@ai/domain/interfaces/rag-chat-workflow.interface';
 import type {
   IRagTraceRepository,
   RagTraceCreateInput,
@@ -107,6 +110,16 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
     return Object.fromEntries(entries);
   }
 
+  private toJsonCitationEvidenceMappings(
+    value: RagCitationEvidenceMapping[],
+  ): Prisma.InputJsonValue {
+    return value.map((mapping) => ({
+      citationIndex: mapping.citationIndex,
+      selectedEvidenceId: mapping.selectedEvidenceId,
+      evidenceId: mapping.evidenceId,
+    }));
+  }
+
   private toJsonWorkflowMetrics(
     value: RagWorkflowTraceMetrics,
   ): Prisma.InputJsonValue {
@@ -114,6 +127,18 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
       retrievalRetryCount: value.retrievalRetryCount,
       answerRetryCount: value.answerRetryCount,
       citationRetryCount: value.citationRetryCount,
+      citationEvidenceIds: this.toJsonStringArray(
+        value.citationEvidenceIds ?? [],
+      ),
+      citationSelectedEvidenceIds: this.toJsonStringArray(
+        value.citationSelectedEvidenceIds ?? [],
+      ),
+      deterministicSupportingEvidenceIds: this.toJsonStringArray(
+        value.deterministicSupportingEvidenceIds ?? [],
+      ),
+      citationEvidenceMappings: this.toJsonCitationEvidenceMappings(
+        value.citationEvidenceMappings ?? [],
+      ),
       citationCoverageMode: value.citationCoverageMode ?? null,
       citationCoverage: value.citationCoverage ?? null,
       factualClaimCount: value.factualClaimCount ?? null,
@@ -127,7 +152,9 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 
-  private fromJsonStringArray(value: Prisma.JsonValue | null): string[] {
+  private fromJsonStringArray(
+    value: Prisma.JsonValue | null | undefined,
+  ): string[] {
     if (!Array.isArray(value)) {
       return [];
     }
@@ -207,6 +234,18 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
         this.readJsonNumber(value, 'retrievalRetryCount') ?? 0,
       answerRetryCount: this.readJsonNumber(value, 'answerRetryCount') ?? 0,
       citationRetryCount: this.readJsonNumber(value, 'citationRetryCount') ?? 0,
+      citationEvidenceIds: this.fromJsonStringArray(
+        value['citationEvidenceIds'],
+      ),
+      citationSelectedEvidenceIds: this.fromJsonStringArray(
+        value['citationSelectedEvidenceIds'],
+      ),
+      deterministicSupportingEvidenceIds: this.fromJsonStringArray(
+        value['deterministicSupportingEvidenceIds'],
+      ),
+      citationEvidenceMappings: this.fromJsonCitationEvidenceMappings(
+        value['citationEvidenceMappings'],
+      ),
       citationCoverageMode:
         coverageMode === 'LLM' ||
         coverageMode === 'FALLBACK' ||
@@ -218,6 +257,32 @@ export class PrismaRagTraceRepository implements IRagTraceRepository {
       supportedClaimCount: this.readJsonNumber(value, 'supportedClaimCount'),
       diagnostics: this.readJsonObject(value, 'diagnostics'),
     };
+  }
+
+  private fromJsonCitationEvidenceMappings(
+    value: Prisma.JsonValue | null | undefined,
+  ): RagCitationEvidenceMapping[] {
+    if (!Array.isArray(value)) return [];
+
+    return value.flatMap((item) => {
+      if (!this.isJsonObject(item)) return [];
+      const citationIndex = this.readJsonNumber(item, 'citationIndex');
+      const selectedEvidenceId = this.readJsonString(
+        item,
+        'selectedEvidenceId',
+      );
+      const evidenceId = this.readJsonString(item, 'evidenceId');
+      if (
+        citationIndex === undefined ||
+        !Number.isInteger(citationIndex) ||
+        citationIndex < 0 ||
+        !selectedEvidenceId ||
+        !evidenceId
+      ) {
+        return [];
+      }
+      return [{ citationIndex, selectedEvidenceId, evidenceId }];
+    });
   }
 
   private isJsonObject(

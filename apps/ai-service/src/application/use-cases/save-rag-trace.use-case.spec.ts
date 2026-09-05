@@ -45,7 +45,18 @@ describe('SaveRagTraceUseCase', () => {
       },
       route: {
         intent: 'REEL_VIDEO_QUESTION',
+        referenceTarget: 'SHARED_REEL',
         needsRetrieval: true,
+        needsUserMemory: false,
+        needsConversationSummary: false,
+        needsVerification: true,
+        reelQuestionType: 'TRANSCRIPT_CONTENT',
+        requiredEvidence: ['TRANSCRIPT'],
+        recommendationAction: {
+          type: 'NONE',
+          reason: 'No recommendation needed.',
+        },
+        reason: 'The question asks about shared reel transcript content.',
         diagnostics: {
           modelRole: 'ROUTER',
           model: '@cf/test/router',
@@ -75,6 +86,25 @@ describe('SaveRagTraceUseCase', () => {
           decisionSource: 'LLM',
           modelRole: 'CONTEXT_SUFFICIENCY',
           model: '@cf/test/sufficiency',
+        },
+      },
+      citationCoverage: {
+        mode: 'LLM',
+        coverage: 1,
+        factualClaimCount: 1,
+        supportedClaimCount: 1,
+        unsupportedClaims: [],
+        diagnostics: {
+          decisionSource: 'LLM',
+          selectedEvidenceIds: ['e0'],
+          deterministicSupportingEvidenceIds: [],
+          selectedEvidenceMappings: [
+            {
+              citationIndex: 0,
+              selectedEvidenceId: 'e0',
+              evidenceId: 'reel:r1:chunk:0',
+            },
+          ],
         },
       },
       verification: {
@@ -110,11 +140,30 @@ describe('SaveRagTraceUseCase', () => {
           retrievalRetryCount: 2,
           answerRetryCount: 1,
           citationRetryCount: 1,
+          citationEvidenceIds: ['reel:r1:chunk:0'],
+          citationSelectedEvidenceIds: ['e0'],
+          deterministicSupportingEvidenceIds: [],
+          citationEvidenceMappings: [
+            {
+              citationIndex: 0,
+              selectedEvidenceId: 'e0',
+              evidenceId: 'reel:r1:chunk:0',
+            },
+          ],
           diagnostics: expect.objectContaining({
             draftHistory: state.draftHistory,
             finalFailureSource: 'NO_CONTEXT',
             failure: state.failureDiagnostics,
             citationAttempts: state.citationAttempts,
+            routeDecision: {
+              intent: 'REEL_VIDEO_QUESTION',
+              referenceTarget: 'SHARED_REEL',
+              reelQuestionType: 'TRANSCRIPT_CONTENT',
+              requiredEvidence: ['TRANSCRIPT'],
+              needsRetrieval: true,
+              needsVerification: true,
+              recommendationActionType: 'NONE',
+            },
             route: state.route?.diagnostics,
             retrievalPlan: state.retrievalPlan?.diagnostics,
             retrievalCounts: { retrieved: 0, reranked: 0 },
