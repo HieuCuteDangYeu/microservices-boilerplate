@@ -99,14 +99,6 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
   }): Promise<TranscriptMatch[]> {
     const diagnostics = input.diagnostics;
     this.initializeAccessDiagnostics(diagnostics, input.accessibleReelIds);
-    if (input.plan.mode === 'NONE') {
-      if (diagnostics) {
-        diagnostics.queryCount = diagnostics.queries.length;
-        diagnostics.retrievedCount = 0;
-      }
-      return [];
-    }
-
     const queries = this.getQueries(input.plan);
     const includeVisual = input.route.requiredEvidence.includes('VISUAL');
     const includeTranscript =
@@ -127,6 +119,13 @@ export class DeterministicRetrievalEngineAdapter implements IRetrievalEngine {
       throw error;
     }
     this.initializeAccessDiagnostics(diagnostics, accessibleReelIds);
+    if (input.plan.mode === 'NONE') {
+      if (diagnostics) {
+        diagnostics.queryCount = diagnostics.queries.length;
+        diagnostics.retrievedCount = 0;
+      }
+      return [];
+    }
     if (accessibleReelIds.length === 0) {
       if (diagnostics) diagnostics.queryCount = 0;
       return [];
