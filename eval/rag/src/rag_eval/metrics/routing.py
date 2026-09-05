@@ -13,4 +13,7 @@ def modality_accuracy(actual_types: list[str], expected_types: list[str]) -> flo
     expected = set(expected_types) - {"NONE"}
     if not expected:
         return None
-    return float(expected.issubset(set(actual_types)))
+    actual = set(actual_types) - {"UNKNOWN", "NONE"}
+    if not actual:
+        return None
+    return float(expected.issubset(actual))

@@ -85,6 +85,65 @@ def _object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _collect_model_calls(
+    value: Any, output: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    calls = output if output is not None else []
+    if not isinstance(value, (dict, list)):
+        return calls
+    if isinstance(value, dict):
+        model = value.get("model")
+        role = value.get("modelRole") or value.get("role")
+        usage = value.get("usage") if isinstance(value.get("usage"), dict) else {}
+        provider_status = value.get("providerStatus")
+        call_shaped_status = isinstance(provider_status, int) or provider_status in {
+            "NETWORK_ERROR",
+            "TIMEOUT",
+        }
+        if isinstance(model, str) and role and (
+            call_shaped_status
+            or usage
+            or "configuredTimeoutMs" in value
+            or "finishReason" in value
+            or "attempt" in value
+        ):
+            calls.append(
+                {
+                    "modelRole": role,
+                    "model": model,
+                    "inputTokens": value.get("inputTokens", usage.get("inputTokens")),
+                    "outputTokens": value.get("outputTokens", usage.get("outputTokens")),
+                    "totalTokens": value.get("totalTokens", usage.get("totalTokens")),
+                    "usageSource": value.get("usageSource", "PROVIDER" if usage else "UNAVAILABLE"),
+                    "latencyMs": value.get("latencyMs"),
+                    "finishReason": value.get("finishReason"),
+                    "attempt": value.get("attempt", 1),
+                    "providerStatus": provider_status,
+                    "providerCategory": value.get("providerCategory"),
+                    "scope": value.get("scope", "QUERY"),
+                }
+            )
+            return calls
+        children = value.values()
+    else:
+        children = value
+    for child in children:
+        _collect_model_calls(child, calls)
+    return calls
+
+
+def _normalize_context(item: Any, rank: int) -> dict[str, Any]:
+    if isinstance(item, str):
+        parts = item.split(":")
+        return {
+            "evidenceId": item,
+            "reelId": parts[1] if parts[0] == "reel" and len(parts) > 1 else parts[0],
+            "evidenceType": "UNKNOWN",
+            "rank": rank,
+        }
+    return item if isinstance(item, dict) else {"evidenceId": item, "rank": rank}
+
+
 def _route_from_trace(trace: dict[str, Any]) -> dict[str, Any]:
     metrics = _object(trace.get("workflowMetrics"))
     diagnostics = _object(metrics.get("diagnostics"))
@@ -228,12 +287,10 @@ def normalize_runner_case(
     retrieved = trace.get("retrievedContexts") or trace.get("retrievedChunkIds") or []
     reranked = trace.get("rerankedContexts") or trace.get("rerankedChunkIds") or retrieved
     retrieved_contexts = [
-        item if isinstance(item, dict) else {"evidenceId": item}
-        for item in retrieved
+        _normalize_context(item, index + 1) for index, item in enumerate(retrieved)
     ]
     reranked_contexts = [
-        item if isinstance(item, dict) else {"evidenceId": item}
-        for item in reranked
+        _normalize_context(item, index + 1) for index, item in enumerate(reranked)
     ]
     citations = case.get("citations") or trace.get("citations") or []
     citations = _evaluation_citations(citations, trace, reranked_contexts)
@@ -260,7 +317,7 @@ def normalize_runner_case(
             **(_object(trace.get("workflowMetrics")) or trace),
             **({"ragTraceId": trace["traceId"]} if trace.get("traceId") else {}),
         },
-        modelCalls=trace.get("modelCalls", []),
+        modelCalls=trace.get("modelCalls") or _collect_model_calls(trace),
         latencyMs=case.get("latencyMs", trace.get("latencyMs")),
     )
 

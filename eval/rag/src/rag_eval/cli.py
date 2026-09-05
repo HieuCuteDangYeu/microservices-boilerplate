@@ -59,6 +59,7 @@ def _variant(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "variantName": args.variant,
         "gitSha": git_sha,
+        "evaluatorSha": git_sha,
         "productionSha": args.production_sha,
         "datasetVersion": args.dataset,
         "pricingVersion": load_pricing()["version"],
@@ -76,6 +77,22 @@ def _variant(args: argparse.Namespace) -> dict[str, Any]:
 def _repo_path(value: str) -> Path:
     path = Path(value)
     return path if path.is_absolute() else ROOT.parents[1] / path
+
+
+def _build_live_runner_args(
+    args: argparse.Namespace, definitions_path: Path
+) -> tuple[str, list[str]]:
+    if args.run_id and args.resume:
+        raise SystemExit("LIVE accepts either --run-id or --resume, not both")
+    if args.resume:
+        run_id = args.resume
+        runner_args = ["--definitions-report", str(definitions_path), "--resume", run_id]
+    else:
+        run_id = args.run_id or f"ragas-live-{int(time.time())}"
+        runner_args = ["--definitions-report", str(definitions_path), "--run-id", run_id]
+    if args.env_file:
+        runner_args += ["--env-file", str(_repo_path(args.env_file))]
+    return run_id, runner_args
 
 
 def _definition_reel_ids(definition: dict[str, Any]) -> list[str]:
@@ -159,10 +176,7 @@ async def run_live(args: argparse.Namespace) -> Path:
     snapshot = load_runtime_snapshot(
         snapshot_path, args.production_sha, args.dataset
     )
-    run_id = args.run_id or f"ragas-live-{int(time.time())}"
-    runner_args = ["--definitions-report", str(definitions_path), "--run-id", run_id]
-    if args.env_file:
-        runner_args += ["--env-file", str(_repo_path(args.env_file))]
+    run_id, runner_args = _build_live_runner_args(args, definitions_path)
     report_path = invoke_typescript_runner(runner_args)
     executions = load_runner_report(
         report_path, rows, _repo_path(args.trace_file) if args.trace_file else None
@@ -308,6 +322,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("offline", parents=[common])
     live = commands.add_parser("live", parents=[common])
     live.add_argument("--confirm-live", action="store_true")
+    live.add_argument("--resume")
     live.add_argument("--definitions-report")
     live.add_argument("--env-file")
     live.add_argument("--trace-file")
