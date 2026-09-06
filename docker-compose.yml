@@ -292,6 +292,51 @@ services:
     networks:
       - microservices-net
 
+  rag-eval:
+    image: ${DOCKERHUB_USERNAME:-local}/rag-eval:latest
+    build:
+      context: .
+      dockerfile: ./eval/rag/Dockerfile
+      args:
+        EVALUATOR_SHA: ${EVALUATOR_SHA:-unknown}
+        PRODUCTION_SHA: ${PRODUCTION_SHA:-unknown}
+    profiles:
+      - eval
+    restart: 'no'
+    env_file:
+      - ${RAG_EVAL_ENV_FILE:-./eval/rag/eval.env.example}
+    environment:
+      # Provider credentials are read from the server-side deployment env at
+      # run time; they are never copied into the image or committed.
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      CLOUDFLARE_AI_GATEWAY_ID: ${CLOUDFLARE_AI_GATEWAY_ID:-}
+      AI_ROUTER_MODEL: ${AI_ROUTER_MODEL:-}
+      AI_ROUTER_TIMEOUT_MS: ${AI_ROUTER_TIMEOUT_MS:-}
+      AI_ROUTER_MAX_TOKENS: ${AI_ROUTER_MAX_TOKENS:-}
+      AI_RETRIEVAL_PLANNER_MODEL: ${AI_RETRIEVAL_PLANNER_MODEL:-}
+      AI_RETRIEVAL_PLANNER_TIMEOUT_MS: ${AI_RETRIEVAL_PLANNER_TIMEOUT_MS:-}
+      AI_RETRIEVAL_PLANNER_MAX_TOKENS: ${AI_RETRIEVAL_PLANNER_MAX_TOKENS:-}
+      AI_VERIFIER_MODEL: ${AI_VERIFIER_MODEL:-}
+      AI_VERIFIER_TIMEOUT_MS: ${AI_VERIFIER_TIMEOUT_MS:-}
+      AI_VERIFIER_MAX_TOKENS: ${AI_VERIFIER_MAX_TOKENS:-}
+      AI_CITATION_ATTRIBUTION_MODEL: ${AI_CITATION_ATTRIBUTION_MODEL:-}
+      AI_CITATION_TIMEOUT_MS: ${AI_CITATION_TIMEOUT_MS:-}
+      AI_CITATION_MAX_TOKENS: ${AI_CITATION_MAX_TOKENS:-}
+      CLOUDFLARE_AI_GATEWAY_ENABLED: ${CLOUDFLARE_AI_GATEWAY_ENABLED:-}
+      CLOUDFLARE_AI_GATEWAY_MAX_ATTEMPTS: ${CLOUDFLARE_AI_GATEWAY_MAX_ATTEMPTS:-}
+      CLOUDFLARE_AI_GATEWAY_RETRY_DELAY_MS: ${CLOUDFLARE_AI_GATEWAY_RETRY_DELAY_MS:-}
+      CLOUDFLARE_AI_GATEWAY_BACKOFF: ${CLOUDFLARE_AI_GATEWAY_BACKOFF:-}
+      CLOUDFLARE_STRUCTURED_REASONING_EFFORT: ${CLOUDFLARE_STRUCTURED_REASONING_EFFORT:-}
+      CLOUDFLARE_ROUTER_OUTPUT_CONTRACT: ${CLOUDFLARE_ROUTER_OUTPUT_CONTRACT:-}
+      CLOUDFLARE_STRUCTURED_MAX_TOKENS_PARAMETER: ${CLOUDFLARE_STRUCTURED_MAX_TOKENS_PARAMETER:-}
+    volumes:
+      - ${RAG_EVAL_RESULTS_DIR:-./eval/rag/results}:/workspace/eval/rag/results
+      - ${RAG_EVAL_EXPERIMENTS_DIR:-./eval/rag/experiments}:/workspace/eval/rag/experiments
+      - ${RAG_EVAL_AMI_REPORT_DIR:-./test-data/reel-integration/ami/reports}:/workspace/test-data/reel-integration/ami/reports
+    networks:
+      - microservices-net
+
   rabbitmq:
     image: rabbitmq:3.13-management
     restart: unless-stopped

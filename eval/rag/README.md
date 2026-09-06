@@ -33,6 +33,36 @@ pnpm eval:rag:test
 pnpm eval:rag:capacity-check --confirm-one-call
 ```
 
+## Containerized evaluator
+
+The evaluator has a separate `rag-eval` image and is available only through
+the Compose `eval` profile. Normal `docker compose up -d` does not start it.
+The image contains Node 20/pnpm, the compiled AI adapter and required Prisma
+clients, Python 3.12, uv, and the locked Ragas environment; it is not part of
+the `ai-service` image.
+
+Build and run commands on the evaluation host use the repository tree and keep
+state on the host:
+
+```sh
+docker compose --profile eval build rag-eval
+docker compose --profile eval run --rm --no-deps rag-eval pnpm eval:rag:test
+docker compose --profile eval run --rm --no-deps rag-eval \
+  pnpm eval:rag:offline --dataset rag-generalization-v1
+```
+
+`eval/rag/results`, `eval/rag/experiments`, and
+`test-data/reel-integration/ami/reports` are bind-mounted so Ragas reports and
+the exactly-once AMI runner state survive container removal. Set
+`RAG_EVAL_RESULTS_DIR`, `RAG_EVAL_EXPERIMENTS_DIR`, and
+`RAG_EVAL_AMI_REPORT_DIR` only when the host uses different persistent paths.
+
+The default `eval/rag/eval.env.example` contains no credentials. For live work,
+set `RAG_EVAL_ENV_FILE` to a server-side evaluator env file for additional
+evaluation-only values. Provider diagnostics still require the explicit
+operator-observed `--runtime-config-snapshot`, a matching `--production-sha`,
+and `CONFIG_MATCH=YES` before any provider call.
+
 Offline mode uses explicit `FIXTURE` normalized results and never creates provider clients. Live mode is opt-in, invokes the existing TypeScript runner, refuses unsupported datasets, and evaluates only completed/reconciled rows. A failed or missing response remains in the denominator with a failure status; semantic metrics may be null.
 
 Capacity check makes exactly one cheap production-model request and never launches a benchmark. It requires explicit confirmation and Cloudflare credentials. Do not repeat it while an account-limit response is already known.
