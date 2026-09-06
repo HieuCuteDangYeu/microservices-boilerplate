@@ -86,9 +86,12 @@ def _object(value: Any) -> dict[str, Any]:
 
 
 def _collect_model_calls(
-    value: Any, output: list[dict[str, Any]] | None = None
+    value: Any,
+    output: list[dict[str, Any]] | None = None,
+    seen: set[tuple[Any, ...]] | None = None,
 ) -> list[dict[str, Any]]:
     calls = output if output is not None else []
+    identities = seen if seen is not None else set()
     if not isinstance(value, (dict, list)):
         return calls
     if isinstance(value, dict):
@@ -107,28 +110,68 @@ def _collect_model_calls(
             or "finishReason" in value
             or "attempt" in value
         ):
-            calls.append(
-                {
-                    "modelRole": role,
-                    "model": model,
-                    "inputTokens": value.get("inputTokens", usage.get("inputTokens")),
-                    "outputTokens": value.get("outputTokens", usage.get("outputTokens")),
-                    "totalTokens": value.get("totalTokens", usage.get("totalTokens")),
-                    "usageSource": value.get("usageSource", "PROVIDER" if usage else "UNAVAILABLE"),
-                    "latencyMs": value.get("latencyMs"),
-                    "finishReason": value.get("finishReason"),
-                    "attempt": value.get("attempt", 1),
-                    "providerStatus": provider_status,
-                    "providerCategory": value.get("providerCategory"),
-                    "scope": value.get("scope", "QUERY"),
-                }
+            normalized = {
+                "modelRole": role,
+                "model": model,
+                "attempt": value.get("attempt", 1),
+                "configuredTimeoutMs": value.get("configuredTimeoutMs"),
+                "configuredMaxCompletionTokens": value.get(
+                    "configuredMaxCompletionTokens"
+                ),
+                "latencyMs": value.get("latencyMs"),
+                "providerStatus": provider_status,
+                "providerCode": value.get("providerCode"),
+                "providerCategory": value.get("providerCategory"),
+                "errorCode": value.get("errorCode"),
+                "transient": value.get("transient"),
+                "retryAfterMs": value.get("retryAfterMs"),
+                "networkErrorName": value.get("networkErrorName"),
+                "networkErrorCode": value.get("networkErrorCode"),
+                "networkErrorSyscall": value.get("networkErrorSyscall"),
+                "finishReason": value.get("finishReason"),
+                "endpointContract": value.get("endpointContract"),
+                "responseContentType": value.get("responseContentType"),
+                "contentPresent": value.get("contentPresent"),
+                "toolCallsPresent": value.get("toolCallsPresent"),
+                "schemaPath": value.get("schemaPath"),
+                "schemaConstraint": value.get("schemaConstraint"),
+                "schemaVersion": value.get("schemaVersion"),
+                "expectedType": value.get("expectedType"),
+                "actualJsonType": value.get("actualJsonType"),
+                "inputTokens": value.get("inputTokens", usage.get("inputTokens")),
+                "outputTokens": value.get("outputTokens", usage.get("outputTokens")),
+                "totalTokens": value.get("totalTokens", usage.get("totalTokens")),
+                "reasoningTokens": value.get(
+                    "reasoningTokens", usage.get("reasoningTokens")
+                ),
+                "usageSource": value.get(
+                    "usageSource", "PROVIDER" if usage else "UNAVAILABLE"
+                ),
+                "scope": value.get("scope", "QUERY"),
+            }
+            identity = tuple(
+                normalized.get(key)
+                for key in (
+                    "modelRole",
+                    "attempt",
+                    "model",
+                    "configuredTimeoutMs",
+                    "latencyMs",
+                    "errorCode",
+                    "providerStatus",
+                    "providerCode",
+                    "providerCategory",
+                )
             )
+            if identity not in identities:
+                identities.add(identity)
+                calls.append(normalized)
             return calls
         children = value.values()
     else:
         children = value
     for child in children:
-        _collect_model_calls(child, calls)
+        _collect_model_calls(child, calls, identities)
     return calls
 
 
