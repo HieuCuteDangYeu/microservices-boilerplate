@@ -136,6 +136,14 @@ function safeError(error) {
   };
 }
 
+function selectCallDiagnostics(result, failure, observedDiagnostics) {
+  const semanticCalls =
+    result?.diagnostics?.semanticCalls ?? failure?.semanticCalls;
+  return Array.isArray(semanticCalls) && semanticCalls.length > 0
+    ? semanticCalls
+    : observedDiagnostics;
+}
+
 function isSuccessfulCall(call) {
   return (
     call &&
@@ -234,11 +242,27 @@ async function runCharacterization({
   configService.skipProcessEnv = true;
   const applicationConfig = new AiApplicationConfigAdapter(configService);
   const structuredLlm = new CloudflareStructuredLlmAdapter(configService);
-  const router = new QueryRouterAgentUseCase(structuredLlm, applicationConfig);
+  let observedDiagnostics = [];
+  const observedStructuredLlm = {
+    generateObject: async (input) =>
+      structuredLlm.generateObject({
+        ...input,
+        onDiagnostics: (diagnostics) => {
+          const safe = safeDiagnostics(diagnostics);
+          if (safe) observedDiagnostics.push(safe);
+          input.onDiagnostics?.(diagnostics);
+        },
+      }),
+  };
+  const router = new QueryRouterAgentUseCase(
+    observedStructuredLlm,
+    applicationConfig,
+  );
 
   const records = [];
   let stoppedReason = 'COMPLETED_PREDECLARED_SAMPLE';
   for (let index = 0; index < SYNTHETIC_REQUESTS.length; index += 1) {
+    observedDiagnostics = [];
     const startedAt = Date.now();
     let result;
     let failure;
@@ -250,8 +274,11 @@ async function runCharacterization({
     } catch (error) {
       failure = error;
     }
-    const rawCalls =
-      result?.diagnostics?.semanticCalls ?? failure?.semanticCalls ?? [];
+    const rawCalls = selectCallDiagnostics(
+      result,
+      failure,
+      observedDiagnostics,
+    );
     const calls = rawCalls.map(safeDiagnostics).filter(Boolean);
     const record = {
       logicalRequest: index + 1,
@@ -370,6 +397,7 @@ module.exports = {
   buildSummary,
   classifyRecords,
   effectivePrimaryAttempts,
+  selectCallDiagnostics,
   safeDiagnostics,
   validateExperimentConfig,
 };
