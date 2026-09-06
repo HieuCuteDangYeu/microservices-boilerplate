@@ -3,6 +3,8 @@ import type { GenerateStructuredObjectInput } from '@ai/domain/interfaces/struct
 import {
   QueryRouterAgentUseCase,
   RouterUnavailableError,
+  RouterSemanticInconsistencyError,
+  shouldRetryPrimaryRouter,
 } from './query-router-agent.use-case';
 
 describe('QueryRouterAgentUseCase', () => {
@@ -13,6 +15,36 @@ describe('QueryRouterAgentUseCase', () => {
     get: jest.fn().mockReturnValue(undefined),
     number: jest.fn((_key: string, fallback: number) => fallback),
   } as unknown as IAiApplicationConfig;
+
+  const primaryAttemptsConfig = (maxAttempts?: number) =>
+    ({
+      ...config,
+      number: jest.fn((key: string, fallback: number) =>
+        key === 'AI_ROUTER_PRIMARY_MAX_ATTEMPTS'
+          ? (maxAttempts ?? fallback)
+          : fallback,
+      ),
+    }) as unknown as IAiApplicationConfig;
+
+  const routerDiagnostic = (attempt: number, overrides = {}) => ({
+    modelRole: 'ROUTER',
+    model: '@cf/test/router',
+    providerStatus: 503 as const,
+    latencyMs: 10,
+    configuredTimeoutMs: 7_000,
+    configuredMaxCompletionTokens: 384,
+    attempt,
+    errorCode: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+    providerCategory: 'TRANSIENT_PROVIDER_FAILURE' as const,
+    transient: true,
+    ...overrides,
+  });
+
+  const transientRouterError = (transient?: boolean) =>
+    Object.assign(new Error('router provider failure'), {
+      code: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+      ...(transient === undefined ? {} : { transient }),
+    });
 
   const response = (overrides: Record<string, unknown> = {}) => {
     const intent =
@@ -630,6 +662,223 @@ describe('QueryRouterAgentUseCase', () => {
       referenceTarget: 'NONE',
     });
     expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries only explicitly transient structured provider errors', () => {
+    expect(shouldRetryPrimaryRouter(transientRouterError(true))).toBe(true);
+    expect(shouldRetryPrimaryRouter(transientRouterError(false))).toBe(false);
+    expect(shouldRetryPrimaryRouter(transientRouterError())).toBe(false);
+    expect(
+      shouldRetryPrimaryRouter(
+        Object.assign(new Error('timeout'), {
+          code: 'STRUCTURED_COMPLETION_TIMEOUT',
+          transient: true,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not retry when the first Router attempt succeeds', async () => {
+    const requests: GenerateStructuredObjectInput[] = [];
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockImplementation((input: GenerateStructuredObjectInput) => {
+          requests.push(input);
+          input.onDiagnostics?.({
+            ...routerDiagnostic(1),
+            providerStatus: 200,
+            providerCategory: undefined,
+            transient: undefined,
+          });
+          return Promise.resolve(response());
+        }),
+    };
+
+    await expect(
+      new QueryRouterAgentUseCase(
+        service as never,
+        primaryAttemptsConfig(2),
+      ).execute({ message: 'Normal chat.' }),
+    ).resolves.toMatchObject({ intent: 'NORMAL_CHAT' });
+    expect(service.generateObject).toHaveBeenCalledTimes(1);
+    expect(requests[0].attempt).toBe(1);
+  });
+
+  it('retries the same Router model once after an explicit transient error', async () => {
+    const first = transientRouterError(true);
+    const requests: GenerateStructuredObjectInput[] = [];
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockImplementationOnce((input: GenerateStructuredObjectInput) => {
+          requests.push(input);
+          input.onDiagnostics?.(routerDiagnostic(1));
+          return Promise.reject(first);
+        })
+        .mockImplementationOnce((input: GenerateStructuredObjectInput) => {
+          requests.push(input);
+          input.onDiagnostics?.({
+            ...routerDiagnostic(2),
+            providerStatus: 200,
+            providerCategory: undefined,
+            transient: undefined,
+          });
+          return Promise.resolve(response());
+        }),
+    };
+
+    const result = await new QueryRouterAgentUseCase(
+      service as never,
+      primaryAttemptsConfig(2),
+    ).execute({ message: 'Normal chat.' });
+
+    expect(result.intent).toBe('NORMAL_CHAT');
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+    expect(requests.map((input) => input.model)).toEqual([
+      '@cf/test/router',
+      '@cf/test/router',
+    ]);
+    expect(
+      result.diagnostics?.semanticCalls?.map((call) => call.attempt),
+    ).toEqual([1, 2]);
+  });
+
+  it('returns RouterUnavailableError after two explicit transient failures', async () => {
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockImplementation((input: GenerateStructuredObjectInput) => {
+          input.onDiagnostics?.(routerDiagnostic(input.attempt ?? 1));
+          return Promise.reject(transientRouterError(true));
+        }),
+    };
+
+    await expect(
+      new QueryRouterAgentUseCase(
+        service as never,
+        primaryAttemptsConfig(2),
+      ).execute({ message: 'Normal chat.' }),
+    ).rejects.toMatchObject({
+      code: 'ROUTER_UNAVAILABLE',
+      semanticCalls: [
+        expect.objectContaining({ attempt: 1 }),
+        expect.objectContaining({ attempt: 2 }),
+      ],
+    });
+    expect(service.generateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['non-transient provider error', transientRouterError(false)],
+    ['unknown transient state', transientRouterError(undefined)],
+    [
+      'account limited',
+      Object.assign(new Error('account limited'), {
+        code: 'STRUCTURED_COMPLETION_PROVIDER_ERROR',
+        providerCode: 3036,
+        transient: false,
+      }),
+    ],
+    [
+      'schema failure',
+      Object.assign(new Error('schema failure'), {
+        code: 'STRUCTURED_COMPLETION_SCHEMA_INVALID',
+      }),
+    ],
+    [
+      'Router timeout',
+      Object.assign(new Error('timeout'), {
+        code: 'STRUCTURED_COMPLETION_TIMEOUT',
+        transient: true,
+      }),
+    ],
+  ])('does not primary-retry %s', async (_name, error: Error) => {
+    const service = {
+      generateObject: jest.fn().mockRejectedValue(error),
+    };
+
+    await expect(
+      new QueryRouterAgentUseCase(
+        service as never,
+        primaryAttemptsConfig(2),
+      ).execute({ message: 'Normal chat.' }),
+    ).rejects.toBeDefined();
+    expect(service.generateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('numbers an alternate fallback after two primary attempts', async () => {
+    const requests: GenerateStructuredObjectInput[] = [];
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockImplementationOnce((input: GenerateStructuredObjectInput) => {
+          requests.push(input);
+          input.onDiagnostics?.(routerDiagnostic(1));
+          return Promise.reject(transientRouterError(true));
+        })
+        .mockImplementationOnce((input: GenerateStructuredObjectInput) => {
+          requests.push(input);
+          input.onDiagnostics?.(routerDiagnostic(2));
+          return Promise.reject(transientRouterError(true));
+        })
+        .mockImplementationOnce((input: GenerateStructuredObjectInput) => {
+          requests.push(input);
+          input.onDiagnostics?.({
+            ...routerDiagnostic(3),
+            model: '@cf/test/fallback',
+            providerStatus: 200,
+            providerCategory: undefined,
+            transient: undefined,
+          });
+          return Promise.resolve(response());
+        }),
+    };
+    const fallbackConfig = {
+      ...primaryAttemptsConfig(2),
+      get: jest.fn((key: string) =>
+        key === 'AI_ROUTER_FALLBACK_MODEL' ? '@cf/test/fallback' : undefined,
+      ),
+    } as unknown as IAiApplicationConfig;
+
+    await expect(
+      new QueryRouterAgentUseCase(service as never, fallbackConfig).execute({
+        message: 'Normal chat.',
+      }),
+    ).resolves.toMatchObject({ intent: 'NORMAL_CHAT' });
+    expect(service.generateObject).toHaveBeenCalledTimes(3);
+    expect(requests.map((input) => input.attempt)).toEqual([1, 2, 3]);
+  });
+
+  it('does not retry semantic inconsistency', async () => {
+    const service = {
+      generateObject: jest
+        .fn()
+        .mockRejectedValue(
+          new RouterSemanticInconsistencyError('INVALID_INTENT'),
+        ),
+    };
+
+    await expect(
+      new QueryRouterAgentUseCase(
+        service as never,
+        primaryAttemptsConfig(2),
+      ).execute({ message: 'Normal chat.' }),
+    ).rejects.toMatchObject({ code: 'ROUTER_UNAVAILABLE' });
+    expect(service.generateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the default primary attempt count at one', async () => {
+    const service = {
+      generateObject: jest.fn().mockRejectedValue(transientRouterError(true)),
+    };
+
+    await expect(
+      new QueryRouterAgentUseCase(service as never, config).execute({
+        message: 'Normal chat.',
+      }),
+    ).rejects.toMatchObject({ code: 'ROUTER_UNAVAILABLE' });
+    expect(service.generateObject).toHaveBeenCalledTimes(1);
   });
 
   it('returns typed unavailable after bounded transient failure', async () => {
