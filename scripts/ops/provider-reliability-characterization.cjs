@@ -627,6 +627,7 @@ module.exports = {
   PRODUCTION_ROLES,
   ROLE_ENV,
   compareRuntimeConfig,
+  buildAdapterConfig,
   loadRuntimeSnapshot,
   runCharacterization,
   sanitizeDiagnostics,
