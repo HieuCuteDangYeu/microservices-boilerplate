@@ -124,6 +124,8 @@ export class UpsertUserMemoriesUseCase {
     const candidates = await this.userMemoryRepository.findRelevantByUserId({
       userId: memory.userId,
       queryVector: memory.embedding,
+      queryEmbeddingModel: memory.embeddingModel,
+      queryEmbeddingVersion: memory.embeddingVersion,
       limit: 5,
       minScore: semanticThreshold,
       minConfidence: 0,

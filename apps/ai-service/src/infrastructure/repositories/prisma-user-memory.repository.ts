@@ -1,6 +1,7 @@
 import { UserMemory } from '@ai/domain/entities/user-memory.entity';
 import type {
   IUserMemoryRepository,
+  UserMemoryEmbeddingIdentity,
   UserMemoryEmbeddingUpdateInput,
   UserMemorySemanticSearchInput,
   UserMemoryUpsertInput,
@@ -131,6 +132,8 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
         WHERE um."userId" = ${input.userId}
           AND um.embedding IS NOT NULL
           AND um.confidence >= ${minConfidence}
+          AND (${input.queryEmbeddingModel ?? null}::text IS NULL OR um."embeddingModel" = ${input.queryEmbeddingModel ?? null})
+          AND (${input.queryEmbeddingVersion ?? null}::text IS NULL OR (to_jsonb(um)->>'embeddingVersion') = ${input.queryEmbeddingVersion ?? null})
       ),
 
       scored AS (
@@ -183,7 +186,10 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
     return rows.map((row) => this.toDomainFromRaw(row));
   }
 
-  async findWithoutEmbedding(limit: number): Promise<UserMemory[]> {
+  async findWithoutEmbedding(
+    limit: number,
+    identity?: UserMemoryEmbeddingIdentity,
+  ): Promise<UserMemory[]> {
     const normalizedLimit = this.normalizeLimit(limit, 1, 500);
 
     const rows = await this.prisma.$queryRaw<UserMemoryRawRecord[]>`
@@ -204,6 +210,14 @@ export class PrismaUserMemoryRepository implements IUserMemoryRepository {
         "updatedAt"
       FROM "UserMemory" um
       WHERE um.embedding IS NULL
+        OR (
+          ${identity?.model ?? null}::text IS NOT NULL
+          AND (
+            um."embeddingModel" IS DISTINCT FROM ${identity?.model ?? null}
+            OR (to_jsonb(um)->>'embeddingDimensions')::int IS DISTINCT FROM ${identity?.dimensions ?? null}
+            OR to_jsonb(um)->>'embeddingVersion' IS DISTINCT FROM ${identity?.version ?? null}
+          )
+        )
       ORDER BY um."updatedAt" DESC
       LIMIT ${normalizedLimit};
     `;

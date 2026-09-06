@@ -20,13 +20,17 @@ describe('BackfillUserMemoryEmbeddingsUseCase', () => {
     const embeddingService = {
       generateVector: jest.fn().mockResolvedValue({
         values: Array.from({ length: 1024 }, () => 0.01),
-        model: '@cf/baai/bge-m3',
+        model: 'BAAI/bge-m3',
         dimensions: 1024,
       }),
     };
     const config = {
       get: jest.fn((key: string) =>
-        key === 'AI_EMBEDDING_VERSION' ? 'cf-bge-m3-v1' : undefined,
+        key === 'AI_EMBEDDING_MODEL'
+          ? 'BAAI/bge-m3'
+          : key === 'AI_EMBEDDING_VERSION'
+            ? 'bge-m3-tei-v1'
+            : undefined,
       ),
     } as unknown as IAiApplicationConfig;
     const useCase = new BackfillUserMemoryEmbeddingsUseCase(
@@ -51,9 +55,9 @@ describe('BackfillUserMemoryEmbeddingsUseCase', () => {
     expect(repository.updateEmbedding).toHaveBeenCalledWith(
       expect.objectContaining({
         memoryId: 'memory-1',
-        embeddingModel: '@cf/baai/bge-m3',
+        embeddingModel: 'BAAI/bge-m3',
         embeddingDimensions: 1024,
-        embeddingVersion: 'cf-bge-m3-v1',
+        embeddingVersion: 'bge-m3-tei-v1',
       }),
     );
   });
@@ -76,12 +80,16 @@ describe('BackfillUserMemoryEmbeddingsUseCase', () => {
     const embeddingService = {
       generateVector: jest.fn().mockResolvedValue({
         values: Array.from({ length: 1024 }, () => 0.01),
-        model: '@cf/baai/bge-m3',
+        model: 'BAAI/bge-m3',
         dimensions: 1024,
       }),
     };
     const useCase = new BackfillUserMemoryEmbeddingsUseCase(
-      { get: jest.fn(() => 'cf-bge-m3-v1') } as unknown as IAiApplicationConfig,
+      {
+        get: jest.fn((key: string) =>
+          key === 'AI_EMBEDDING_MODEL' ? 'BAAI/bge-m3' : 'bge-m3-tei-v1',
+        ),
+      } as unknown as IAiApplicationConfig,
       repository as never,
       embeddingService as never,
     );

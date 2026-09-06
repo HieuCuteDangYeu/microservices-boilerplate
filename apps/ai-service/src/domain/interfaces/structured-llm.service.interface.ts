@@ -7,8 +7,10 @@ export interface StructuredLlmJsonSchema {
 
 export type StructuredProviderFailureCategory =
   | 'ACCOUNT_LIMITED'
+  | 'AUTH_OR_CONFIGURATION_FAILURE'
   | 'OUT_OF_CAPACITY'
   | 'RATE_LIMITED'
+  | 'PERMANENT_PROVIDER_FAILURE'
   | 'TRANSIENT_PROVIDER_FAILURE'
   | 'UNKNOWN_PROVIDER_FAILURE';
 

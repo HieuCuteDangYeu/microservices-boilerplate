@@ -32,24 +32,24 @@ import { VerifierAgentUseCase } from '@ai/application/use-cases/verifier-agent.u
 import { AiApplicationConfigAdapter } from '@ai/infrastructure/adapters/ai-application-config.adapter';
 import { ChatPromptBuilderAdapter } from '@ai/infrastructure/adapters/chat-prompt-builder.adapter';
 import { CloudflareCitationAttributionAdapter } from '@ai/infrastructure/adapters/cloudflare-citation-attribution.adapter';
-import { CloudflareConversationSummarizerAdapter } from '@ai/infrastructure/adapters/cloudflare-conversation-summarizer.adapter';
-import { CloudflareCrossEncoderRerankerAdapter } from '@ai/infrastructure/adapters/cloudflare-cross-encoder-reranker.adapter';
-import { CloudflareEmbeddingAdapter } from '@ai/infrastructure/adapters/cloudflare-embedding.adapter';
-import { CloudflareLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-llm.adapter';
-import { CloudflareMemoryExtractorAdapter } from '@ai/infrastructure/adapters/cloudflare-memory-extractor.adapter';
-import { CloudflareStructuredLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-structured-llm.adapter';
-import { CloudflareToolCallingLlmAdapter } from '@ai/infrastructure/adapters/cloudflare-tool-calling-llm.adapter';
-import { CloudflareTranscriptionAdapter } from '@ai/infrastructure/adapters/cloudflare-transcription.adapter';
 import { CloudflareVisionAdapter } from '@ai/infrastructure/adapters/cloudflare-vision.adapter';
-import { CloudflareWorkersAiTextClient } from '@ai/infrastructure/adapters/cloudflare-workers-ai-text.client';
 import { ContentServiceAdapter } from '@ai/infrastructure/adapters/content-service.adapter';
 import { ConversationTokenPublisherAdapter } from '@ai/infrastructure/adapters/conversation-token-publisher.adapter';
 import { DeterministicRetrievalEngineAdapter } from '@ai/infrastructure/adapters/deterministic-retrieval-engine.adapter';
-import { GeminiLlmAdapter } from '@ai/infrastructure/adapters/gemini-llm.adapter';
+import { GroqConversationSummarizerAdapter } from '@ai/infrastructure/adapters/groq-conversation-summarizer.adapter';
+import { GroqLlmAdapter } from '@ai/infrastructure/adapters/groq-llm.adapter';
+import { GroqMemoryExtractorAdapter } from '@ai/infrastructure/adapters/groq-memory-extractor.adapter';
+import { GroqStructuredLlmAdapter } from '@ai/infrastructure/adapters/groq-structured-llm.adapter';
+import { GroqTextClient } from '@ai/infrastructure/adapters/groq-text.client';
+import { GroqToolCallingLlmAdapter } from '@ai/infrastructure/adapters/groq-tool-calling-llm.adapter';
+import { GroqTranscriptionAdapter } from '@ai/infrastructure/adapters/groq-transcription.adapter';
 import { LangGraphRagChatWorkflowAdapter } from '@ai/infrastructure/adapters/langgraph-rag-chat-workflow.adapter';
+import { OllamaVisionAdapter } from '@ai/infrastructure/adapters/ollama-vision.adapter';
 import { ReelSemanticIndexAdapter } from '@ai/infrastructure/adapters/reel-semantic-index.adapter';
 import { RetrievalAgentPolicyAdapter } from '@ai/infrastructure/adapters/retrieval-agent-policy.adapter';
 import { SimpleRerankerAdapter } from '@ai/infrastructure/adapters/simple-reranker.adapter';
+import { TeiEmbeddingAdapter } from '@ai/infrastructure/adapters/tei-embedding.adapter';
+import { TeiRerankerAdapter } from '@ai/infrastructure/adapters/tei-reranker.adapter';
 import { AiController } from '@ai/infrastructure/controller/ai.controller';
 import { IndexQualityAgentController } from '@ai/infrastructure/controllers/index-quality-agent.controller';
 import { PrismaService } from '@ai/infrastructure/prisma/prisma.service';
@@ -131,6 +131,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   providers: [
     PrismaService,
     SimpleRerankerAdapter,
+    GroqTextClient,
 
     StreamChatUseCase,
     GenerateEmbeddingUseCase,
@@ -180,15 +181,18 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IEmbeddingService',
-      useClass: CloudflareEmbeddingAdapter,
+      useClass: TeiEmbeddingAdapter,
     },
     {
       provide: 'ITranscriptionService',
-      useClass: CloudflareTranscriptionAdapter,
+      useClass: GroqTranscriptionAdapter,
     },
     {
       provide: 'IVisionService',
-      useClass: CloudflareVisionAdapter,
+      useClass:
+        process.env.AI_VISION_PROVIDER === 'ollama'
+          ? OllamaVisionAdapter
+          : CloudflareVisionAdapter,
     },
     {
       provide: 'IAudioStorageService',
@@ -196,10 +200,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'ILlmService',
-      useClass:
-        process.env.AI_CHAT_PROVIDER === 'gemini'
-          ? GeminiLlmAdapter
-          : CloudflareLlmAdapter,
+      useClass: GroqLlmAdapter,
     },
     {
       provide: 'IContentService',
@@ -207,7 +208,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IRerankerService',
-      useClass: CloudflareCrossEncoderRerankerAdapter,
+      useClass: TeiRerankerAdapter,
     },
     {
       provide: 'IReelSemanticIndexService',
@@ -231,7 +232,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IMemoryExtractorService',
-      useClass: CloudflareMemoryExtractorAdapter,
+      useClass: GroqMemoryExtractorAdapter,
     },
     {
       provide: 'IConversationMemoryRepository',
@@ -239,15 +240,15 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     },
     {
       provide: 'IConversationSummarizerService',
-      useClass: CloudflareConversationSummarizerAdapter,
+      useClass: GroqConversationSummarizerAdapter,
     },
     {
       provide: 'IStructuredLlmService',
-      useClass: CloudflareStructuredLlmAdapter,
+      useClass: GroqStructuredLlmAdapter,
     },
     {
       provide: 'IToolCallingLlmService',
-      useClass: CloudflareToolCallingLlmAdapter,
+      useClass: GroqToolCallingLlmAdapter,
     },
     {
       provide: 'ICitationAttributionService',
@@ -261,8 +262,6 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
       provide: 'IRagChatWorkflow',
       useClass: LangGraphRagChatWorkflowAdapter,
     },
-
-    CloudflareWorkersAiTextClient,
   ],
 })
 export class AiServiceModule {}

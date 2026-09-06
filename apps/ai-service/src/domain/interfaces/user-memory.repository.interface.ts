@@ -17,9 +17,17 @@ export interface UserMemoryUpsertInput {
 export interface UserMemorySemanticSearchInput {
   userId: string;
   queryVector: number[];
+  queryEmbeddingModel?: string;
+  queryEmbeddingVersion?: string;
   limit: number;
   minScore?: number;
   minConfidence?: number;
+}
+
+export interface UserMemoryEmbeddingIdentity {
+  model: string;
+  dimensions: number;
+  version: string;
 }
 
 export interface UserMemoryEmbeddingUpdateInput {
@@ -36,7 +44,10 @@ export interface IUserMemoryRepository {
   findRelevantByUserId(
     input: UserMemorySemanticSearchInput,
   ): Promise<UserMemory[]>;
-  findWithoutEmbedding(limit: number): Promise<UserMemory[]>;
+  findWithoutEmbedding(
+    limit: number,
+    identity?: UserMemoryEmbeddingIdentity,
+  ): Promise<UserMemory[]>;
   upsertMany(memories: UserMemoryUpsertInput[]): Promise<UserMemory[]>;
   replaceSimilar(
     memoryId: string,

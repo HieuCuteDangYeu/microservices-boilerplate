@@ -636,7 +636,7 @@ export class PrismaSemanticIndexRepository implements ISemanticIndexRepository {
   } {
     const provider =
       this.config.get<string>('INDEX_EMBEDDING_PROVIDER')?.trim() ||
-      'cloudflare-workers-ai';
+      'self-hosted-tei';
     const model = this.config.get<string>('AI_EMBEDDING_MODEL')?.trim();
     const dimensions = Number(
       this.config.get<string>('AI_EMBEDDING_DIMENSIONS'),
