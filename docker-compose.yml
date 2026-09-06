@@ -295,7 +295,7 @@ services:
   # Local retrieval-model services are profile-gated during migration so the
   # host can be benchmarked before they become production dependencies.
   rag-embedding:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest@sha256:7e0ad922d10ef6f728b521d1a47e83004480687bd4073c97f079c806e3e92a41
     profiles:
       - local-ai
     command:
@@ -314,7 +314,7 @@ services:
       - microservices-net
 
   rag-reranker:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest@sha256:7e0ad922d10ef6f728b521d1a47e83004480687bd4073c97f079c806e3e92a41
     profiles:
       - local-ai
     command:
