@@ -292,6 +292,56 @@ services:
     networks:
       - microservices-net
 
+  # Local retrieval-model services are profile-gated during migration so the
+  # host can be benchmarked before they become production dependencies.
+  rag-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9
+    profiles:
+      - local-ai
+    command:
+      - --model-id
+      - BAAI/bge-m3
+      - --port
+      - '80'
+      - --max-concurrent-requests
+      - '2'
+      - --max-batch-tokens
+      - '1024'
+    restart: unless-stopped
+    volumes:
+      - rag_embedding_cache:/data
+    networks:
+      - microservices-net
+
+  rag-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9
+    profiles:
+      - local-ai
+    command:
+      - --model-id
+      - BAAI/bge-reranker-v2-m3
+      - --port
+      - '80'
+      - --max-concurrent-requests
+      - '2'
+      - --max-batch-tokens
+      - '1024'
+    restart: unless-stopped
+    volumes:
+      - rag_reranker_cache:/data
+    networks:
+      - microservices-net
+
+  rag-vision:
+    image: ollama/ollama:latest
+    profiles:
+      - local-ai
+    restart: unless-stopped
+    volumes:
+      - rag_vision_cache:/root/.ollama
+    networks:
+      - microservices-net
+
   rag-eval:
     image: ${DOCKERHUB_USERNAME:-local}/rag-eval:latest
     build:
@@ -366,3 +416,6 @@ networks:
 
 volumes:
   rabbitmq_data:
+  rag_embedding_cache:
+  rag_reranker_cache:
+  rag_vision_cache:

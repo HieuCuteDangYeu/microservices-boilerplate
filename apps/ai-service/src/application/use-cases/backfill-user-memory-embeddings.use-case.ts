@@ -31,8 +31,19 @@ export class BackfillUserMemoryEmbeddingsUseCase {
     limit?: number;
   }): Promise<BackfillUserMemoryEmbeddingsResult> {
     const limit = this.normalizeLimit(input?.limit ?? 100, 1, 500);
-    const memories =
-      await this.userMemoryRepository.findWithoutEmbedding(limit);
+    const identity = {
+      model:
+        this.configService.get<string>('AI_EMBEDDING_MODEL')?.trim() ||
+        'BAAI/bge-m3',
+      dimensions: Number(
+        this.configService.get<string>('AI_EMBEDDING_DIMENSIONS') ?? 1024,
+      ),
+      version: this.getEmbeddingVersion(),
+    };
+    const memories = await this.userMemoryRepository.findWithoutEmbedding(
+      limit,
+      identity,
+    );
 
     let updated = 0;
     let failed = 0;

@@ -426,7 +426,7 @@ export class BuildHierarchicalIndexUseCase {
       documentKind: draft.kind,
       embeddingProvider:
         this.config.get<string>('INDEX_EMBEDDING_PROVIDER') ||
-        'cloudflare-workers-ai',
+        'self-hosted-tei',
       embeddingModel: embeddingIdentity.model.replace(/^models\//, ''),
       embeddingDimensions: embeddingIdentity.dimensions,
       embeddingVersion: embeddingIdentity.version,

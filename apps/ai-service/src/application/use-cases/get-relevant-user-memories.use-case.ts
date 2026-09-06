@@ -114,6 +114,8 @@ export class GetRelevantUserMemoriesUseCase {
       return await this.userMemoryRepository.findRelevantByUserId({
         userId: input.userId,
         queryVector: embedding.values,
+        queryEmbeddingModel: embedding.model,
+        queryEmbeddingVersion: embedding.version,
         limit: input.limit,
         minScore: this.getNumber(
           'AI_USER_MEMORY_MIN_SEMANTIC_SCORE',

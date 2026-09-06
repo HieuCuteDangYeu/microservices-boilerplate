@@ -50,8 +50,7 @@ export class ValidateEvidenceIndexCandidateUseCase {
     );
     const expectedEmbedding = this.config.embeddingIdentity();
     const expectedProvider =
-      this.config.get<string>('INDEX_EMBEDDING_PROVIDER') ||
-      'cloudflare-workers-ai';
+      this.config.get<string>('INDEX_EMBEDDING_PROVIDER') || 'self-hosted-tei';
     const sourceEvidence = this.normalize(
       (input.transcriptSegments ?? []).map((segment) => segment.text).join(' '),
     );
