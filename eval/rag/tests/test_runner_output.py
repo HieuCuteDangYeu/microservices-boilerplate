@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -123,6 +124,81 @@ def test_load_runner_report_collects_nested_structured_call_diagnostics(tmp_path
 
     assert result.modelCalls[0].modelRole == "ROUTER"
     assert result.modelCalls[0].totalTokens == 14
+
+
+def test_load_runner_report_collects_failure_semantic_calls_without_request_ids(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"runId":"run-failure-calls","cases":[{"caseId":"C-1",'
+        '"status":"FAILED_RECONCILED","finalAnswer":"","citations":[]}]}'
+    )
+    traces = tmp_path / "traces.jsonl"
+    diagnostic = {
+        "modelRole": "ROUTER",
+        "model": "@cf/test/router",
+        "attempt": 1,
+        "configuredTimeoutMs": 30000,
+        "configuredMaxCompletionTokens": 512,
+        "latencyMs": 30123,
+        "providerStatus": 503,
+        "providerCode": 9021,
+        "providerCategory": "TRANSIENT_PROVIDER_FAILURE",
+        "errorCode": "STRUCTURED_COMPLETION_PROVIDER_ERROR",
+        "transient": True,
+        "retryAfterMs": 1000,
+        "networkErrorName": "UND_ERR_SOCKET",
+        "networkErrorCode": "ECONNRESET",
+        "networkErrorSyscall": "read",
+        "endpointContract": "CHAT_JSON_SCHEMA",
+        "responseContentType": "absent",
+        "contentPresent": False,
+        "toolCallsPresent": False,
+        "schemaPath": None,
+        "schemaConstraint": None,
+        "schemaVersion": "router-semantic-v4",
+        "usage": {"inputTokens": 100, "outputTokens": 0, "totalTokens": 100},
+        "requestId": "must-not-persist",
+    }
+    traces.write_text(
+        json.dumps(
+            {
+                "caseId": "C-1",
+                "workflowMetrics": {
+                    "diagnostics": {
+                        "route": diagnostic,
+                        "failure": {"semanticCalls": [diagnostic]},
+                    }
+                },
+            }
+        )
+        + "\n"
+    )
+    from rag_eval.schemas import EvaluationRow
+
+    row = EvaluationRow(
+        id="C-1",
+        datasetVersion="test",
+        question="Question?",
+        referenceAnswer="",
+        category="test",
+        fixtureGroup="test",
+    )
+
+    result = runner_output.load_runner_report(report, {row.id: row}, traces)["C-1"]
+
+    assert len(result.modelCalls) == 1
+    call = result.modelCalls[0]
+    assert call.modelRole == "ROUTER"
+    assert call.providerStatus == 503
+    assert call.providerCode == 9021
+    assert call.providerCategory == "TRANSIENT_PROVIDER_FAILURE"
+    assert call.errorCode == "STRUCTURED_COMPLETION_PROVIDER_ERROR"
+    assert call.transient is True
+    assert call.retryAfterMs == 1000
+    assert call.networkErrorCode == "ECONNRESET"
+    assert call.configuredTimeoutMs == 30000
+    assert call.inputTokens == 100
+    assert not hasattr(call, "requestId")
 
 
 def test_invoke_typescript_runner_parses_report_path(monkeypatch):
