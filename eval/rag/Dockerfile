@@ -69,11 +69,17 @@ COPY --chown=eval:eval eval/rag/src ./eval/rag/src
 COPY --chown=eval:eval eval/rag/tests ./eval/rag/tests
 COPY --chown=eval:eval eval/rag/config ./eval/rag/config
 COPY --chown=eval:eval eval/rag/datasets ./eval/rag/datasets
+COPY --chown=root:root eval/rag/docker-entrypoint.sh /usr/local/bin/rag-eval-entrypoint
 
 RUN chown -R eval:eval /workspace/eval/rag
+
+RUN chmod 755 /usr/local/bin/rag-eval-entrypoint
 
 USER eval
 
 RUN uv sync --frozen --directory /workspace/eval/rag
 
+USER root
+
+ENTRYPOINT ["/usr/local/bin/rag-eval-entrypoint"]
 CMD ["sh"]
