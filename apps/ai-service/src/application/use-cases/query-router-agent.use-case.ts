@@ -28,6 +28,15 @@ interface RawRouteDecision {
 
 type RawRecord = Record<string, unknown>;
 
+export function shouldRetryPrimaryRouter(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as RawRecord;
+  return (
+    record.code === 'STRUCTURED_COMPLETION_PROVIDER_ERROR' &&
+    record.transient === true
+  );
+}
+
 export class RouterUnavailableError extends Error {
   readonly code = 'ROUTER_UNAVAILABLE';
 
@@ -124,12 +133,10 @@ export class QueryRouterAgentUseCase {
 
     try {
       const result = this.normalize(
-        await this.routeWithModel({
+        await this.routeWithPrimaryAttempts({
           input,
           model: primaryModel,
-          attempt: 1,
           semanticCalls,
-          timeoutMs: this.config.timeoutMs('ROUTER'),
         }),
         input,
       );
@@ -139,6 +146,10 @@ export class QueryRouterAgentUseCase {
           input,
           semanticCalls,
           primaryResult: result,
+          primaryAttemptCount: this.primaryAttemptCount(
+            semanticCalls,
+            primaryModel,
+          ),
           reason: 'STRUCTURAL_REFERENT_AMBIGUITY',
         });
       }
@@ -165,6 +176,10 @@ export class QueryRouterAgentUseCase {
       return await this.routeWithFallback({
         input,
         semanticCalls,
+        primaryAttemptCount: this.primaryAttemptCount(
+          semanticCalls,
+          primaryModel,
+        ),
         semanticInconsistency:
           error instanceof RouterSemanticInconsistencyError ? error : undefined,
         reason:
@@ -179,6 +194,7 @@ export class QueryRouterAgentUseCase {
     input: Parameters<QueryRouterAgentUseCase['execute']>[0];
     semanticCalls: StructuredLlmCallDiagnostics[];
     primaryResult?: RagChatRouteDecision;
+    primaryAttemptCount: number;
     semanticInconsistency?: RouterSemanticInconsistencyError;
     reason: string;
   }): Promise<RagChatRouteDecision> {
@@ -202,7 +218,7 @@ export class QueryRouterAgentUseCase {
         await this.routeWithModel({
           input: input.input,
           model: fallbackModel,
-          attempt: 2,
+          attempt: input.primaryAttemptCount + 1,
           maxTokens: Math.round(
             this.config.number(
               'AI_ROUTER_FALLBACK_MAX_TOKENS',
@@ -255,6 +271,47 @@ export class QueryRouterAgentUseCase {
         )?.semanticInconsistencyDetails,
       );
     }
+  }
+
+  private async routeWithPrimaryAttempts(input: {
+    input: Parameters<QueryRouterAgentUseCase['execute']>[0];
+    model: string;
+    semanticCalls: StructuredLlmCallDiagnostics[];
+  }): Promise<RawRouteDecision> {
+    const maxAttempts = Math.round(
+      this.config.number('AI_ROUTER_PRIMARY_MAX_ATTEMPTS', 1, 1, 2),
+    );
+    const timeoutMs = this.config.timeoutMs('ROUTER');
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.routeWithModel({
+          input: input.input,
+          model: input.model,
+          attempt,
+          semanticCalls: input.semanticCalls,
+          timeoutMs,
+        });
+      } catch (error: unknown) {
+        if (attempt >= maxAttempts || !shouldRetryPrimaryRouter(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error('Router primary attempts exhausted');
+  }
+
+  private primaryAttemptCount(
+    semanticCalls: StructuredLlmCallDiagnostics[],
+    model: string,
+  ): number {
+    return Math.max(
+      1,
+      semanticCalls.filter(
+        (call) => call.modelRole === 'ROUTER' && call.model === model,
+      ).length,
+    );
   }
 
   private errorCode(error: unknown): string | undefined {
